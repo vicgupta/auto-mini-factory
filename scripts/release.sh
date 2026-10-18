@@ -94,7 +94,7 @@ for p in $platforms; do
 	echo "Building $name"
 	mkdir "$out/$name"
 	CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -ldflags "-s -w -X main.version=$tag" -o "$out/$name/amf" ./cmd/amf
-	cp README.md SPECS.md LICENSE "$out/$name/"
+	cp README.md docs/SPECS.md LICENSE "$out/$name/"
 	# COPYFILE_DISABLE keeps macOS tar from adding ._ metadata files.
 	(cd "$out" && COPYFILE_DISABLE=1 tar -czf "$name.tar.gz" "$name")
 	tar -tzf "$out/$name.tar.gz" | grep -qx "$name/amf" || fail "$name.tar.gz has no $name/amf"

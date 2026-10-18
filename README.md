@@ -232,7 +232,8 @@ code you're executing on your machine.
 
 ## Spec
 
-See [SPECS.md](SPECS.md).
+See [docs/SPECS.md](docs/SPECS.md). For a step-by-step walk through how amf
+processes an issue, see [docs/AMF-PROCESS.md](docs/AMF-PROCESS.md).
 
 ## Develop
 

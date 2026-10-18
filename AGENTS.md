@@ -1,8 +1,8 @@
 # Agent instructions
 
-## Keep SPECS.md current
+## Keep docs/SPECS.md current
 
-`SPECS.md` is the single source of truth for amf's behavior. A feature is
+`docs/SPECS.md` is the single source of truth for amf's behavior. A feature is
 finished only when `SPECS.md` describes it, so update it in the same change
 as the code whenever that change alters something a user can observe:
 
@@ -67,7 +67,8 @@ re-uploading).
    `amd64`, writes `checksums.txt`, runs this machine's binary to check its
    version, creates the tag and the release titled `amf vX.Y.Z` on the
    current commit, and checks that GitHub serves the archive it uploaded.
-   Each archive holds `amf`, `README.md`, `SPECS.md` and `LICENSE`.
+   Each archive holds `amf`, `README.md`, `SPECS.md` (from `docs/`) and
+   `LICENSE`.
 5. **Verify:** `amf update --check` should name the new version, as
    available or up to date.
 

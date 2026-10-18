@@ -62,7 +62,8 @@ clone GITHUB_REPO into ./<name> (or reuse that clone) and work there.
 
 A repo can declare a pipeline in its AGENTS.md: a table under "## amf" with a
 plan, code and eval stage, each naming a skill URL, an agent (claudecode,
-codex or opencode) and a model. See SPECS.md.
+codex or opencode) and a model. See docs/SPECS.md at
+github.com/vicgupta/auto-mini-factory.
 `
 
 var errUsage = errors.New("usage")
