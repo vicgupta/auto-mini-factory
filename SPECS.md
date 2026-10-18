@@ -119,8 +119,7 @@ the run is interrupted. If Claim itself fails, the issue can be left on
 2. Download `amf_<tag>_<os>_<arch>.tar.gz` and `checksums.txt` from that
    release. If the archive is missing, fail with `no amf <tag> for <os>/<arch>`.
    If its SHA-256 doesn't match, fail. The binary is
-   `amf_<tag>_<os>_<arch>/amf` inside the archive, which is how
-   `release.sh` builds it; if it isn't there, fail.
+   `amf_<tag>_<os>_<arch>/amf` inside the archive; if it isn't there, fail.
 3. Write the archive's `amf` next to the running executable (symlinks
    resolved) as a temporary file with permissions 0755. Run it with
    `version`, and fail unless it prints `amf <tag>`.

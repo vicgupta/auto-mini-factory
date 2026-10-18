@@ -1,8 +1,10 @@
 #!/bin/sh
 # Build amf for every supported platform and publish a GitHub release.
+# For the maintainer only: publishing requires gh to be logged in as the
+# repo owner. End users get new versions with `amf update`.
 #
-#   ./release.sh v0.1.2 notes.md      test, build, check, tag and publish
-#   ./release.sh --dry-run v0.1.2     test, build and check only
+#   scripts/release.sh v0.1.2 notes.md      test, build, check, tag and publish
+#   scripts/release.sh --dry-run v0.1.2     test, build and check only
 #
 # Each archive is laid out the way install.sh and `amf update` expect:
 #
@@ -37,7 +39,7 @@ if [ "${1:-}" = "--dry-run" ]; then
 fi
 tag="${1:-}"
 notes="${2:-}"
-echo "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || fail "usage: ./release.sh [--dry-run] vX.Y.Z [notes.md]"
+echo "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || fail "usage: scripts/release.sh [--dry-run] vX.Y.Z [notes.md]"
 
 if ! $dry; then
 	[ -s "$notes" ] || fail "release notes file is missing or empty: ${notes:-<none>}"
@@ -47,9 +49,11 @@ if ! $dry; then
 	fi
 	notes="$(cd "$(dirname "$notes")" && pwd)/$(basename "$notes")"
 	command -v gh >/dev/null 2>&1 || fail "gh is required"
+	login=$(gh api user -q .login 2>/dev/null) || fail "log in to gh first: gh auth login"
+	[ "$login" = "${repo%%/*}" ] || fail "only ${repo%%/*} can publish releases (gh is logged in as $login); end users update with: amf update"
 fi
 
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 if ! $dry; then
 	[ -z "$(git status --porcelain --untracked-files=no)" ] || fail "commit or stash your changes first"

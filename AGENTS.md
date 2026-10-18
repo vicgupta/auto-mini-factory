@@ -22,10 +22,13 @@ checked against the source rather than from memory, and the change includes
 
 ## Releasing
 
-Publish releases only with `release.sh`; never build or upload archives by
-hand. `install.sh` and `amf update` find the binary at
-`amf_<tag>_<os>_<arch>/amf` inside each archive, and an archive without that
-folder breaks both (this happened to v0.1.1 and was fixed by re-uploading).
+Releases are for the maintainer (the repo owner) only; end users never run
+this and get new versions with `amf update`. Publish only with
+`scripts/release.sh`, which refuses unless `gh` is logged in as the owner;
+never build or upload archives by hand. `install.sh` and `amf update` find
+the binary at `amf_<tag>_<os>_<arch>/amf` inside each archive, and an archive
+without that folder breaks both (this happened to v0.1.1 and was fixed by
+re-uploading).
 
 1. **Pick the version.** Bump the patch (`v0.1.1` → `v0.1.2`) for fixes,
    docs and packaging, and the minor (`v0.1.x` → `v0.2.0`) for new commands,
@@ -38,14 +41,15 @@ folder breaks both (this happened to v0.1.1 and was fixed by re-uploading).
    - `**Full changelog:**` linking `compare/<previous tag>...<tag>`.
    - No Claude attribution ("Generated with Claude Code", `Co-Authored-By`);
      the script refuses notes that contain it.
-3. **Dry run:** `./release.sh --dry-run vX.Y.Z` runs vet and tests, builds
-   every platform, and checks the archives without publishing.
-4. **Release:** `./release.sh vX.Y.Z notes.md`. From a clean `main` that
-   matches `origin/main`, it builds `darwin` and `linux` for `arm64` and
+3. **Dry run:** `scripts/release.sh --dry-run vX.Y.Z` runs vet and tests,
+   builds every platform, and checks the archives without publishing.
+4. **Release:** `scripts/release.sh vX.Y.Z notes.md`. From a clean `main`
+   that matches `origin/main`, it builds `darwin` and `linux` for `arm64` and
    `amd64`, writes `checksums.txt`, runs this machine's binary to check its
    version, creates the tag and the release titled `amf vX.Y.Z` on the
    current commit, and checks that GitHub serves the archive it uploaded.
-5. **Verify:** `amf update --check` should name the new version, as available or up to date.
+5. **Verify:** `amf update --check` should name the new version, as
+   available or up to date.
 
 If you replace a release's files, GitHub's download cache can serve the old
 ones for a few minutes, so a failure right after a re-upload may be stale.
