@@ -8,10 +8,10 @@ library, for a solo developer or small team that doesn't want to run a platform.
 
 | Command | Behavior |
 |---|---|
-| `amf init` | Writes `.env` with every variable amf uses. Backs up an existing `.env` to the next free `.env.NNNN` and keeps its real values. |
-| `amf issue "Title" [-b body \| -f file \| stdin] [--no-label]` | Creates an issue labeled `amf`. |
+| `amf init` | Writes `.env` with every variable amf uses. Backs up an existing `.env` to the next free `.env.NNNN` (only if it changes) and keeps its real values. Once the token and repo are set, creates any missing amf labels. |
+| `amf issue "Title" [-b body \| -f file \| stdin] [--no-label]` | Creates an issue labeled `amf:ready`. |
 | `amf run <N> [--timeout 30m]` | Processes one issue into a PR. |
-| `amf watch [--interval 60s] [--label amf] [--timeout 30m]` | Polls for open `amf`-labeled issues with no status label and runs them one at a time, oldest first. |
+| `amf watch [--interval 60s] [--label amf:ready] [--timeout 30m]` | Polls for open `amf:ready` issues not already in progress and runs them one at a time, oldest first. |
 | `amf version` | Prints the version. |
 
 ## Configuration
@@ -34,7 +34,7 @@ checkout. Values set in the environment win over the file. Values ending in
 1. Check that `GITHUB_REPO` exists and the token can reach it.
 2. Use the enclosing git checkout. Outside one, clone the repo into `./<name>`,
    or reuse that clone.
-3. Label the issue `amf:in-progress`.
+3. Label the issue `amf:in-progress` and remove `amf:ready`.
 4. Fetch the default branch and create the worktree `.amf/worktrees/issue-N`
    on branch `amf/issue-N`, starting from `origin/<default>`.
 5. Run `claude -p --dangerously-skip-permissions --output-format stream-json --verbose`
@@ -51,8 +51,9 @@ the worktree for inspection. Re-running starts from a fresh worktree.
 
 ## Invariants
 
-- amf owns `amf/issue-*` branches and the `amf`, `amf:in-progress`, `amf:done`
-  and `amf:failed` labels.
+- amf owns `amf/issue-*` branches and the `amf:ready`, `amf:in-progress`,
+  `amf:done` and `amf:failed` labels. An issue moves ready → in-progress →
+  done or failed. Adding `amf:ready` again retries it.
 - Claude never receives `GITHUB_TOKEN`. amf does all git and GitHub work itself.
 - `.amf/`, `.env` and `.env.NNNN` are added to `.git/info/exclude`, never to
   the tracked `.gitignore`.
@@ -65,5 +66,5 @@ the worktree for inspection. Re-running starts from a fresh worktree.
 - Sandboxing. Claude runs with permissions bypassed and can read local files,
   so label only issues you trust.
 - Merging, reviewing or retrying PRs. People review and merge them.
-- Repos with more than 100 open `amf`-labeled issues. `watch` reads only the
+- Repos with more than 100 open `amf:ready` issues. `watch` reads only the
   first page.

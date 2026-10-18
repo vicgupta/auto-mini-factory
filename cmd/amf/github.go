@@ -171,6 +171,29 @@ func (g *GitHub) ListOpenIssues(ctx context.Context, label string) ([]Issue, err
 	return issues, nil
 }
 
+// LabelSpec describes a repository label.
+type LabelSpec struct {
+	Name, Color, Description string
+}
+
+// EnsureLabel creates the label if the repository doesn't have it yet and
+// reports whether it did.
+func (g *GitHub) EnsureLabel(ctx context.Context, l LabelSpec) (created bool, err error) {
+	err = g.do(ctx, "GET", g.repoPath("/labels/%s", url.PathEscape(l.Name)), nil, nil)
+	if err == nil {
+		return false, nil
+	}
+	if !isStatus(err, http.StatusNotFound) {
+		return false, err
+	}
+	in := map[string]string{"name": l.Name, "color": l.Color, "description": l.Description}
+	err = g.do(ctx, "POST", g.repoPath("/labels"), in, nil)
+	if isStatus(err, http.StatusUnprocessableEntity) { // created by someone else meanwhile
+		return false, nil
+	}
+	return err == nil, err
+}
+
 // AddLabels adds labels to an issue; GitHub creates labels that don't exist.
 func (g *GitHub) AddLabels(ctx context.Context, n int, labels ...string) error {
 	return g.do(ctx, "POST", g.repoPath("/issues/%d/labels", n), map[string]any{"labels": labels}, nil)

@@ -78,6 +78,7 @@ func TestLoadConfig(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 	t.Setenv("GITHUB_TOKEN", "")
 	t.Setenv("GITHUB_REPO", "")
+	t.Setenv("AMF_API_URL", "")
 
 	cfg, err := loadConfig(filepath.Join(dir, "missing"), env)
 	if err != nil {
@@ -155,30 +156,48 @@ func TestParseClaudeResult(t *testing.T) {
 }
 
 func TestNeedsWork(t *testing.T) {
-	open := Issue{State: "open", Labels: []Label{{Name: "amf"}}}
-	if !needsWork(open) {
-		t.Fatal("labeled open issue should need work")
-	}
-	for _, l := range statusLabels {
-		is := open
-		is.Labels = append(slices.Clone(open.Labels), Label{Name: l})
-		if needsWork(is) {
-			t.Fatalf("issue with %s should be skipped", l)
+	issue := func(labels ...string) Issue {
+		is := Issue{State: "open"}
+		for _, l := range labels {
+			is.Labels = append(is.Labels, Label{Name: l})
 		}
+		return is
+	}
+	for _, tc := range []struct {
+		labels []string
+		want   bool
+	}{
+		{[]string{"amf:ready"}, true},
+		{[]string{"amf:ready", "amf:failed"}, true}, // retry
+		{[]string{"amf:ready", "amf:done"}, true},   // retry
+		{[]string{"amf:ready", "amf:in-progress"}, false},
+		{[]string{"custom"}, true}, // watch --label custom
+		{[]string{"custom", "amf:done"}, false},
+		{[]string{"custom", "amf:failed"}, false},
+	} {
+		if got := needsWork(issue(tc.labels...)); got != tc.want {
+			t.Errorf("needsWork(%v) = %v, want %v", tc.labels, got, tc.want)
+		}
+	}
+	closed := issue("amf:ready")
+	closed.State = "closed"
+	if needsWork(closed) {
+		t.Error("closed issues should be skipped")
 	}
 }
 
 // fakeGitHub is an in-memory stand-in for the parts of the GitHub API amf uses.
 type fakeGitHub struct {
-	t        *testing.T
-	mu       sync.Mutex
-	issues   map[int]*Issue
-	comments map[int][]string
-	prs      []map[string]string
+	t          *testing.T
+	mu         sync.Mutex
+	issues     map[int]*Issue
+	comments   map[int][]string
+	prs        []map[string]string
+	repoLabels map[string]LabelSpec // the repository's labels
 }
 
 func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
-	f := &fakeGitHub{t: t, issues: map[int]*Issue{}, comments: map[int][]string{}}
+	f := &fakeGitHub{t: t, issues: map[int]*Issue{}, comments: map[int][]string{}, repoLabels: map[string]LabelSpec{}}
 	mux := http.NewServeMux()
 	const repo = "/repos/vic/demo"
 	mux.HandleFunc("GET "+repo, func(w http.ResponseWriter, r *http.Request) {
@@ -210,6 +229,27 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
 			}
 		}
 		writeJSON(w, 200, out)
+	})
+	mux.HandleFunc("GET "+repo+"/labels/{name}", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if l, ok := f.repoLabels[r.PathValue("name")]; ok {
+			writeJSON(w, 200, map[string]string{"name": l.Name, "color": l.Color})
+			return
+		}
+		writeJSON(w, 404, map[string]string{"message": "Not Found"})
+	})
+	mux.HandleFunc("POST "+repo+"/labels", func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ Name, Color, Description string }
+		decode(t, r, &in)
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if _, ok := f.repoLabels[in.Name]; ok {
+			writeJSON(w, 422, map[string]string{"message": "Validation Failed"})
+			return
+		}
+		f.repoLabels[in.Name] = LabelSpec{in.Name, in.Color, in.Description}
+		writeJSON(w, 201, in)
 	})
 	mux.HandleFunc("GET "+repo+"/issues/{n}", func(w http.ResponseWriter, r *http.Request) {
 		f.withIssue(w, r, func(is *Issue) { writeJSON(w, 200, is) })
@@ -355,7 +395,7 @@ func newTestRunner(t *testing.T, srv *httptest.Server, root, claude string) (*Ru
 func TestRunOpensPR(t *testing.T) {
 	root, origin := setupRepo(t)
 	gh, srv := newFakeGitHub(t)
-	gh.issues[1] = &Issue{Number: 1, Title: "Add feature file", Body: "Please add feature.txt", State: "open", Labels: []Label{{Name: "amf"}}}
+	gh.issues[1] = &Issue{Number: 1, Title: "Add feature file", Body: "Please add feature.txt", State: "open", Labels: []Label{{Name: "amf:ready"}}}
 	t.Setenv("GITHUB_TOKEN", "must-not-leak")
 	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-api-should-not-win")
 
@@ -391,7 +431,7 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"Added feat
 	if got := mustGit(t, root, "--git-dir", origin, "show", "amf/issue-1:feature.txt"); got != "hello" {
 		t.Fatalf("pushed branch has feature.txt = %q", got)
 	}
-	if got, want := gh.labels(1), []string{"amf", "amf:done"}; !reflect.DeepEqual(got, want) {
+	if got, want := gh.labels(1), []string{"amf:done"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("labels = %v, want %v", got, want)
 	}
 	if c := gh.comments[1]; len(c) != 1 || !strings.Contains(c[0], "/pull/101") {
@@ -408,7 +448,7 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"Added feat
 func TestRunFailsWithoutChanges(t *testing.T) {
 	root, _ := setupRepo(t)
 	gh, srv := newFakeGitHub(t)
-	gh.issues[1] = &Issue{Number: 1, Title: "Do nothing", State: "open", Labels: []Label{{Name: "amf"}}}
+	gh.issues[1] = &Issue{Number: 1, Title: "Do nothing", State: "open", Labels: []Label{{Name: "amf:ready"}}}
 	claude := fakeClaude(t, `cat >/dev/null; echo '{"type":"result","subtype":"success","is_error":false,"result":"nothing"}'`)
 	r, _ := newTestRunner(t, srv, root, claude)
 
@@ -416,7 +456,7 @@ func TestRunFailsWithoutChanges(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "without making any changes") {
 		t.Fatalf("expected no-changes error, got %v", err)
 	}
-	if got, want := gh.labels(1), []string{"amf", "amf:failed"}; !reflect.DeepEqual(got, want) {
+	if got, want := gh.labels(1), []string{"amf:failed"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("labels = %v, want %v", got, want)
 	}
 	if c := gh.comments[1]; len(c) != 1 || !strings.Contains(c[0], "without making any changes") {
@@ -434,7 +474,7 @@ func TestRunFailsWithoutChanges(t *testing.T) {
 	if err := r.Run(context.Background(), 1); err != nil {
 		t.Fatalf("re-run: %v", err)
 	}
-	if got, want := gh.labels(1), []string{"amf", "amf:done"}; !reflect.DeepEqual(got, want) {
+	if got, want := gh.labels(1), []string{"amf:done"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("labels after re-run = %v, want %v", got, want)
 	}
 }
@@ -455,17 +495,18 @@ func TestRunClaudeTimeout(t *testing.T) {
 func TestWatchProcessesLabeledIssues(t *testing.T) {
 	root, _ := setupRepo(t)
 	gh, srv := newFakeGitHub(t)
-	gh.issues[1] = &Issue{Number: 1, Title: "One", State: "open", Labels: []Label{{Name: "amf"}}}
-	gh.issues[2] = &Issue{Number: 2, Title: "Already done", State: "open", Labels: []Label{{Name: "amf"}, {Name: "amf:done"}}}
+	gh.issues[1] = &Issue{Number: 1, Title: "One", State: "open", Labels: []Label{{Name: "amf:ready"}}}
+	gh.issues[2] = &Issue{Number: 2, Title: "Already done", State: "open", Labels: []Label{{Name: "amf:done"}}}
 	gh.issues[3] = &Issue{Number: 3, Title: "Not for amf", State: "open"}
+	gh.issues[4] = &Issue{Number: 4, Title: "Retry", State: "open", Labels: []Label{{Name: "amf:ready"}, {Name: "amf:failed"}}}
 	claude := fakeClaude(t, `cat >/dev/null; date > out.txt; echo ok`)
 	r, log := newTestRunner(t, srv, root, claude)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error)
-	go func() { done <- r.Watch(ctx, "amf", 50*time.Millisecond) }()
+	go func() { done <- r.Watch(ctx, "amf:ready", 50*time.Millisecond) }()
 	deadline := time.Now().Add(10 * time.Second)
-	for !slices.Contains(gh.labels(1), "amf:done") {
+	for !slices.Contains(gh.labels(1), "amf:done") || !slices.Contains(gh.labels(4), "amf:done") {
 		if time.Now().After(deadline) {
 			t.Fatalf("issue 1 never processed; log:\n%s", log)
 		}
@@ -475,8 +516,11 @@ func TestWatchProcessesLabeledIssues(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	if len(gh.prs) != 1 || gh.prs[0]["head"] != "amf/issue-1" {
-		t.Fatalf("expected exactly one PR for #1, got %v", gh.prs)
+	if len(gh.prs) != 2 || gh.prs[0]["head"] != "amf/issue-1" || gh.prs[1]["head"] != "amf/issue-4" {
+		t.Fatalf("expected PRs for #1 and #4, got %v", gh.prs)
+	}
+	if got := gh.labels(4); !reflect.DeepEqual(got, []string{"amf:done"}) {
+		t.Fatalf("retried issue labels = %v", got)
 	}
 }
 
@@ -496,7 +540,7 @@ func TestIssueCommand(t *testing.T) {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
 	is := gh.issues[1]
-	if is.Title != "Add dark mode" || is.Body != "Use CSS variables" || !is.HasLabel("amf") {
+	if is.Title != "Add dark mode" || is.Body != "Use CSS variables" || !is.HasLabel("amf:ready") {
 		t.Fatalf("unexpected issue %+v", is)
 	}
 
@@ -531,6 +575,10 @@ func TestExcludeAMFDir(t *testing.T) {
 }
 
 func TestMain(m *testing.M) {
+	for _, k := range []string{"GITHUB_TOKEN", "GITHUB_REPO", "CLAUDE_CODE_OAUTH_TOKEN", "AMF_API_URL", "AMF_CLONE_URL", "AMF_CLAUDE"} {
+		os.Unsetenv(k)
+	}
+	os.Setenv("AMF_API_URL", "http://127.0.0.1:1") // unreachable unless a test sets a fake
 	if _, err := exec.LookPath("git"); err != nil {
 		fmt.Println("skipping: git not installed")
 		return
@@ -564,7 +612,8 @@ func TestInitWritesTemplate(t *testing.T) {
 	if m, _ := filepath.Glob(".env.*"); len(m) != 0 {
 		t.Errorf("no backup expected without an existing .env, got %v", m)
 	}
-	if !strings.Contains(out.String(), "fill in GITHUB_TOKEN, GITHUB_REPO, CLAUDE_CODE_OAUTH_TOKEN") {
+	if !strings.Contains(out.String(), "fill in GITHUB_TOKEN, GITHUB_REPO, CLAUDE_CODE_OAUTH_TOKEN") ||
+		!strings.Contains(out.String(), "labels not checked yet") {
 		t.Errorf("output = %q", out.String())
 	}
 
@@ -606,8 +655,9 @@ func TestInitBacksUpAndKeepsValues(t *testing.T) {
 		t.Fatalf("new .env lost values: %v", vars)
 	}
 
-	// Each run takes the next number, even after a gap.
+	// Each change takes the next number, even after a gap.
 	os.WriteFile(".env.0007", []byte("old"), 0o600)
+	os.WriteFile(".env", []byte("GITHUB_TOKEN=ghp_other\n"), 0o600)
 	if err := run(context.Background(), []string{"init"}, nil, io.Discard, io.Discard); err != nil {
 		t.Fatal(err)
 	}
@@ -712,4 +762,48 @@ func mustEval(t *testing.T, p string) string {
 		t.Fatal(err)
 	}
 	return r
+}
+
+func TestInitCreatesLabels(t *testing.T) {
+	gh, srv := newFakeGitHub(t)
+	gh.repoLabels["amf:done"] = LabelSpec{"amf:done", "000000", "already here"}
+	t.Chdir(t.TempDir())
+	t.Setenv("AMF_API_URL", srv.URL)
+	os.WriteFile(".env", []byte("GITHUB_TOKEN=test-token\nGITHUB_REPO=vic/demo\n"), 0o600)
+
+	var out bytes.Buffer
+	if err := run(context.Background(), []string{"init"}, nil, &out, io.Discard); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	for _, l := range amfLabels {
+		if _, ok := gh.repoLabels[l.Name]; !ok {
+			t.Errorf("label %s not created", l.Name)
+		}
+	}
+	if gh.repoLabels["amf:done"].Color != "000000" {
+		t.Error("existing label should be left alone")
+	}
+	for _, want := range []string{"amf:ready        created", "amf:done         exists", "amf:failed       created"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output missing %q:\n%s", want, out.String())
+		}
+	}
+
+	// Running init again changes nothing: no new backup, every label exists.
+	out.Reset()
+	if err := run(context.Background(), []string{"init"}, nil, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), ".env is up to date") || strings.Contains(out.String(), "created") {
+		t.Errorf("second init output:\n%s", out.String())
+	}
+	if m, _ := filepath.Glob(".env.0*"); len(m) != 1 {
+		t.Errorf("expected only the first run's backup, got %v", m)
+	}
+
+	// A bad token fails clearly.
+	os.WriteFile(".env", []byte("GITHUB_TOKEN=nope\nGITHUB_REPO=vic/demo\n"), 0o600)
+	if err := run(context.Background(), []string{"init"}, nil, io.Discard, io.Discard); err == nil || !strings.Contains(err.Error(), "rejected GITHUB_TOKEN") {
+		t.Fatalf("expected bad-token error, got %v", err)
+	}
 }

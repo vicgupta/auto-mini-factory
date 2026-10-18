@@ -36,10 +36,10 @@ func buildVersion() string {
 const usage = `amf turns GitHub issues into pull requests with Claude Code.
 
 Usage:
-  amf init                                                 write .env with every variable amf uses (backs up an existing one)
-  amf issue "Title" [-b body | -f file.md] [--no-label]   create an issue (body may also come from stdin)
-  amf run <issue-number> [--timeout 30m]                   process one issue into a PR
-  amf watch [--interval 60s] [--label amf] [--timeout 30m] process labeled issues as they arrive
+  amf init                                                        write .env (backing up an existing one) and create amf's labels
+  amf issue "Title" [-b body | -f file.md] [--no-label]           create an issue (body may also come from stdin)
+  amf run <issue-number> [--timeout 30m]                          process one issue into a PR
+  amf watch [--interval 60s] [--label amf:ready] [--timeout 30m]  process amf:ready issues as they arrive
   amf version
 
 Configuration is read from .env (or the environment):
@@ -100,7 +100,7 @@ func cmdIssue(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 	fs.SetOutput(stderr)
 	body := fs.String("b", "", "issue body")
 	file := fs.String("f", "", "read the issue body from a file (- for stdin)")
-	label := fs.String("label", labelTrigger, "label that marks the issue for amf")
+	label := fs.String("label", labelReady, "label that marks the issue for amf")
 	noLabel := fs.Bool("no-label", false, "don't label the issue for amf")
 	pos, err := parseArgs(fs, args)
 	if err != nil {
@@ -171,14 +171,14 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 	fs := flag.NewFlagSet("watch", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	interval := fs.Duration("interval", 60*time.Second, "how often to poll GitHub")
-	label := fs.String("label", labelTrigger, "process open issues with this label")
+	label := fs.String("label", labelReady, "process open issues with this label")
 	timeout := fs.Duration("timeout", 30*time.Minute, "maximum time Claude may spend per issue")
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return errUsage
 	}
 	if len(pos) != 0 {
-		fmt.Fprintln(stderr, "usage: amf watch [--interval 60s] [--label amf] [--timeout 30m]")
+		fmt.Fprintln(stderr, "usage: amf watch [--interval 60s] [--label amf:ready] [--timeout 30m]")
 		return errUsage
 	}
 	r, err := newRunner(ctx, *timeout, stderr)

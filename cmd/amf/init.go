@@ -27,7 +27,8 @@ func isPlaceholder(v string) bool {
 
 // cmdInit writes .env in the current directory with every variable amf uses.
 // An existing .env is first copied to the next free .env.NNNN, and its real
-// values are carried over into the new file.
+// values are carried over into the new file. Once .env has a usable token and
+// repo, it also creates any of amf's labels the repository is missing.
 func cmdInit(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if len(args) != 0 {
 		fmt.Fprintln(stderr, "usage: amf init")
@@ -37,16 +38,13 @@ func cmdInit(ctx context.Context, args []string, stdout, stderr io.Writer) error
 
 	old := map[string]string{}
 	var oldKeys []string // to keep extra variables in their original order
-	if raw, err := os.ReadFile(path); err == nil {
+	raw, err := os.ReadFile(path)
+	exists := err == nil
+	if exists {
 		if old, err = parseDotEnv(strings.NewReader(string(raw))); err != nil {
 			return fmt.Errorf("%s: %w (fix or move it, then re-run amf init)", path, err)
 		}
 		oldKeys = envKeys(string(raw))
-		backup, err := backupFile(path)
-		if err != nil {
-			return err
-		}
-		fmt.Fprintf(stdout, "amf: backed up %s to %s\n", path, backup)
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
@@ -82,10 +80,22 @@ func cmdInit(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		b.WriteString("\n# Kept from the previous .env\n" + strings.Join(extra, "\n") + "\n")
 	}
 
-	if err := writeFileAtomic(path, []byte(b.String()), 0o600); err != nil {
-		return err
+	switch {
+	case exists && string(raw) == b.String():
+		fmt.Fprintf(stdout, "amf: %s is up to date\n", path)
+	default:
+		if exists {
+			backup, err := backupFile(path)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(stdout, "amf: backed up %s to %s\n", path, backup)
+		}
+		if err := writeFileAtomic(path, []byte(b.String()), 0o600); err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "amf: wrote %s\n", path)
 	}
-	fmt.Fprintf(stdout, "amf: wrote %s\n", path)
 
 	if root, err := git(ctx, ".", "rev-parse", "--show-toplevel"); err == nil {
 		if err := excludeFromGit(ctx, root, "amf secrets", "/.env", "/.env.[0-9][0-9][0-9][0-9]"); err != nil {
@@ -98,6 +108,31 @@ func cmdInit(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		if slices.Contains(todo, "CLAUDE_CODE_OAUTH_TOKEN") {
 			fmt.Fprintln(stdout, "CLAUDE_CODE_OAUTH_TOKEN is optional; leave the placeholder to use your existing Claude login.")
 		}
+	}
+
+	cfg, err := loadConfig(path)
+	if err != nil {
+		fmt.Fprintf(stdout, "amf: labels not checked yet: %v\nRun amf init again once .env is filled in.\n", err)
+		return nil
+	}
+	return ensureLabels(ctx, newGitHub(cfg), cfg.Repo, stdout)
+}
+
+// ensureLabels creates any of amf's labels the repository is missing.
+func ensureLabels(ctx context.Context, gh *GitHub, repo string, stdout io.Writer) error {
+	if err := checkRepo(ctx, gh, repo); err != nil {
+		return err
+	}
+	for _, l := range amfLabels {
+		created, err := gh.EnsureLabel(ctx, l)
+		if err != nil {
+			return fmt.Errorf("label %s: %w", l.Name, err)
+		}
+		state := "exists"
+		if created {
+			state = "created"
+		}
+		fmt.Fprintf(stdout, "amf: label %-16s %s in %s\n", l.Name, state, repo)
 	}
 	return nil
 }

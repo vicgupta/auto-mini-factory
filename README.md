@@ -50,6 +50,10 @@ unset, so you can leave the optional `CLAUDE_CODE_OAUTH_TOKEN` as it is.
 - **Repo:** `GITHUB_REPO` is filled in from the checkout's GitHub `origin`.
 - **Git:** `.env` and `.env.NNNN` are added to `.git/info/exclude`, so the
   tokens never show up in `git status`.
+- **Labels:** once `GITHUB_TOKEN` and `GITHUB_REPO` are filled in, `amf init`
+  makes sure the repo has `amf:ready`, `amf:in-progress`, `amf:done` and
+  `amf:failed`, creating any that are missing. Run it again after editing
+  `.env`. If nothing changed, it makes no new backup.
 
 amf reads `.env` in the current directory, then at the top of the enclosing
 git checkout. Real environment variables win over the file.
@@ -77,12 +81,12 @@ echo "details" | amf issue "Title"     # body from stdin
 amf issue "Just a note" --no-label     # won't be picked up by watch
 
 amf run 42                  # process one issue now
-amf watch --interval 60s    # process issues labeled `amf`, one at a time
+amf watch --interval 60s    # process issues labeled `amf:ready`, one at a time
 ```
 
 ### What `amf run N` does
 
-1. Labels the issue `amf:in-progress`.
+1. Labels the issue `amf:in-progress` and removes `amf:ready`.
 2. Fetches the default branch and creates a worktree at
    `.amf/worktrees/issue-N` on branch `amf/issue-N` from `origin/<default>`.
 3. Runs `claude -p --dangerously-skip-permissions --output-format stream-json --verbose` in the
@@ -99,9 +103,16 @@ On any failure the issue gets `amf:failed` plus a comment with the reason,
 and the worktree is kept for inspection. Re-running `amf run N` starts again
 from a fresh worktree.
 
-`amf watch` picks up open issues labeled `amf` that have no `amf:*` status
-label, oldest first. To retry a failed issue, remove `amf:failed` or run
-`amf run N`. GitHub creates missing labels on first use.
+### Labels
+
+An issue moves `amf:ready` → `amf:in-progress` → `amf:done` or `amf:failed`.
+`amf issue` adds `amf:ready`, and `amf watch` picks up open `amf:ready` issues
+oldest first. To retry an issue, add `amf:ready` again or run `amf run N`.
+If amf is killed mid-run and an issue is stuck on `amf:in-progress`, run
+`amf run N`.
+
+Issues labeled `amf` by amf v0.0.4 and earlier aren't picked up any more.
+Relabel them `amf:ready`, or run `amf watch --label amf`.
 
 `.amf/` is added to `.git/info/exclude`, so it never shows up in `git status`.
 

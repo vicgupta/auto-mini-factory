@@ -14,14 +14,24 @@ import (
 	"time"
 )
 
+// An issue moves amf:ready -> amf:in-progress -> amf:done or amf:failed.
+// Adding amf:ready again asks amf to retry it.
 const (
-	labelTrigger    = "amf"
+	labelReady      = "amf:ready"
 	labelInProgress = "amf:in-progress"
 	labelDone       = "amf:done"
 	labelFailed     = "amf:failed"
 )
 
 var statusLabels = []string{labelInProgress, labelDone, labelFailed}
+
+// amfLabels are the labels amf uses, as `amf init` creates them.
+var amfLabels = []LabelSpec{
+	{labelReady, "0e8a16", "Ready for amf to turn into a pull request"},
+	{labelInProgress, "fbca04", "amf is working on this issue"},
+	{labelDone, "1d76db", "amf opened a pull request for this issue"},
+	{labelFailed, "d93f0b", "amf could not process this issue; see its comment"},
+}
 
 // Runner turns issues into pull requests from a local checkout of the repo.
 type Runner struct {
@@ -55,6 +65,10 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 
 	r.logf("#%d: %s", n, issue.Title)
 	if err := r.setStatus(ctx, n, labelInProgress); err != nil {
+		return err
+	}
+	// The issue is no longer waiting; adding amf:ready again retries it.
+	if err := r.GH.RemoveLabel(ctx, n, labelReady); err != nil {
 		return err
 	}
 	defer func() {
@@ -310,10 +324,15 @@ func (r *Runner) setStatus(ctx context.Context, n int, status string) error {
 	return r.GH.AddLabels(ctx, n, status)
 }
 
-// needsWork reports whether watch should pick up an issue.
+// needsWork reports whether watch should pick up an issue: one that isn't
+// already in progress, and either is marked amf:ready (a retry if it was
+// done or failed before) or carries a custom --label and no status yet.
 func needsWork(is Issue) bool {
-	if is.PullRequest != nil || is.State != "open" {
+	if is.PullRequest != nil || is.State != "open" || is.HasLabel(labelInProgress) {
 		return false
+	}
+	if is.HasLabel(labelReady) {
+		return true
 	}
 	for _, l := range statusLabels {
 		if is.HasLabel(l) {
