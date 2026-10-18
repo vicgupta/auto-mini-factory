@@ -7,7 +7,8 @@ without running a platform.
 ## Install
 
 ```sh
-go install .        # or: go build -o amf .
+go install github.com/vicgupta/auto-mini-factory/cmd/amf@latest
+# or, from a clone: go build -o amf ./cmd/amf
 ```
 
 Needs `git` and the [`claude`](https://claude.com/claude-code) CLI on `PATH`.
