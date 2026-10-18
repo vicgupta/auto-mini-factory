@@ -155,3 +155,5 @@ go test -race ./...
 
 Tests use `httptest` for GitHub, real git repos in temp dirs, and a shell
 script standing in for `claude`.
+
+To release, run `./release.sh vX.Y.Z notes.md`; see [AGENTS.md](AGENTS.md#releasing).
