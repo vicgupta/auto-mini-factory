@@ -1,11 +1,14 @@
 # amf specification
 
 amf (autonomous mini factory) turns labeled GitHub issues into pull requests by
-running Claude Code headless in a git worktree. It is a single Go binary that
-uses only the standard library, for one developer or a small team that doesn't
-want to run a platform.
+running coding agents headless in a git worktree. By default that's one Claude
+Code run. A repo can instead declare a plan → code → eval pipeline in its
+`AGENTS.md`, with a skill, agent and model for each stage. amf is a single Go
+binary that uses only the standard library, for one developer or a small team
+that doesn't want to run a platform.
 
-**Needs:** `git` and the `claude` CLI on `PATH`, and a GitHub token for one repository.
+**Needs:** `git` and the `claude` CLI on `PATH`, and a GitHub token for one
+repository. A pipeline also needs whichever of `codex` and `opencode` it names.
 
 ## Issue lifecycle
 
@@ -27,10 +30,15 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened)
 | `amf init` | Writes `./.env` and creates the labels (see below). |
 | `amf issue "Title" [-b body \| -f file \| -f -] [--label L] [--no-label]` | Creates an issue labeled `amf:ready`. The body can also come from stdin when it's piped. Prints `#N <url>`. |
 | `amf list [--state open\|closed\|all] [--label L]` | Lists issues, newest first, with every page fetched and PRs left out. Columns: `ISSUE`, `STATE` (with `--state all` only), `AMF` (the issue's `amf` and `amf:*` labels, or `-`) and `TITLE`. Prints `No … in owner/name.` when nothing matches. Needs no git checkout. |
-| `amf run <N> [--timeout 30m]` | Processes issue N once. |
-| `amf watch [--interval 60s] [--label amf:ready] [--timeout 30m]` | Polls open issues with the label (every page), oldest first, and processes them one at a time until interrupted. |
+| `amf run <N> [--timeout 30m] [--eval-rounds 2]` | Processes issue N once. |
+| `amf watch [--interval 60s] [--label amf:ready] [--timeout 30m] [--eval-rounds 2]` | Polls open issues with the label (every page), oldest first, and processes them one at a time until interrupted. |
+| `amf pipeline [--fetch]` | Checks the pipeline in `AGENTS.md` of the enclosing checkout, as it is on disk. See below. |
 | `amf update [--version vX.Y.Z] [--check]` | Replaces the running binary with the latest release, or with the given one, which can be a downgrade. Needs no `.env`. See below. |
 | `amf version` | Prints the version: the release tag, or the module version for `go install`. |
+
+- `--timeout` limits each agent run, not the whole issue.
+- `--eval-rounds` is how many times a pipeline's eval stage may send the
+  change back to the code stage. A negative value is an error.
 
 **Exit codes:** 0 on success, 1 on error, 2 on a usage error. SIGINT and
 SIGTERM cancel the current step; the issue is still marked failed.
@@ -52,6 +60,21 @@ SIGTERM cancel the current step; the issue is still marked failed.
    any of the four labels that are missing. Existing labels aren't changed.
    Until then it prints that labels weren't checked yet.
 
+### `amf pipeline`
+
+1. Must run inside a git checkout. Reads `AGENTS.md` at its top level from
+   disk, so a change can be checked before it's merged.
+2. Without `AGENTS.md`, or without an `## amf` table in it, prints that amf
+   runs claude with its built-in prompt, and exits 0.
+3. Otherwise prints the stages (`STAGE`, `AGENT`, `MODEL`, `SKILL`), then one
+   line per agent: `ok` with its path, or `missing`. Agent paths come from
+   the environment and `.env`; no token is needed.
+4. With `--fetch`, also downloads each skill as `run` does, and prints `ok`
+   with its size and SHA-256 (the value for a `#sha256=` pin), or why it
+   failed.
+5. A table that doesn't parse is an error. Missing agents and failed skills
+   end with `the pipeline has N problems` and exit 1.
+
 ## Configuration
 
 amf reads `./.env`, then `.env` at the top of the git checkout. Environment
@@ -64,8 +87,64 @@ placeholders and count as unset.
 | `GITHUB_REPO` | required | `owner/name`; github.com URLs are accepted |
 | `CLAUDE_CODE_OAUTH_TOKEN` | unset | Claude subscription token, passed to Claude |
 | `AMF_CLAUDE` | `claude` | Path to the Claude CLI |
+| `AMF_CODEX` | `codex` | Path to the Codex CLI, for pipelines |
+| `AMF_OPENCODE` | `opencode` | Path to the opencode CLI, for pipelines |
 | `AMF_API_URL` | `https://api.github.com` | GitHub API base URL |
 | `AMF_CLONE_URL` | `https://github.com/<repo>.git` | Where to clone the repo from |
+
+## Pipelines (`AGENTS.md`)
+
+A repo declares a pipeline with a table under an `## amf` heading in
+`AGENTS.md` at its top level:
+
+```markdown
+## amf
+
+| Stage | Skill | Agent | Model |
+|---|---|---|---|
+| plan | https://raw.githubusercontent.com/vicgupta/auto-mini-factory/v0.2.0/skills/plan/SKILL.md | claudecode | claude-opus-5-5 |
+| code | https://raw.githubusercontent.com/vicgupta/auto-mini-factory/v0.2.0/skills/code/SKILL.md | codex | default |
+| eval | https://raw.githubusercontent.com/vicgupta/auto-mini-factory/v0.2.0/skills/eval/SKILL.md | opencode | opencode/deepseek-v4.1-flash-free |
+```
+
+- **Table:** the first table between `## amf` (any case) and the next
+  heading. Columns are matched by name, ignoring case and order. `Stage` and
+  `Agent` are required; `Skill` and `Model` are optional. A cell may wrap
+  its value in backticks, `<…>` or a `[text](url)` link.
+- **Stage:** `plan`, `code` or `eval`, each at most once. `code` is
+  required. Without `plan` there is no plan. Without `eval` the first code
+  round goes straight to the PR.
+- **Skill:** an `https://` URL of one `SKILL.md`, or `-` or empty for none.
+  `#sha256=<64 hex digits>` pins its content; no other fragment is allowed.
+- **Agent:** `claudecode`, `codex` or `opencode`.
+- **Model:** passed to the agent. `default`, `-` or empty means the agent's
+  own default.
+
+`run` and `watch` read the table from `AGENTS.md` on `origin/<default>`, so a
+pipeline only changes through a merge, and `watch` uses it from the next
+issue on. A repo without the file or the table is processed with one
+`claude` run, as described below.
+
+**Skills** are put into each stage's prompt as text, after amf's own
+instructions, which win where they conflict. amf's prompt fixes each stage's
+inputs and output (such as eval's verdict line); the skill says how to do the
+work. Starter skills are in this repo under `skills/`.
+
+### Agents
+
+| Agent | Command, run in the worktree | Final message |
+|---|---|---|
+| `claudecode` | `claude -p --dangerously-skip-permissions --output-format stream-json --verbose [--model M]`, prompt on stdin | The `result` message; one with an error fails the run |
+| `codex` | `codex exec --dangerously-bypass-approvals-and-sandbox [-m M] -o <file> -`, prompt on stdin | The `-o` file; fails if it's empty |
+| `opencode` | `opencode run [--model M] <prompt>` | A file the prompt asks it to write; what it printed, if it didn't |
+
+- **Permissions:** every agent runs with permission checks off. opencode
+  gets `OPENCODE_CONFIG` pointing at `.amf/opencode.json`, which allows
+  edits, shell commands, web fetches and paths outside the worktree.
+- **Environment:** see step 6 below. Codex and opencode keep their own
+  logins and API keys.
+- **Output files:** the final-message files are `.amf/<stage>.md` inside the
+  worktree, which git ignores.
 
 ## Processing one issue
 
@@ -75,37 +154,92 @@ placeholders and count as unset.
    into `./<name>` with the user's git credentials, or reuse an existing clone
    there. Refuse if `./<name>` exists but isn't a clone of the repo. Add
    `/.amf/` to `.git/info/exclude`.
-3. **Claim.** The issue must be an open issue, not a PR. Label it
-   `amf:in-progress` and remove `amf:ready`.
-4. **Worktree.** Fetch the default branch and create
+3. **Check.** The issue must be an open issue, not a PR. Fetch the default
+   branch and read the pipeline from `AGENTS.md` on it. A table that doesn't
+   parse, or an agent that isn't installed, stops the run here without
+   changing the issue. `watch` then logs the error and tries again on its
+   next poll.
+4. **Claim.** Label the issue `amf:in-progress` and remove `amf:ready`.
+5. **Worktree.** Fetch the default branch and create
    `.amf/worktrees/issue-N` on `amf/issue-N`, reset to `origin/<default>`. A
    worktree left from an earlier run is discarded first.
-5. **Agent.** Run, in the worktree:
-   `claude -p --dangerously-skip-permissions --output-format stream-json --verbose`
-   - **Prompt (on stdin):** the issue's title and body, plus instructions to
-     make the smallest complete change, run the project's tests and build, not
-     touch git or GitHub, and reply with only a PR description.
-   - **Environment:** without `GITHUB_TOKEN`. When `CLAUDE_CODE_OAUTH_TOKEN` is
-     set, it is passed and `ANTHROPIC_API_KEY` is removed.
+6. **Agent.** Without a pipeline, run Claude as in the Agents table above,
+   with no model.
+   - **Prompt:** the issue's title and body, plus instructions to make the
+     smallest complete change, run the project's tests and build, not touch
+     git or GitHub, and reply with only a PR description.
+   - **Environment:** `PWD` is the worktree, and no agent gets
+     `GITHUB_TOKEN`. When `CLAUDE_CODE_OAUTH_TOKEN` is set, it's passed to
+     Claude only, and Claude's `ANTHROPIC_API_KEY` is removed.
    - **Log:** output streams live to `.amf/logs/issue-N.log`.
-   - **Timeout:** Claude is killed after `--timeout`.
-   - **Summary:** the final `result` message becomes the summary. A
-     `result` with an error fails the run.
-6. **Commit.** Stage everything and commit as `Fix #N: <title>` with the body
+   - **Timeout:** the agent is killed after `--timeout`.
+   - **Summary:** the final message becomes the summary.
+
+   With a pipeline, this step and the next are replaced by the steps in
+   "With a pipeline" below.
+7. **Commit.** Stage everything and commit as `Fix #N: <title>` with the body
    `Closes #N`. Fail if the branch has no commits beyond `origin/<default>`.
-7. **Push.** `git push --force -u origin amf/issue-N`, with the user's git
+8. **Push.** `git push --force -u origin amf/issue-N`, with the user's git
    credentials.
-8. **PR.** Open `amf/issue-N` → `<default>`, titled `Fix #N: <title>`. The
-   body is the summary (or `Resolves #N.` if there isn't one), then `Closes #N`
-   and an "Opened by amf" footer. Before that, amf removes from the summary
-   any Claude attribution lines ("Generated with Claude Code", `Co-Authored-By`)
-   and Claude's own `Closes`/`Fixes`/`Resolves #N` line, so each PR is credited
-   to the user alone and closes the issue once.
-9. **Finish.** Comment the PR link on the issue, set `amf:done`, and remove the
-   worktree. The branch and log are kept.
+9. **PR.** Open `amf/issue-N` → `<default>`, titled `Fix #N: <title>`. The
+   body is the summary (or `Resolves #N.` if there isn't one), then any
+   pipeline sections, then `Closes #N` and an "Opened by amf" footer. amf
+   first removes Claude attribution lines ("Generated with Claude Code",
+   `Co-Authored-By`) and the agent's own `Closes`/`Fixes`/`Resolves #N` line
+   from the summary, and the attribution lines from the plan and review too.
+   That way each PR is credited to the user alone and closes the issue once.
+10. **Finish.** Comment the PR link on the issue, set `amf:done`, and remove
+    the worktree. The branch and logs are kept.
+
+### With a pipeline
+
+1. **Skills.** Download each stage's skill: HTTPS only, following only HTTPS
+   redirects, with no credentials sent, at most 256 KB, UTF-8, and matching
+   its `sha256` pin if it has one. Any problem fails the issue.
+2. **Plan** (if declared). The prompt has the issue, the skill, and
+   instructions not to change files and to reply with only the plan, or with
+   a first line starting `BLOCKED:` and the questions that need answers.
+   - The plan is saved to `.amf/runs/issue-N/plan.md`, and its log is
+     `.amf/logs/issue-N-plan.log`.
+   - Afterwards amf resets the worktree to the commit it started from and
+     removes untracked files (`git clean -fd`), so the stage can't change
+     the branch.
+   - A `BLOCKED:` plan fails the issue. The comment shows the plan and asks
+     for the issue to be edited and `amf:ready` added again.
+3. **Code, round K** (K = 1, 2, …). The prompt is the one in step 6, plus
+   the plan and the skill. From round 2 on, it also says the previous
+   attempt is in the working tree, and gives eval's review to fix.
+   - The log is `.amf/logs/issue-N-code-K.log`.
+   - amf commits any changes as `amf: code round K`.
+   - The run fails with `the code stage (<agent>) finished without making
+     any changes` if the branch has no commits beyond `origin/<default>`.
+   - The final message becomes the summary.
+4. **Eval, round K** (if declared). The prompt has the issue, the plan, the
+   code stage's summary, the skill, and `git diff origin/<default> HEAD`
+   (cut at 100 KB, with a note). It tells the agent to run the tests, change
+   nothing, and end with `VERDICT: PASS` or `VERDICT: FAIL`.
+   - The review is saved to `.amf/runs/issue-N/eval-K.md`, with its log
+     at `.amf/logs/issue-N-eval-K.log`. The worktree is then reset as after
+     Plan.
+   - The verdict is read from the last non-blank line, ignoring case,
+     `*`, `_`, backticks and a trailing period. Without one, the result is
+     `FAIL` and the review starts `eval gave no verdict.`
+   - On `PASS`, continue to step 5.
+   - On `FAIL`, go back to step 3 with the review, unless there have
+     already been `--eval-rounds` code rounds after the first. In that case
+     amf pushes the branch for inspection and fails the issue. The comment
+     names the eval agent, the number of rounds and the branch, and puts the
+     last review in a collapsed block.
+5. **Squash.** Replace the round commits with one commit, as in step 7, and
+   continue with Push.
+
+**Pipeline sections in the PR body:** with an eval stage, an
+`## Evaluation` section saying `PASS`, the eval agent and model, and the
+number of code rounds, with the review in a collapsed block. With a plan
+stage, the plan in a collapsed block.
 
 **On failure** in any step after Claim: set `amf:failed`, comment the error on
-the issue, and keep the worktree and log for inspection. This also happens if
+the issue, and keep the worktree and logs for inspection. This also happens if
 the run is interrupted. If Claim itself fails, the issue can be left on
 `amf:in-progress`, which `watch` skips; `amf run N` recovers it.
 
@@ -134,16 +268,24 @@ Any failure leaves the installed binary unchanged.
 |---|---|
 | `.env`, `.env.NNNN` | Configuration and its backups (permissions 0600, git-excluded) |
 | `.amf/worktrees/issue-N/` | Working copy for an issue in progress or failed |
-| `.amf/logs/issue-N.log` | Claude's stream-json output for the latest run of issue N |
+| `.amf/logs/issue-N.log` | Claude's stream-json output for the latest run of issue N, without a pipeline |
+| `.amf/logs/issue-N-<stage>.log` | Each pipeline stage's output: `plan`, `code-K`, `eval-K` |
+| `.amf/runs/issue-N/` | The latest pipeline run's `plan.md` and `eval-K.md` |
+| `.amf/opencode.json` | The config amf runs opencode with |
 
 amf only ever adds to `.git/info/exclude`. It never edits a tracked `.gitignore`.
 
 ## Security model
 
-- Claude runs with every permission check off. An issue's body is effectively
+- Agents run with every permission check off. An issue's body is effectively
   code run on the user's machine, so label only issues you trust.
-- Claude never gets `GITHUB_TOKEN`, but it can read local files, including
+- A skill is instructions run the same way. Reference only skills you
+  control or have reviewed, at a tag or commit, ideally with a `sha256` pin.
+  The pipeline itself changes only through a merge to the default branch.
+- No agent gets `GITHUB_TOKEN`, but agents can read local files, including
   `.env`. For real isolation, run amf in a container or VM.
+- Plan and eval can't change the branch: amf resets the worktree after them,
+  so only the code stage's changes reach the PR.
 - amf does all git and GitHub writes itself, through the user's credentials
   and the configured token.
 
@@ -151,4 +293,5 @@ amf only ever adds to `.git/info/exclude`. It never edits a tracked `.gitignore`
 
 - Running issues in parallel. `watch` processes one at a time.
 - Reviewing, merging, or retrying failed PRs. People do that.
-- Sandboxing Claude.
+- Sandboxing agents.
+- Skills that need authentication to download.

@@ -1,8 +1,9 @@
 # amf — autonomous mini factory
 
 One stdlib-only Go binary that turns GitHub issues into pull requests with
-Claude Code. For a solo developer or small team that wants coding agents
-without running a platform.
+Claude Code, or with a plan → code → eval pipeline of Claude Code, Codex and
+opencode. For a solo developer or small team that wants coding agents without
+running a platform.
 
 ## Install
 
@@ -102,6 +103,8 @@ amf watch --interval 60s    # process issues labeled `amf:ready`, one at a time
 
 ### What `amf run N` does
 
+Without a pipeline (see below), amf runs Claude once:
+
 1. Labels the issue `amf:in-progress` and removes `amf:ready`.
 2. Fetches the default branch and creates a worktree at
    `.amf/worktrees/issue-N` on branch `amf/issue-N` from `origin/<default>`.
@@ -118,6 +121,49 @@ amf watch --interval 60s    # process issues labeled `amf:ready`, one at a time
 On any failure the issue gets `amf:failed` plus a comment with the reason,
 and the worktree is kept for inspection. Re-running `amf run N` starts again
 from a fresh worktree.
+
+### Pipelines: plan → code → eval
+
+Instead of one Claude run, a repo can have amf plan the change, code it, and
+have a reviewer agent check it before any PR is opened. Each stage gets its
+own skill, agent (`claudecode`, `codex` or `opencode`) and model. Declare the
+pipeline in the target repo's `AGENTS.md`:
+
+```markdown
+## amf
+
+| Stage | Skill | Agent | Model |
+|---|---|---|---|
+| plan | https://raw.githubusercontent.com/vicgupta/auto-mini-factory/v0.2.0/skills/plan/SKILL.md | claudecode | claude-opus-5-5 |
+| code | https://raw.githubusercontent.com/vicgupta/auto-mini-factory/v0.2.0/skills/code/SKILL.md | codex | default |
+| eval | https://raw.githubusercontent.com/vicgupta/auto-mini-factory/v0.2.0/skills/eval/SKILL.md | opencode | opencode/deepseek-v4.1-flash-free |
+```
+
+- **plan** writes a plan with acceptance criteria. It can stop with
+  `BLOCKED:` and questions when the issue is too unclear, and amf comments
+  them on the issue.
+- **code** follows the plan, then amf commits the round.
+- **eval** runs the tests, reviews the diff against the plan, and ends with
+  `VERDICT: PASS` or `VERDICT: FAIL`. On a fail, its review goes back to
+  code, up to `--eval-rounds` times (default 2). If it still fails, amf
+  pushes the branch for you to look at and marks the issue `amf:failed`.
+- The PR gets one `Fix #N` commit, with eval's verdict and review and the
+  plan in collapsed sections of the body.
+
+Only `code` is required. A skill URL can be pinned with `#sha256=…`, and
+amf refuses the skill if it changes. Plan and eval can't change the branch,
+because amf resets the worktree after them. Each stage logs to
+`.amf/logs/issue-N-<stage>.log`.
+
+`amf run` and `amf watch` read the pipeline from `AGENTS.md` on the default
+branch, so a change takes effect once merged. To check a change before
+merging, run `amf pipeline --fetch` in your checkout: it shows the stages,
+checks the agents are installed, and downloads each skill.
+
+Starter skills are in [`skills/`](skills): [plan](skills/plan/SKILL.md),
+[code](skills/code/SKILL.md) and [eval](skills/eval/SKILL.md). Write your own
+by copying one; amf's prompt already fixes each stage's inputs and output
+format, so a skill only needs to say how to do the work.
 
 ### Labels
 
@@ -142,6 +188,8 @@ code you're executing on your machine.
 - `GITHUB_TOKEN` is stripped from Claude's environment, but Claude can still
   read files on disk, including `.env` at the top of your checkout. For full
   isolation, run amf in a container or VM.
+- A pipeline's skills are instructions run the same way. Use skills you
+  control or have reviewed, at a tag, ideally pinned with `#sha256=`.
 
 ## Spec
 

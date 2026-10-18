@@ -9,7 +9,9 @@ as the code whenever that change alters something a user can observe:
 - a command, flag, default, output message or exit code
 - a configuration variable, or how `.env` is read or written
 - the issue lifecycle or the labels
-- any step of processing an issue: preflight, checkout, prompt, Claude's
+- the `## amf` pipeline table, a stage, an agent's command or how its final
+  message is read
+- any step of processing an issue: preflight, checkout, prompt, an agent's
   environment, commit, push, PR or failure handling
 - the files amf creates, or the security model
 

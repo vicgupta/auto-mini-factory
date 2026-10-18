@@ -12,10 +12,12 @@ import (
 
 // Config is everything amf needs to talk to GitHub and Claude Code.
 type Config struct {
-	Token  string // GITHUB_TOKEN
-	Repo   string // GITHUB_REPO, as owner/name
-	APIURL string // AMF_API_URL, defaults to https://api.github.com
-	Claude string // AMF_CLAUDE, path to the claude binary, defaults to "claude"
+	Token    string // GITHUB_TOKEN
+	Repo     string // GITHUB_REPO, as owner/name
+	APIURL   string // AMF_API_URL, defaults to https://api.github.com
+	Claude   string // AMF_CLAUDE, path to the claude binary, defaults to "claude"
+	Codex    string // AMF_CODEX, path to the codex binary, defaults to "codex"
+	Opencode string // AMF_OPENCODE, path to the opencode binary, defaults to "opencode"
 	// CloneURL is AMF_CLONE_URL, where to clone GITHUB_REPO from when amf
 	// isn't started inside a checkout. Defaults to https://github.com/<repo>.git.
 	CloneURL string
@@ -56,10 +58,12 @@ func loadConfig(paths ...string) (Config, error) {
 	}
 
 	cfg := Config{
-		Token:  get("GITHUB_TOKEN", ""),
-		Repo:   normalizeRepo(get("GITHUB_REPO", "")),
-		APIURL: strings.TrimSuffix(get("AMF_API_URL", "https://api.github.com"), "/"),
-		Claude: get("AMF_CLAUDE", "claude"),
+		Token:    get("GITHUB_TOKEN", ""),
+		Repo:     normalizeRepo(get("GITHUB_REPO", "")),
+		APIURL:   strings.TrimSuffix(get("AMF_API_URL", "https://api.github.com"), "/"),
+		Claude:   get("AMF_CLAUDE", "claude"),
+		Codex:    get("AMF_CODEX", "codex"),
+		Opencode: get("AMF_OPENCODE", "opencode"),
 
 		ClaudeToken: get("CLAUDE_CODE_OAUTH_TOKEN", ""),
 	}

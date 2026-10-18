@@ -7,8 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -36,14 +36,20 @@ var amfLabels = []LabelSpec{
 
 // Runner turns issues into pull requests from a local checkout of the repo.
 type Runner struct {
-	GH     *GitHub
-	Repo   string // owner/name, for the prompt
-	Root   string // top level of the local checkout
-	Claude string // claude binary
+	GH       *GitHub
+	Repo     string // owner/name, for the prompt
+	Root     string // top level of the local checkout
+	Claude   string // claude binary
+	Codex    string // codex binary, for pipelines
+	Opencode string // opencode binary, for pipelines
 	// ClaudeToken, when set, is passed to Claude as CLAUDE_CODE_OAUTH_TOKEN.
 	ClaudeToken string
-	Timeout     time.Duration
-	Log         io.Writer // progress output
+	Timeout     time.Duration // per agent run
+	// EvalRounds is how many times a pipeline's eval stage may send a change
+	// back to the code stage.
+	EvalRounds int
+	HTTP       *http.Client // for downloading skills; nil means a default client
+	Log        io.Writer    // progress output
 }
 
 func (r *Runner) logf(format string, a ...any) {
@@ -62,6 +68,17 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 	}
 	if issue.State != "open" {
 		return fmt.Errorf("#%d is %s", n, issue.State)
+	}
+
+	// Problems with the repo's pipeline or this machine are found before the
+	// issue is touched.
+	base, err := r.GH.DefaultBranch(ctx)
+	if err != nil {
+		return err
+	}
+	pipeline, err := r.loadPipeline(ctx, base)
+	if err != nil {
+		return err
 	}
 
 	r.logf("#%d: %s", n, issue.Title)
@@ -83,12 +100,16 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 			r.logf("#%d: could not set %s: %v", n, labelFailed, serr)
 		}
 		msg := fmt.Sprintf("amf could not turn this issue into a pull request:\n\n```\n%s\n```", err)
+		var se *stageError
+		if errors.As(err, &se) {
+			msg = se.comment
+		}
 		if cerr := r.GH.Comment(cctx, n, msg); cerr != nil {
 			r.logf("#%d: could not comment: %v", n, cerr)
 		}
 	}()
 
-	pr, err := r.process(ctx, issue)
+	pr, err := r.process(ctx, issue, base, pipeline)
 	if err != nil {
 		return err
 	}
@@ -100,12 +121,10 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 	return r.setStatus(ctx, n, labelDone)
 }
 
-func (r *Runner) process(ctx context.Context, issue Issue) (PullRequest, error) {
+// process turns the issue into a PR: with a single claude run, or with the
+// repo's pipeline when its AGENTS.md declares one.
+func (r *Runner) process(ctx context.Context, issue Issue, base string, p *Pipeline) (PullRequest, error) {
 	n := issue.Number
-	base, err := r.GH.DefaultBranch(ctx)
-	if err != nil {
-		return PullRequest{}, err
-	}
 	branch := fmt.Sprintf("amf/issue-%d", n)
 	wt := filepath.Join(r.Root, ".amf", "worktrees", fmt.Sprintf("issue-%d", n))
 
@@ -114,15 +133,24 @@ func (r *Runner) process(ctx context.Context, issue Issue) (PullRequest, error) 
 		return PullRequest{}, err
 	}
 
-	r.logf("#%d: running claude (timeout %s)", n, r.Timeout)
-	summary, err := r.runClaude(ctx, wt, issue, branch)
-	if err != nil {
-		return PullRequest{}, err
-	}
-
 	title := fmt.Sprintf("Fix #%d: %s", n, issue.Title)
-	if err := commitAll(ctx, wt, title, n, base); err != nil {
-		return PullRequest{}, err
+	var summary, extra string
+	if p == nil {
+		r.logf("#%d: running claude (timeout %s)", n, r.Timeout)
+		log := filepath.Join(r.Root, ".amf", "logs", fmt.Sprintf("issue-%d.log", n))
+		var err error
+		if summary, err = r.runAgent(ctx, agentClaude, "", wt, buildPrompt(r.Repo, branch, issue), log, ""); err != nil {
+			return PullRequest{}, err
+		}
+		if err := commitAll(ctx, wt, title, n, base); err != nil {
+			return PullRequest{}, err
+		}
+	} else {
+		r.logf("#%d: running the pipeline from AGENTS.md: %s", n, describePipeline(p))
+		var err error
+		if summary, extra, err = r.runPipeline(ctx, wt, issue, branch, base, p); err != nil {
+			return PullRequest{}, err
+		}
 	}
 
 	r.logf("#%d: pushing %s", n, branch)
@@ -134,6 +162,9 @@ func (r *Runner) process(ctx context.Context, issue Issue) (PullRequest, error) 
 	summary = cleanSummary(summary, n)
 	if summary == "" {
 		summary = fmt.Sprintf("Resolves #%d.", n)
+	}
+	if extra != "" {
+		summary += "\n\n" + extra
 	}
 	body := fmt.Sprintf("%s\n\nCloses #%d\n\n---\n_Opened by amf._", summary, n)
 	pr, err := r.GH.CreatePR(ctx, title, branch, base, body)
@@ -214,41 +245,6 @@ Instructions:
 - When you are done, reply with only a pull request description in Markdown:
   a short summary of what changed and why, and how you verified it.
 `, repo, branch, issue.Number, issue.Title, body)
-}
-
-// runClaude runs Claude Code headless in wt and returns its final message.
-// Output is saved to .amf/logs/issue-N.log.
-func (r *Runner) runClaude(ctx context.Context, wt string, issue Issue, branch string) (string, error) {
-	logPath := filepath.Join(r.Root, ".amf", "logs", fmt.Sprintf("issue-%d.log", issue.Number))
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
-		return "", err
-	}
-	logFile, err := os.Create(logPath)
-	if err != nil {
-		return "", err
-	}
-	defer logFile.Close()
-
-	ctx, cancel := context.WithTimeout(ctx, r.Timeout)
-	defer cancel()
-	// stream-json writes one JSON message per line as Claude works, so the log
-	// fills in live; it requires --verbose in print mode.
-	cmd := exec.CommandContext(ctx, r.Claude, "-p", "--dangerously-skip-permissions", "--output-format", "stream-json", "--verbose")
-	cmd.Dir = wt
-	cmd.Env = r.claudeEnv(os.Environ())
-	cmd.Stdin = strings.NewReader(buildPrompt(r.Repo, branch, issue))
-	var stdout bytes.Buffer
-	cmd.Stdout = io.MultiWriter(&stdout, logFile)
-	cmd.Stderr = logFile
-	cmd.WaitDelay = 10 * time.Second
-
-	if err := cmd.Run(); err != nil {
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return "", fmt.Errorf("claude timed out after %s (log: %s)", r.Timeout, logPath)
-		}
-		return "", fmt.Errorf("claude: %v (log: %s)", err, logPath)
-	}
-	return parseClaudeResult(stdout.Bytes())
 }
 
 // cleanSummary prepares Claude's summary for a PR body. It drops attribution

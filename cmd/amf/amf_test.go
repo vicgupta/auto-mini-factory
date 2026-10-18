@@ -724,7 +724,7 @@ func TestNewRunnerClonesOutsideCheckout(t *testing.T) {
 	ctx := context.Background()
 
 	var log bytes.Buffer
-	r, err := newRunner(ctx, time.Minute, &log)
+	r, err := newRunner(ctx, time.Minute, 2, &log)
 	if err != nil {
 		t.Fatalf("newRunner: %v\n%s", err, log.String())
 	}
@@ -740,7 +740,7 @@ func TestNewRunnerClonesOutsideCheckout(t *testing.T) {
 
 	// The next run reuses the clone.
 	log.Reset()
-	if _, err := newRunner(ctx, time.Minute, &log); err != nil {
+	if _, err := newRunner(ctx, time.Minute, 2, &log); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(log.String(), "using the clone at") {
@@ -750,7 +750,7 @@ func TestNewRunnerClonesOutsideCheckout(t *testing.T) {
 	// A folder with the repo's name that isn't its clone is left alone.
 	t.Chdir(t.TempDir())
 	os.Mkdir("demo", 0o755)
-	if _, err := newRunner(ctx, time.Minute, io.Discard); err == nil || !strings.Contains(err.Error(), "is not a clone of vic/demo") {
+	if _, err := newRunner(ctx, time.Minute, 2, io.Discard); err == nil || !strings.Contains(err.Error(), "is not a clone of vic/demo") {
 		t.Fatalf("expected not-a-clone error, got %v", err)
 	}
 }
@@ -761,7 +761,7 @@ func TestNewRunnerUnknownRepo(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "test-token")
 	t.Setenv("GITHUB_REPO", "vicc/demo")
 	t.Setenv("AMF_API_URL", srv.URL)
-	_, err := newRunner(context.Background(), time.Minute, io.Discard)
+	_, err := newRunner(context.Background(), time.Minute, 2, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "GITHUB_REPO vicc/demo was not found") {
 		t.Fatalf("expected not-found error, got %v", err)
 	}
@@ -771,7 +771,7 @@ func TestNewRunnerUnknownRepo(t *testing.T) {
 
 	t.Setenv("GITHUB_TOKEN", "wrong-token")
 	t.Setenv("GITHUB_REPO", "vic/demo")
-	if _, err := newRunner(context.Background(), time.Minute, io.Discard); err == nil || !strings.Contains(err.Error(), "rejected GITHUB_TOKEN") {
+	if _, err := newRunner(context.Background(), time.Minute, 2, io.Discard); err == nil || !strings.Contains(err.Error(), "rejected GITHUB_TOKEN") {
 		t.Fatalf("expected bad-token error, got %v", err)
 	}
 }

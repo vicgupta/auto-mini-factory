@@ -39,8 +39,9 @@ Usage:
   amf init                                                        write .env (backing up an existing one) and create amf's labels
   amf issue "Title" [-b body | -f file.md] [--no-label]           create an issue (body may also come from stdin)
   amf list [--state open|closed|all] [--label L]                  list issues, newest first, with their amf labels
-  amf run <issue-number> [--timeout 30m]                          process one issue into a PR
-  amf watch [--interval 60s] [--label amf:ready] [--timeout 30m]  process amf:ready issues as they arrive
+  amf run <issue-number> [--timeout 30m] [--eval-rounds 2]        process one issue into a PR
+  amf watch [--interval 60s] [--label amf:ready] [--timeout 30m]  process amf:ready issues as they arrive (also takes --eval-rounds)
+  amf pipeline [--fetch]                                          check the plan/code/eval pipeline in this checkout's AGENTS.md
   amf update [--version vX.Y.Z] [--check]                         replace this amf binary with the latest (or given) release
   amf version
 
@@ -49,11 +50,17 @@ Configuration is read from .env (or the environment):
   GITHUB_REPO    owner/name
   CLAUDE_CODE_OAUTH_TOKEN  optional subscription token for Claude Code (claude setup-token)
   AMF_CLAUDE     path to the claude binary (default "claude")
+  AMF_CODEX      path to the codex binary (default "codex"), for pipelines
+  AMF_OPENCODE   path to the opencode binary (default "opencode"), for pipelines
   AMF_API_URL    GitHub API base URL (default https://api.github.com)
   AMF_CLONE_URL  URL to clone GITHUB_REPO from (default https://github.com/GITHUB_REPO.git)
 
 run and watch work in the enclosing git checkout. Started anywhere else, they
 clone GITHUB_REPO into ./<name> (or reuse that clone) and work there.
+
+A repo can declare a pipeline in its AGENTS.md: a table under "## amf" with a
+plan, code and eval stage, each naming a skill URL, an agent (claudecode,
+codex or opencode) and a model. See SPECS.md.
 `
 
 var errUsage = errors.New("usage")
@@ -87,6 +94,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return cmdRun(ctx, rest, stderr)
 	case "watch":
 		return cmdWatch(ctx, rest, stderr)
+	case "pipeline":
+		return cmdPipeline(ctx, rest, stdout, stderr)
 	case "update":
 		return cmdUpdate(ctx, rest, stdout, stderr)
 	case "version", "--version":
@@ -153,20 +162,21 @@ func cmdIssue(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 func cmdRun(ctx context.Context, args []string, stderr io.Writer) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	timeout := fs.Duration("timeout", 30*time.Minute, "maximum time Claude may spend on the issue")
+	timeout := fs.Duration("timeout", 30*time.Minute, "maximum time each agent run may take")
+	evalRounds := fs.Int("eval-rounds", 2, "how many times a pipeline's eval stage may send the change back to code")
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return errUsage
 	}
 	if len(pos) != 1 {
-		fmt.Fprintln(stderr, "usage: amf run <issue-number> [--timeout 30m]")
+		fmt.Fprintln(stderr, "usage: amf run <issue-number> [--timeout 30m] [--eval-rounds 2]")
 		return errUsage
 	}
 	n, err := strconv.Atoi(strings.TrimPrefix(pos[0], "#"))
 	if err != nil || n <= 0 {
 		return fmt.Errorf("invalid issue number %q", pos[0])
 	}
-	r, err := newRunner(ctx, *timeout, stderr)
+	r, err := newRunner(ctx, *timeout, *evalRounds, stderr)
 	if err != nil {
 		return err
 	}
@@ -178,23 +188,27 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 	fs.SetOutput(stderr)
 	interval := fs.Duration("interval", 60*time.Second, "how often to poll GitHub")
 	label := fs.String("label", labelReady, "process open issues with this label")
-	timeout := fs.Duration("timeout", 30*time.Minute, "maximum time Claude may spend per issue")
+	timeout := fs.Duration("timeout", 30*time.Minute, "maximum time each agent run may take")
+	evalRounds := fs.Int("eval-rounds", 2, "how many times a pipeline's eval stage may send the change back to code")
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return errUsage
 	}
 	if len(pos) != 0 {
-		fmt.Fprintln(stderr, "usage: amf watch [--interval 60s] [--label amf:ready] [--timeout 30m]")
+		fmt.Fprintln(stderr, "usage: amf watch [--interval 60s] [--label amf:ready] [--timeout 30m] [--eval-rounds 2]")
 		return errUsage
 	}
-	r, err := newRunner(ctx, *timeout, stderr)
+	r, err := newRunner(ctx, *timeout, *evalRounds, stderr)
 	if err != nil {
 		return err
 	}
 	return r.Watch(ctx, *label, *interval)
 }
 
-func newRunner(ctx context.Context, timeout time.Duration, log io.Writer) (*Runner, error) {
+func newRunner(ctx context.Context, timeout time.Duration, evalRounds int, log io.Writer) (*Runner, error) {
+	if evalRounds < 0 {
+		return nil, errors.New("--eval-rounds can't be negative")
+	}
 	cfg, err := loadConfig(envPaths(ctx)...)
 	if err != nil {
 		return nil, err
@@ -220,8 +234,11 @@ func newRunner(ctx context.Context, timeout time.Duration, log io.Writer) (*Runn
 		Repo:        cfg.Repo,
 		Root:        root,
 		Claude:      cfg.Claude,
+		Codex:       cfg.Codex,
+		Opencode:    cfg.Opencode,
 		ClaudeToken: cfg.ClaudeToken,
 		Timeout:     timeout,
+		EvalRounds:  evalRounds,
 		Log:         log,
 	}, nil
 }
