@@ -27,14 +27,32 @@ Needs `git` and the [`claude`](https://claude.com/claude-code) CLI on `PATH`.
 
 ## Configure
 
-amf reads `.env` in the current directory, then at the top of the enclosing
-git checkout. Real environment variables win over the file.
+In a clone of the repo you want amf to work on, run:
+
+```sh
+amf init
+```
+
+This writes `.env` with every variable amf uses:
 
 ```sh
 GITHUB_TOKEN=github_pat_...   # Contents, Issues, Pull requests: read & write
 GITHUB_REPO=owner/name
-CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...   # optional, see below
+CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...   # optional: Claude subscription token from `claude setup-token`
 ```
+
+Edit it and replace the placeholders. Placeholders ending in `...` count as
+unset, so you can leave the optional `CLAUDE_CODE_OAUTH_TOKEN` as it is.
+
+- **Backups:** if `.env` already exists, `amf init` first copies it to the next
+  free `.env.0001`, `.env.0002`, and so on, then keeps its real values in the
+  new file, including any extra variables.
+- **Repo:** `GITHUB_REPO` is filled in from the checkout's GitHub `origin`.
+- **Git:** `.env` and `.env.NNNN` are added to `.git/info/exclude`, so the
+  tokens never show up in `git status`.
+
+amf reads `.env` in the current directory, then at the top of the enclosing
+git checkout. Real environment variables win over the file.
 
 `CLAUDE_CODE_OAUTH_TOKEN` lets Claude run on your Pro/Max subscription, which
 helps on servers or in CI where you can't log in interactively. Generate one with

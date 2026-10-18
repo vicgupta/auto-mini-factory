@@ -41,11 +41,12 @@ func loadConfig(paths ...string) (Config, error) {
 		}
 		break
 	}
+	// Unfilled placeholders from `amf init` count as unset.
 	get := func(key, def string) string {
-		if v := os.Getenv(key); v != "" {
+		if v := os.Getenv(key); v != "" && !isPlaceholder(v) {
 			return v
 		}
-		if v := file[key]; v != "" {
+		if v := file[key]; v != "" && !isPlaceholder(v) {
 			return v
 		}
 		return def
@@ -60,10 +61,10 @@ func loadConfig(paths ...string) (Config, error) {
 		ClaudeToken: get("CLAUDE_CODE_OAUTH_TOKEN", ""),
 	}
 	if cfg.Token == "" {
-		return cfg, errors.New("GITHUB_TOKEN is not set (add it to .env)")
+		return cfg, errors.New("GITHUB_TOKEN is not set (run amf init, then edit .env)")
 	}
 	if cfg.Repo == "" {
-		return cfg, errors.New("GITHUB_REPO is not set (add GITHUB_REPO=owner/name to .env)")
+		return cfg, errors.New("GITHUB_REPO is not set (run amf init, then edit .env)")
 	}
 	if owner, name, ok := strings.Cut(cfg.Repo, "/"); !ok || owner == "" || name == "" || strings.Contains(name, "/") {
 		return cfg, fmt.Errorf("GITHUB_REPO must look like owner/name, got %q", cfg.Repo)

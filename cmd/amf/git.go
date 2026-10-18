@@ -26,9 +26,10 @@ func git(ctx context.Context, dir string, args ...string) (string, error) {
 	return strings.TrimSpace(stdout.String()), nil
 }
 
-// excludeAMFDir keeps amf's working directory out of `git status` without
-// touching the repository's tracked .gitignore.
-func excludeAMFDir(ctx context.Context, root string) error {
+// excludeFromGit adds patterns to .git/info/exclude, so they stay out of
+// `git status` without touching the repository's tracked .gitignore.
+// Patterns already listed are skipped.
+func excludeFromGit(ctx context.Context, root, comment string, patterns ...string) error {
 	common, err := git(ctx, root, "rev-parse", "--git-common-dir")
 	if err != nil {
 		return err
@@ -41,10 +42,18 @@ func excludeAMFDir(ctx context.Context, root string) error {
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
+	have := map[string]bool{}
 	for _, line := range strings.Split(string(existing), "\n") {
-		if strings.TrimSpace(line) == "/.amf/" {
-			return nil
+		have[strings.TrimSpace(line)] = true
+	}
+	var add []string
+	for _, p := range patterns {
+		if !have[p] {
+			add = append(add, p)
 		}
+	}
+	if len(add) == 0 {
+		return nil
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
@@ -58,6 +67,6 @@ func excludeAMFDir(ctx context.Context, root string) error {
 	if len(existing) > 0 && !bytes.HasSuffix(existing, []byte("\n")) {
 		prefix = "\n"
 	}
-	_, err = fmt.Fprintf(f, "%s# amf worktrees and logs\n/.amf/\n", prefix)
+	_, err = fmt.Fprintf(f, "%s# %s\n%s\n", prefix, comment, strings.Join(add, "\n"))
 	return err
 }

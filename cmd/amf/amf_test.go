@@ -483,7 +483,7 @@ func TestExcludeAMFDir(t *testing.T) {
 	root, _ := setupRepo(t)
 	ctx := context.Background()
 	for range 2 {
-		if err := excludeAMFDir(ctx, root); err != nil {
+		if err := excludeFromGit(ctx, root, "amf worktrees and logs", "/.amf/"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -504,4 +504,107 @@ func TestMain(m *testing.M) {
 		return
 	}
 	os.Exit(m.Run())
+}
+
+func TestInitWritesTemplate(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	var out bytes.Buffer
+	if err := run(context.Background(), []string{"init"}, nil, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(".env")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"GITHUB_TOKEN=github_pat_...   # Contents, Issues, Pull requests: read & write\n",
+		"GITHUB_REPO=owner/name\n",
+		"CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...",
+	} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf(".env missing %q:\n%s", want, b)
+		}
+	}
+	if st, _ := os.Stat(".env"); st.Mode().Perm() != 0o600 {
+		t.Errorf(".env mode = %v, want 0600", st.Mode().Perm())
+	}
+	if m, _ := filepath.Glob(".env.*"); len(m) != 0 {
+		t.Errorf("no backup expected without an existing .env, got %v", m)
+	}
+	if !strings.Contains(out.String(), "fill in GITHUB_TOKEN, GITHUB_REPO, CLAUDE_CODE_OAUTH_TOKEN") {
+		t.Errorf("output = %q", out.String())
+	}
+
+	// Placeholders count as unset.
+	for _, k := range []string{"GITHUB_TOKEN", "GITHUB_REPO", "CLAUDE_CODE_OAUTH_TOKEN"} {
+		t.Setenv(k, "")
+	}
+	if _, err := loadConfig(".env"); err == nil || !strings.Contains(err.Error(), "GITHUB_TOKEN is not set") {
+		t.Fatalf("loadConfig with placeholders: %v", err)
+	}
+	os.WriteFile(".env", []byte("GITHUB_TOKEN=real\nGITHUB_REPO=vic/demo\nCLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...\n"), 0o600)
+	cfg, err := loadConfig(".env")
+	if err != nil || cfg.ClaudeToken != "" {
+		t.Fatalf("placeholder OAuth token should be ignored: %+v, %v", cfg, err)
+	}
+}
+
+func TestInitBacksUpAndKeepsValues(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	orig := "GITHUB_TOKEN=ghp_real\nAMF_CLAUDE=/opt/my claude\nGITHUB_REPO=owner/name\n"
+	os.WriteFile(".env", []byte(orig), 0o600)
+
+	var out bytes.Buffer
+	if err := run(context.Background(), []string{"init"}, nil, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(".env.0001"); string(b) != orig {
+		t.Fatalf(".env.0001 = %q, want the original .env", b)
+	}
+	if !strings.Contains(out.String(), "backed up .env to .env.0001") {
+		t.Errorf("output = %q", out.String())
+	}
+	vars, err := parseDotEnv(strings.NewReader(mustRead(t, ".env")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if vars["GITHUB_TOKEN"] != "ghp_real" || vars["AMF_CLAUDE"] != "/opt/my claude" || vars["GITHUB_REPO"] != "owner/name" {
+		t.Fatalf("new .env lost values: %v", vars)
+	}
+
+	// Each run takes the next number, even after a gap.
+	os.WriteFile(".env.0007", []byte("old"), 0o600)
+	if err := run(context.Background(), []string{"init"}, nil, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(".env.0008"); err != nil {
+		t.Fatalf("expected .env.0008: %v", err)
+	}
+}
+
+func TestInitInRepoFillsRepoAndExcludes(t *testing.T) {
+	root, _ := setupRepo(t)
+	mustGit(t, root, "remote", "set-url", "origin", "git@github.com:vic/demo.git")
+	t.Chdir(root)
+	if err := run(context.Background(), []string{"init"}, nil, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(mustRead(t, ".env"), "GITHUB_REPO=vic/demo\n") {
+		t.Fatalf("GITHUB_REPO not taken from origin:\n%s", mustRead(t, ".env"))
+	}
+	run(context.Background(), []string{"init"}, nil, io.Discard, io.Discard) // creates .env.0001
+	if st := mustGit(t, root, "status", "--porcelain"); st != "" {
+		t.Fatalf(".env and backups should be ignored, status = %q", st)
+	}
+}
+
+func mustRead(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
 }

@@ -36,6 +36,7 @@ func buildVersion() string {
 const usage = `amf turns GitHub issues into pull requests with Claude Code.
 
 Usage:
+  amf init                                                 write .env with every variable amf uses (backs up an existing one)
   amf issue "Title" [-b body | -f file.md] [--no-label]   create an issue (body may also come from stdin)
   amf run <issue-number> [--timeout 30m]                   process one issue into a PR
   amf watch [--interval 60s] [--label amf] [--timeout 30m] process labeled issues as they arrive
@@ -72,6 +73,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return errUsage
 	}
 	switch cmd, rest := args[0], args[1:]; cmd {
+	case "init":
+		return cmdInit(ctx, rest, stdout, stderr)
 	case "issue":
 		return cmdIssue(ctx, rest, stdin, stdout, stderr)
 	case "run":
@@ -197,7 +200,7 @@ func newRunner(ctx context.Context, timeout time.Duration, log io.Writer) (*Runn
 	} else if !strings.EqualFold(normalizeRepo(strings.TrimPrefix(origin, "ssh://git@github.com/")), cfg.Repo) {
 		fmt.Fprintf(log, "amf: warning: origin is %s but GITHUB_REPO is %s\n", origin, cfg.Repo)
 	}
-	if err := excludeAMFDir(ctx, root); err != nil {
+	if err := excludeFromGit(ctx, root, "amf worktrees and logs", "/.amf/"); err != nil {
 		return nil, err
 	}
 	return &Runner{
