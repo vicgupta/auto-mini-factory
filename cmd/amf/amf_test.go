@@ -49,6 +49,28 @@ EMPTY=
 	}
 }
 
+func TestQuoteEnv(t *testing.T) {
+	for _, v := range []string{
+		"",
+		"plain",
+		"/opt/my claude",
+		"tab\there",
+		"a#b",
+		"x # note",
+		`say "hi"`,
+		"it's",
+		`both "double" and 'single'`,
+	} {
+		got, err := parseDotEnv(strings.NewReader("K=" + quoteEnv(v)))
+		if err != nil {
+			t.Fatalf("quoteEnv(%q): %v", v, err)
+		}
+		if got["K"] != v {
+			t.Errorf("quoteEnv(%q) = %q, parsed back as %q", v, quoteEnv(v), got["K"])
+		}
+	}
+}
+
 func TestLoadConfig(t *testing.T) {
 	dir := t.TempDir()
 	env := filepath.Join(dir, ".env")
