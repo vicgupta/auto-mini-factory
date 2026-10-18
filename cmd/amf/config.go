@@ -95,6 +95,9 @@ func parseDotEnv(r io.Reader) (map[string]string, error) {
 	sc := bufio.NewScanner(r)
 	for line := 1; sc.Scan(); line++ {
 		s := strings.TrimSpace(sc.Text())
+		if line == 1 {
+			s = strings.TrimPrefix(s, "\ufeff") // a byte order mark, from some Windows editors
+		}
 		if s == "" || s[0] == '#' {
 			continue
 		}

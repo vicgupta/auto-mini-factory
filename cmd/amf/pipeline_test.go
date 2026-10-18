@@ -176,9 +176,9 @@ esac
 	// The eval stage, as opencode: it fails round 1, passes round 2, and its
 	// stray file must not survive.
 	fakeEvalOpencode = `
-[ "$1" = run ] && [ "$2" = --model ] && [ "$3" = opencode/test ] || { echo "bad args: $*" >&2; exit 5; }
+[ "$#" = 3 ] && [ "$1" = run ] && [ "$2" = --model ] && [ "$3" = opencode/test ] || { echo "bad args: $*" >&2; exit 5; }
 [ -f "$OPENCODE_CONFIG" ] || { echo "no OPENCODE_CONFIG" >&2; exit 6; }
-prompt=$4
+prompt=$(cat)
 case "$prompt" in *"eval stage"*"+hello"*"EVAL-SKILL"*) ;; *) echo "bad eval prompt: $prompt" >&2; exit 4;; esac
 out=$(printf '%s\n' "$prompt" | sed -n 's/.*final reply, exactly as you give it, to the file \(.*\)\.$/\1/p')
 echo scratch > eval-scratch.txt
@@ -261,7 +261,7 @@ func TestPipelineFailsWhenEvalNeverPasses(t *testing.T) {
 	gh.issues[1] = &Issue{Number: 1, Title: "Add feature file", State: "open", Labels: []Label{{Name: "amf:ready"}}}
 	r, log := newPipelineRunner(t, srv, skills, root)
 	r.Opencode = fakeAgent(t, "opencode", `
-out=$(printf '%s\n' "$4" | sed -n 's/.*final reply, exactly as you give it, to the file \(.*\)\.$/\1/p')
+out=$(cat | sed -n 's/.*final reply, exactly as you give it, to the file \(.*\)\.$/\1/p')
 printf -- '- **blocking** still wrong\n\nVERDICT: FAIL\n' > "$out"
 `)
 	r.EvalRounds = 1

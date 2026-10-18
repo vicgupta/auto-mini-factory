@@ -308,9 +308,45 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
 		decode(t, r, &in)
 		f.mu.Lock()
 		defer f.mu.Unlock()
+		// Like GitHub, refuse a second open PR from the same branch.
+		for _, pr := range f.prs {
+			if pr["head"] == in["head"] && pr["state"] == "open" {
+				writeJSON(w, 422, map[string]any{"message": "Validation Failed", "errors": []map[string]string{{"message": "A pull request already exists for vic:" + in["head"] + "."}}})
+				return
+			}
+		}
+		in["state"] = "open"
 		f.prs = append(f.prs, in)
 		n := 100 + len(f.prs)
 		writeJSON(w, 201, PullRequest{Number: n, HTMLURL: fmt.Sprintf("https://github.com/vic/demo/pull/%d", n)})
+	})
+	mux.HandleFunc("GET "+repo+"/pulls", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		out := []PullRequest{}
+		for i, pr := range f.prs {
+			if "vic:"+pr["head"] == q.Get("head") && (q.Get("state") == "all" || pr["state"] == q.Get("state")) {
+				n := 101 + i
+				out = append(out, PullRequest{Number: n, HTMLURL: fmt.Sprintf("https://github.com/vic/demo/pull/%d", n)})
+			}
+		}
+		writeJSON(w, 200, out)
+	})
+	mux.HandleFunc("PATCH "+repo+"/pulls/{n}", func(w http.ResponseWriter, r *http.Request) {
+		var in map[string]string
+		decode(t, r, &in)
+		n, _ := strconv.Atoi(r.PathValue("n"))
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if n < 101 || n > 100+len(f.prs) {
+			writeJSON(w, 404, map[string]string{"message": "Not Found"})
+			return
+		}
+		for k, v := range in {
+			f.prs[n-101][k] = v
+		}
+		writeJSON(w, 200, PullRequest{Number: n, HTMLURL: fmt.Sprintf("https://github.com/vic/demo/pull/%d", n)})
 	})
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -596,7 +632,7 @@ func TestExcludeAMFDir(t *testing.T) {
 }
 
 func TestMain(m *testing.M) {
-	for _, k := range []string{"GITHUB_TOKEN", "GITHUB_REPO", "CLAUDE_CODE_OAUTH_TOKEN", "AMF_API_URL", "AMF_CLONE_URL", "AMF_CLAUDE"} {
+	for _, k := range []string{"GITHUB_TOKEN", "GITHUB_REPO", "CLAUDE_CODE_OAUTH_TOKEN", "AMF_API_URL", "AMF_CLONE_URL", "AMF_CLAUDE", "AMF_CODEX", "AMF_OPENCODE", "AMF_RELEASES_URL"} {
 		os.Unsetenv(k)
 	}
 	os.Setenv("AMF_API_URL", "http://127.0.0.1:1") // unreachable unless a test sets a fake

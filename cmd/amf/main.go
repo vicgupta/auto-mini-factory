@@ -198,6 +198,9 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 		fmt.Fprintln(stderr, "usage: amf watch [--interval 60s] [--label amf:ready] [--timeout 30m] [--eval-rounds 2]")
 		return errUsage
 	}
+	if *interval <= 0 {
+		return errors.New("--interval must be positive")
+	}
 	r, err := newRunner(ctx, *timeout, *evalRounds, stderr)
 	if err != nil {
 		return err
@@ -206,6 +209,9 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 }
 
 func newRunner(ctx context.Context, timeout time.Duration, evalRounds int, log io.Writer) (*Runner, error) {
+	if timeout <= 0 {
+		return nil, errors.New("--timeout must be positive")
+	}
 	if evalRounds < 0 {
 		return nil, errors.New("--eval-rounds can't be negative")
 	}

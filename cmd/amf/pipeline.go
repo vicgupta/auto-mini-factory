@@ -73,10 +73,21 @@ var amfHeading = regexp.MustCompile(`(?i)^##\s+amf\s*$`)
 // returns nil when there is no such section.
 func parsePipeline(md string) (*Pipeline, error) {
 	var rows [][]string
-	in, found := false, false
+	in, found, fenced := false, false, false
 	sc := bufio.NewScanner(strings.NewReader(md))
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
+		// Fenced code blocks hold examples, not the pipeline.
+		if strings.HasPrefix(line, "```") || strings.HasPrefix(line, "~~~") {
+			fenced = !fenced
+			if in && len(rows) > 0 {
+				break
+			}
+			continue
+		}
+		if fenced {
+			continue
+		}
 		switch {
 		case amfHeading.MatchString(line):
 			in, found = true, true
@@ -199,6 +210,9 @@ func skillURL(raw string) (fetch, pin string, err error) {
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme != "https" || u.Host == "" {
 		return "", "", fmt.Errorf("skill %q is not an https URL", raw)
+	}
+	if u.User != nil {
+		return "", "", fmt.Errorf("skill %q must not contain credentials", u.Redacted())
 	}
 	if u.Fragment != "" {
 		pin, ok := strings.CutPrefix(u.Fragment, "sha256=")
@@ -343,9 +357,9 @@ func (r *Runner) runPipeline(ctx context.Context, wt string, issue Issue, branch
 		if err := os.WriteFile(filepath.Join(runDir, "plan.md"), []byte(plan+"\n"), 0o644); err != nil {
 			return "", "", err
 		}
-		if first, _, _ := strings.Cut(plan, "\n"); strings.HasPrefix(strings.TrimSpace(first), "BLOCKED:") {
+		if first, ok := blocked(plan); ok {
 			return "", "", &stageError{
-				msg: fmt.Sprintf("the plan stage needs answers first: %s", strings.TrimSpace(first)),
+				msg: fmt.Sprintf("the plan stage needs answers first: %s", first),
 				comment: fmt.Sprintf("amf's plan stage (%s, %s) needs answers before it can work on this issue. "+
 					"Edit the issue to answer them, then add the `%s` label to retry.\n\n%s", p.Plan.Agent, p.Plan.model(), labelReady, plan),
 			}
@@ -394,15 +408,16 @@ func (r *Runner) runPipeline(ctx context.Context, wt string, issue Issue, branch
 			break
 		}
 		if k > r.EvalRounds {
-			r.logf("#%d: eval still failing after %d code rounds; pushing %s for inspection", n, k, branch)
+			tried := fmt.Sprintf("%d code %s", k, plural(k, "round", "rounds"))
+			r.logf("#%d: eval still failing after %s; pushing %s for inspection", n, tried, branch)
 			if _, err := git(ctx, wt, "push", "--force", "-u", "origin", branch); err != nil {
 				return "", "", err
 			}
 			return "", "", &stageError{
-				msg: fmt.Sprintf("the eval stage still found problems after %d code rounds; the last attempt is on %s", k, branch),
-				comment: fmt.Sprintf("amf's eval stage (%s, %s) still found problems after %d code rounds, so no pull request was opened. "+
+				msg: fmt.Sprintf("the eval stage still found problems after %s; the last attempt is on %s", tried, branch),
+				comment: fmt.Sprintf("amf's eval stage (%s, %s) still found problems after %s, so no pull request was opened. "+
 					"The last attempt is on the branch `%s`.\n\nTo retry, edit the issue if needed and add the `%s` label.\n\n"+
-					"<details><summary>Last review</summary>\n\n%s\n\n</details>", p.Eval.Agent, p.Eval.model(), k, branch, labelReady, review),
+					"<details><summary>Last review</summary>\n\n%s\n\n</details>", p.Eval.Agent, p.Eval.model(), tried, branch, labelReady, review),
 			}
 		}
 		r.logf("#%d: eval found problems; starting code round %d", n, k+1)
@@ -428,6 +443,15 @@ func (r *Runner) runPipeline(ctx context.Context, wt string, issue Issue, branch
 	return summary, extra, nil
 }
 
+// blocked reports whether a plan starts with "BLOCKED:", ignoring case and
+// Markdown emphasis, and returns its first line.
+func blocked(plan string) (string, bool) {
+	first, _, _ := strings.Cut(plan, "\n")
+	first = strings.TrimSpace(first)
+	t := strings.TrimLeft(first, "*_`#> ")
+	return first, len(t) >= 8 && strings.EqualFold(t[:8], "blocked:")
+}
+
 // runReadOnly runs a stage that must not change the branch, then discards
 // whatever it changed anyway.
 func (r *Runner) runReadOnly(ctx context.Context, s *Stage, n int, name, wt, prompt string) (string, error) {
@@ -451,8 +475,8 @@ func (r *Runner) runStage(ctx context.Context, s *Stage, n int, name, wt, prompt
 	return r.runAgent(ctx, s.Agent, s.Model, wt, prompt, log, filepath.Join(wt, ".amf", name+".md"))
 }
 
-// commitRound commits a code round and fails if the branch still has
-// nothing new relative to base.
+// commitRound commits a code round and fails if the branch still doesn't
+// change anything relative to base.
 func commitRound(ctx context.Context, wt string, k int, base string, s *Stage) error {
 	if _, err := git(ctx, wt, "add", "-A"); err != nil {
 		return err
@@ -466,11 +490,11 @@ func commitRound(ctx context.Context, wt string, k int, base string, s *Stage) e
 			return err
 		}
 	}
-	ahead, err := git(ctx, wt, "rev-list", "--count", "origin/"+base+"..HEAD")
+	changed, err := git(ctx, wt, "diff", "--name-only", "origin/"+base, "HEAD")
 	if err != nil {
 		return err
 	}
-	if ahead == "0" {
+	if changed == "" {
 		return fmt.Errorf("the code stage (%s) finished without making any changes", s.Agent)
 	}
 	return nil
@@ -515,8 +539,11 @@ func (r *Runner) runAgent(ctx context.Context, agent, model, wt, prompt, logPath
 		if model != "" {
 			args = append(args, "--model", model)
 		}
+		// The prompt goes on stdin: as an argument, a long one (with a big
+		// diff or skill) would exceed Linux's 128 KB limit per argument.
 		prompt += fmt.Sprintf("\nWhen you are done, also write your final reply, exactly as you give it, to the file %s.\n", outPath)
-		cmd = exec.CommandContext(ctx, r.Opencode, append(args, prompt)...)
+		cmd = exec.CommandContext(ctx, r.Opencode, args...)
+		cmd.Stdin = strings.NewReader(prompt)
 		cmd.Env = append(r.agentEnv(os.Environ(), agent, wt), "OPENCODE_CONFIG="+cfg)
 	default:
 		// stream-json writes one JSON message per line as Claude works, so the
@@ -598,7 +625,7 @@ var verdictLine = regexp.MustCompile(`(?i)^verdict:\s*(pass|fail)\.?$`)
 // false when there isn't one.
 func parseVerdict(out string) (pass, ok bool) {
 	lines := strings.Split(strings.TrimSpace(out), "\n")
-	last := strings.Trim(strings.TrimSpace(lines[len(lines)-1]), "*_` ")
+	last := strings.Trim(strings.TrimSpace(lines[len(lines)-1]), "*_`#> ")
 	m := verdictLine.FindStringSubmatch(last)
 	if m == nil {
 		return false, false
@@ -690,7 +717,8 @@ func evalPrompt(repo, branch, base string, issue Issue, s *Stage, plan, summary,
 	fmt.Fprintf(&b, "\nThe author's description of the change:\n\n<description>\n%s\n</description>\n", strings.TrimSpace(summary))
 	note := ""
 	if len(diff) > maxDiffSize {
-		diff, note = diff[:maxDiffSize], " It is cut short here; run the git diff command to see the rest."
+		// Drop a character split by the cut.
+		diff, note = strings.ToValidUTF8(diff[:maxDiffSize], ""), " It is cut short here; run the git diff command to see the rest."
 	}
 	fmt.Fprintf(&b, "\nThe change, as `git diff origin/%s HEAD`.%s\n\n<diff>\n%s\n</diff>\n", base, note, diff)
 	b.WriteString(`

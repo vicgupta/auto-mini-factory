@@ -249,3 +249,24 @@ func (g *GitHub) CreatePR(ctx context.Context, title, head, base, body string) (
 	err := g.do(ctx, "POST", g.repoPath("/pulls"), in, &pr)
 	return pr, err
 }
+
+// OpenPR finds the open pull request from head, a branch in this repository.
+func (g *GitHub) OpenPR(ctx context.Context, head string) (pr PullRequest, ok bool, err error) {
+	owner, _, _ := strings.Cut(g.repo, "/")
+	q := url.Values{"head": {owner + ":" + head}, "state": {"open"}}
+	var prs []PullRequest
+	if err := g.do(ctx, "GET", g.repoPath("/pulls?%s", q.Encode()), nil, &prs); err != nil {
+		return PullRequest{}, false, err
+	}
+	if len(prs) == 0 {
+		return PullRequest{}, false, nil
+	}
+	return prs[0], true, nil
+}
+
+// UpdatePR replaces a pull request's title and body.
+func (g *GitHub) UpdatePR(ctx context.Context, n int, title, body string) (PullRequest, error) {
+	var pr PullRequest
+	err := g.do(ctx, "PATCH", g.repoPath("/pulls/%d", n), map[string]any{"title": title, "body": body}, &pr)
+	return pr, err
+}

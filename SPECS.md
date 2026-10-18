@@ -36,7 +36,8 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened)
 | `amf update [--version vX.Y.Z] [--check]` | Replaces the running binary with the latest release, or with the given one, which can be a downgrade. Needs no `.env`. See below. |
 | `amf version` | Prints the version: the release tag, or the module version for `go install`. |
 
-- `--timeout` limits each agent run, not the whole issue.
+- `--timeout` limits each agent run, not the whole issue. It and `--interval`
+  must be positive.
 - `--eval-rounds` is how many times a pipeline's eval stage may send the
   change back to the code stage. A negative value is an error.
 
@@ -79,7 +80,9 @@ SIGTERM cancel the current step; the issue is still marked failed.
 
 amf reads `./.env`, then `.env` at the top of the git checkout. Environment
 variables override the file. Values ending in `...`, and `owner/name`, are
-placeholders and count as unset.
+placeholders and count as unset. The file has `KEY=value` lines, optionally
+prefixed with `export ` and quoted; `#` starts a comment line or, after a
+space, a trailing comment. A leading byte order mark is ignored.
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -108,14 +111,15 @@ A repo declares a pipeline with a table under an `## amf` heading in
 ```
 
 - **Table:** the first table between `## amf` (any case) and the next
-  heading. Columns are matched by name, ignoring case and order. `Stage` and
+  heading. Fenced code blocks are skipped, so the file can show examples. Columns are matched by name, ignoring case and order. `Stage` and
   `Agent` are required; `Skill` and `Model` are optional. A cell may wrap
   its value in backticks, `<…>` or a `[text](url)` link.
 - **Stage:** `plan`, `code` or `eval`, each at most once. `code` is
   required. Without `plan` there is no plan. Without `eval` the first code
   round goes straight to the PR.
 - **Skill:** an `https://` URL of one `SKILL.md`, or `-` or empty for none.
-  `#sha256=<64 hex digits>` pins its content; no other fragment is allowed.
+  `#sha256=<64 hex digits>` pins its content; no other fragment is allowed,
+  and neither is a username or password in the URL.
 - **Agent:** `claudecode`, `codex` or `opencode`.
 - **Model:** passed to the agent. `default`, `-` or empty means the agent's
   own default.
@@ -136,7 +140,7 @@ work. Starter skills are in this repo under `skills/`.
 |---|---|---|
 | `claudecode` | `claude -p --dangerously-skip-permissions --output-format stream-json --verbose [--model M]`, prompt on stdin | The `result` message; one with an error fails the run |
 | `codex` | `codex exec --dangerously-bypass-approvals-and-sandbox [-m M] -o <file> -`, prompt on stdin | The `-o` file; fails if it's empty |
-| `opencode` | `opencode run [--model M] <prompt>` | A file the prompt asks it to write; what it printed, if it didn't |
+| `opencode` | `opencode run [--model M]`, prompt on stdin | A file the prompt asks it to write; what it printed, if it didn't |
 
 - **Permissions:** every agent runs with permission checks off. opencode
   gets `OPENCODE_CONFIG` pointing at `.amf/opencode.json`, which allows
@@ -178,18 +182,22 @@ work. Starter skills are in this repo under `skills/`.
    With a pipeline, this step and the next are replaced by the steps in
    "With a pipeline" below.
 7. **Commit.** Stage everything and commit as `Fix #N: <title>` with the body
-   `Closes #N`. Fail if the branch has no commits beyond `origin/<default>`.
+   `Closes #N`. Fail if the branch doesn't change any file compared with
+   `origin/<default>`, even if Claude made commits of its own.
 8. **Push.** `git push --force -u origin amf/issue-N`, with the user's git
    credentials.
-9. **PR.** Open `amf/issue-N` → `<default>`, titled `Fix #N: <title>`. The
+9. **PR.** Open `amf/issue-N` → `<default>`, titled `Fix #N: <title>`. If
+   the branch already has an open PR (a retry), the push has updated it, so
+   amf replaces that PR's title and body instead. The
    body is the summary (or `Resolves #N.` if there isn't one), then any
    pipeline sections, then `Closes #N` and an "Opened by amf" footer. amf
    first removes Claude attribution lines ("Generated with Claude Code",
    `Co-Authored-By`) and the agent's own `Closes`/`Fixes`/`Resolves #N` line
    from the summary, and the attribution lines from the plan and review too.
    That way each PR is credited to the user alone and closes the issue once.
-10. **Finish.** Comment the PR link on the issue, set `amf:done`, and remove
-    the worktree. The branch and logs are kept.
+10. **Finish.** Comment `amf opened <PR URL> for this issue.` (`updated` for
+    a retry's PR), set `amf:done`, and remove the worktree. The branch and
+    logs are kept.
 
 ### With a pipeline
 
@@ -204,25 +212,28 @@ work. Starter skills are in this repo under `skills/`.
    - Afterwards amf resets the worktree to the commit it started from and
      removes untracked files (`git clean -fd`), so the stage can't change
      the branch.
-   - A `BLOCKED:` plan fails the issue. The comment shows the plan and asks
-     for the issue to be edited and `amf:ready` added again.
+   - A `BLOCKED:` plan fails the issue. The first line counts as `BLOCKED:`
+     ignoring case and leading `*`, `_`, backticks, `#` and `>`. The comment
+     shows the plan and asks for the issue to be edited and `amf:ready`
+     added again.
 3. **Code, round K** (K = 1, 2, …). The prompt is the one in step 6, plus
    the plan and the skill. From round 2 on, it also says the previous
    attempt is in the working tree, and gives eval's review to fix.
    - The log is `.amf/logs/issue-N-code-K.log`.
    - amf commits any changes as `amf: code round K`.
    - The run fails with `the code stage (<agent>) finished without making
-     any changes` if the branch has no commits beyond `origin/<default>`.
+     any changes` if the branch doesn't change any file compared with
+     `origin/<default>`, such as when a round undoes the one before.
    - The final message becomes the summary.
 4. **Eval, round K** (if declared). The prompt has the issue, the plan, the
    code stage's summary, the skill, and `git diff origin/<default> HEAD`
-   (cut at 100 KB, with a note). It tells the agent to run the tests, change
+   (cut at 100 KB, without splitting a character, and with a note). It tells the agent to run the tests, change
    nothing, and end with `VERDICT: PASS` or `VERDICT: FAIL`.
    - The review is saved to `.amf/runs/issue-N/eval-K.md`, with its log
      at `.amf/logs/issue-N-eval-K.log`. The worktree is then reset as after
      Plan.
    - The verdict is read from the last non-blank line, ignoring case,
-     `*`, `_`, backticks and a trailing period. Without one, the result is
+     `*`, `_`, backticks, `#`, `>` and a trailing period. Without one, the result is
      `FAIL` and the review starts `eval gave no verdict.`
    - On `PASS`, continue to step 5.
    - On `FAIL`, go back to step 3 with the review, unless there have

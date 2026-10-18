@@ -109,28 +109,33 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 		}
 	}()
 
-	pr, err := r.process(ctx, issue, base, pipeline)
+	pr, updated, err := r.process(ctx, issue, base, pipeline)
 	if err != nil {
 		return err
 	}
 
-	r.logf("#%d: opened %s", n, pr.HTMLURL)
-	if err := r.GH.Comment(ctx, n, fmt.Sprintf("amf opened %s for this issue.", pr.HTMLURL)); err != nil {
+	verb := "opened"
+	if updated {
+		verb = "updated"
+	}
+	r.logf("#%d: %s %s", n, verb, pr.HTMLURL)
+	if err := r.GH.Comment(ctx, n, fmt.Sprintf("amf %s %s for this issue.", verb, pr.HTMLURL)); err != nil {
 		return err
 	}
 	return r.setStatus(ctx, n, labelDone)
 }
 
 // process turns the issue into a PR: with a single claude run, or with the
-// repo's pipeline when its AGENTS.md declares one.
-func (r *Runner) process(ctx context.Context, issue Issue, base string, p *Pipeline) (PullRequest, error) {
+// repo's pipeline when its AGENTS.md declares one. updated is true when the
+// branch already had an open PR, which now has the new title and body.
+func (r *Runner) process(ctx context.Context, issue Issue, base string, p *Pipeline) (pr PullRequest, updated bool, err error) {
 	n := issue.Number
 	branch := fmt.Sprintf("amf/issue-%d", n)
 	wt := filepath.Join(r.Root, ".amf", "worktrees", fmt.Sprintf("issue-%d", n))
 
 	r.logf("#%d: creating worktree %s on %s from origin/%s", n, wt, branch, base)
 	if err := r.prepareWorktree(ctx, wt, branch, base); err != nil {
-		return PullRequest{}, err
+		return PullRequest{}, false, err
 	}
 
 	title := fmt.Sprintf("Fix #%d: %s", n, issue.Title)
@@ -138,25 +143,23 @@ func (r *Runner) process(ctx context.Context, issue Issue, base string, p *Pipel
 	if p == nil {
 		r.logf("#%d: running claude (timeout %s)", n, r.Timeout)
 		log := filepath.Join(r.Root, ".amf", "logs", fmt.Sprintf("issue-%d.log", n))
-		var err error
 		if summary, err = r.runAgent(ctx, agentClaude, "", wt, buildPrompt(r.Repo, branch, issue), log, ""); err != nil {
-			return PullRequest{}, err
+			return PullRequest{}, false, err
 		}
 		if err := commitAll(ctx, wt, title, n, base); err != nil {
-			return PullRequest{}, err
+			return PullRequest{}, false, err
 		}
 	} else {
 		r.logf("#%d: running the pipeline from AGENTS.md: %s", n, describePipeline(p))
-		var err error
 		if summary, extra, err = r.runPipeline(ctx, wt, issue, branch, base, p); err != nil {
-			return PullRequest{}, err
+			return PullRequest{}, false, err
 		}
 	}
 
 	r.logf("#%d: pushing %s", n, branch)
 	// amf owns amf/issue-* branches, so a re-run may replace an earlier push.
 	if _, err := git(ctx, wt, "push", "--force", "-u", "origin", branch); err != nil {
-		return PullRequest{}, err
+		return PullRequest{}, false, err
 	}
 
 	summary = cleanSummary(summary, n)
@@ -167,15 +170,24 @@ func (r *Runner) process(ctx context.Context, issue Issue, base string, p *Pipel
 		summary += "\n\n" + extra
 	}
 	body := fmt.Sprintf("%s\n\nCloses #%d\n\n---\n_Opened by amf._", summary, n)
-	pr, err := r.GH.CreatePR(ctx, title, branch, base, body)
+	pr, err = r.GH.CreatePR(ctx, title, branch, base, body)
+	if isStatus(err, http.StatusUnprocessableEntity) {
+		// A retry of an issue whose PR is still open: the push updated it,
+		// so bring its description up to date too.
+		if open, ok, ferr := r.GH.OpenPR(ctx, branch); ferr == nil && ok {
+			r.logf("#%d: %s already has %s; updating it", n, branch, open.HTMLURL)
+			pr, err = r.GH.UpdatePR(ctx, open.Number, title, body)
+			updated = true
+		}
+	}
 	if err != nil {
-		return PullRequest{}, err
+		return PullRequest{}, false, err
 	}
 
 	if _, err := git(ctx, r.Root, "worktree", "remove", wt); err != nil {
 		r.logf("#%d: could not remove worktree: %v", n, err)
 	}
-	return pr, nil
+	return pr, updated, nil
 }
 
 // prepareWorktree creates a fresh worktree on branch, starting at origin/base.
@@ -187,7 +199,10 @@ func (r *Runner) prepareWorktree(ctx context.Context, wt, branch, base string) e
 	if _, err := os.Stat(wt); err == nil {
 		r.logf("removing stale worktree %s", wt)
 		if _, err := git(ctx, r.Root, "worktree", "remove", "--force", wt); err != nil {
-			return err
+			// Not a worktree git knows about, such as a leftover folder.
+			if err := os.RemoveAll(wt); err != nil {
+				return err
+			}
 		}
 	}
 	if _, err := git(ctx, r.Root, "worktree", "prune"); err != nil {
@@ -201,7 +216,7 @@ func (r *Runner) prepareWorktree(ctx context.Context, wt, branch, base string) e
 }
 
 // commitAll commits whatever Claude changed and fails if the branch ends up
-// with nothing new relative to base.
+// changing nothing relative to base.
 func commitAll(ctx context.Context, wt, title string, n int, base string) error {
 	if _, err := git(ctx, wt, "add", "-A"); err != nil {
 		return err
@@ -215,12 +230,13 @@ func commitAll(ctx context.Context, wt, title string, n int, base string) error 
 			return err
 		}
 	}
-	// Claude may have committed on its own despite the prompt; count commits.
-	ahead, err := git(ctx, wt, "rev-list", "--count", "origin/"+base+"..HEAD")
+	// Claude may have committed on its own despite the prompt, so compare
+	// trees rather than look for amf's commit.
+	changed, err := git(ctx, wt, "diff", "--name-only", "origin/"+base, "HEAD")
 	if err != nil {
 		return err
 	}
-	if ahead == "0" {
+	if changed == "" {
 		return errors.New("claude finished without making any changes")
 	}
 	return nil

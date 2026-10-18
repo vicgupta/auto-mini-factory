@@ -22,6 +22,19 @@ A refactor, a test, or a fix that leaves all of the above as it was needs no
 checked against the source rather than from memory, and the change includes
 `SPECS.md`.
 
+## Testing
+
+- `go test -race ./...` runs the offline suite: fake GitHub (`httptest`),
+  real git repos in temp dirs, and shell scripts as the agents. Every change
+  keeps it passing. Add a test for each bug fixed or edge case handled;
+  `cmd/amf/edge_test.go` collects the edge cases.
+- `cmd/amf/live_test.go` (build tag `live`) runs the real binary and agents
+  against a real repository, from a directory holding its `.env`:
+  `AMF_LIVE_DIR=/tmp/amf AMF_LIVE_PIPELINE=1 go test -tags live -run TestLive -v -timeout 90m ./cmd/amf`.
+  It creates issues, branches and PRs, and with `AMF_LIVE_PIPELINE=1`
+  commits an `AGENTS.md` to the default branch; it cleans all of that up
+  unless `AMF_LIVE_KEEP=1`. Run it before a minor release.
+
 ## Releasing
 
 Releases are for the maintainer (the repo owner) only; end users never run
