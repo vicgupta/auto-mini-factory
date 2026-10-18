@@ -427,7 +427,7 @@ if [ -n "$ANTHROPIC_API_KEY" ]; then echo "api key should be dropped" >&2; exit 
 echo '{"type":"system","subtype":"init"}'
 echo hello > feature.txt
 echo '{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}'
-echo '{"type":"result","subtype":"success","is_error":false,"result":"Added feature.txt.\n\nVerified with ls."}'
+echo '{"type":"result","subtype":"success","is_error":false,"result":"Added feature.txt.\n\nVerified with ls.\n\nCloses #1\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"}'
 `)
 	r, log := newTestRunner(t, srv, root, claude)
 	r.ClaudeToken = "sk-ant-oat-test"
@@ -443,8 +443,11 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"Added feat
 	if pr["head"] != "amf/issue-1" || pr["base"] != "main" || pr["title"] != "Fix #1: Add feature file" {
 		t.Fatalf("unexpected PR %v", pr)
 	}
-	if !strings.Contains(pr["body"], "Added feature.txt.") || !strings.Contains(pr["body"], "Closes #1") {
-		t.Fatalf("PR body missing summary or Closes: %q", pr["body"])
+	if !strings.Contains(pr["body"], "Added feature.txt.") || strings.Count(pr["body"], "Closes #1") != 1 {
+		t.Fatalf("PR body should have the summary and exactly one Closes: %q", pr["body"])
+	}
+	if strings.Contains(strings.ToLower(pr["body"]), "claude") {
+		t.Fatalf("PR body should carry no Claude attribution: %q", pr["body"])
 	}
 	if got := mustGit(t, root, "--git-dir", origin, "show", "amf/issue-1:feature.txt"); got != "hello" {
 		t.Fatalf("pushed branch has feature.txt = %q", got)
@@ -984,5 +987,16 @@ func TestUpdateRefusesBadDownloads(t *testing.T) {
 		if mustRead(t, u.exe) != "old binary" {
 			t.Errorf("%s: binary should be unchanged", tc.name)
 		}
+	}
+}
+
+func TestCleanSummary(t *testing.T) {
+	in := "## Add tests\n\nCloses #3.\n\n### Summary\nAdds TestX.\n\nCloses #3\n\nSee #4, and closes #3 elsewhere.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n"
+	want := "## Add tests\n\n### Summary\nAdds TestX.\n\nSee #4, and closes #3 elsewhere."
+	if got := cleanSummary(in, 3); got != want {
+		t.Fatalf("cleanSummary =\n%q\nwant\n%q", got, want)
+	}
+	if got := cleanSummary("Closes #4\nReal text", 3); got != "Closes #4\nReal text" {
+		t.Fatalf("other issue numbers must stay: %q", got)
 	}
 }

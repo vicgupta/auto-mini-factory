@@ -97,7 +97,10 @@ placeholders and count as unset.
    credentials.
 8. **PR.** Open `amf/issue-N` → `<default>`, titled `Fix #N: <title>`. The
    body is the summary (or `Resolves #N.` if there isn't one), then `Closes #N`
-   and an "Opened by amf" footer.
+   and an "Opened by amf" footer. Before that, amf removes from the summary
+   any Claude attribution lines ("Generated with Claude Code", `Co-Authored-By`)
+   and Claude's own `Closes`/`Fixes`/`Resolves #N` line, so each PR is credited
+   to the user alone and closes the issue once.
 9. **Finish.** Comment the PR link on the issue, set `amf:done`, and remove the
    worktree. The branch and log are kept.
 

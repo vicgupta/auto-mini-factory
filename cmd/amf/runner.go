@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -130,10 +131,11 @@ func (r *Runner) process(ctx context.Context, issue Issue) (PullRequest, error) 
 		return PullRequest{}, err
 	}
 
-	if strings.TrimSpace(summary) == "" {
+	summary = cleanSummary(summary, n)
+	if summary == "" {
 		summary = fmt.Sprintf("Resolves #%d.", n)
 	}
-	body := fmt.Sprintf("%s\n\nCloses #%d\n\n---\n_Opened by amf._", strings.TrimSpace(summary), n)
+	body := fmt.Sprintf("%s\n\nCloses #%d\n\n---\n_Opened by amf._", summary, n)
 	pr, err := r.GH.CreatePR(ctx, title, branch, base, body)
 	if err != nil {
 		return PullRequest{}, err
@@ -247,6 +249,26 @@ func (r *Runner) runClaude(ctx context.Context, wt string, issue Issue, branch s
 		return "", fmt.Errorf("claude: %v (log: %s)", err, logPath)
 	}
 	return parseClaudeResult(stdout.Bytes())
+}
+
+// cleanSummary prepares Claude's summary for a PR body. It drops attribution
+// lines (Claude Code's "Generated with" footer, Co-Authored-By trailers) so
+// the PR is credited to the user alone, and Claude's own "Closes #N" line,
+// since amf adds that itself.
+func cleanSummary(summary string, n int) string {
+	closes := regexp.MustCompile(fmt.Sprintf(`(?i)^(closes|fixes|resolves) #%d\.?$`, n))
+	var keep []string
+	for _, line := range strings.Split(summary, "\n") {
+		t := strings.TrimSpace(line)
+		low := strings.ToLower(t)
+		if strings.Contains(low, "generated with [claude code]") || strings.Contains(low, "generated with claude code") ||
+			strings.HasPrefix(low, "co-authored-by:") || closes.MatchString(t) {
+			continue
+		}
+		keep = append(keep, line)
+	}
+	out := strings.TrimSpace(strings.Join(keep, "\n"))
+	return regexp.MustCompile(`\n{3,}`).ReplaceAllString(out, "\n\n")
 }
 
 // claudeResult is the final message Claude prints in its JSON output formats.
