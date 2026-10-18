@@ -11,13 +11,27 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
 )
 
+// version is set at release build time with -ldflags "-X main.version=...".
 var version = "dev"
+
+// buildVersion is version, or the module version when installed with
+// `go install ...@vX.Y.Z`.
+func buildVersion() string {
+	if version != "dev" {
+		return version
+	}
+	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		return bi.Main.Version
+	}
+	return version
+}
 
 const usage = `amf turns GitHub issues into pull requests with Claude Code.
 
@@ -65,7 +79,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	case "watch":
 		return cmdWatch(ctx, rest, stderr)
 	case "version", "--version":
-		fmt.Fprintln(stdout, "amf", version)
+		fmt.Fprintln(stdout, "amf", buildVersion())
 		return nil
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, usage)
