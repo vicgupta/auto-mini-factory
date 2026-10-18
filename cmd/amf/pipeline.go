@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -74,9 +73,9 @@ var amfHeading = regexp.MustCompile(`(?i)^##\s+amf\s*$`)
 func parsePipeline(md string) (*Pipeline, error) {
 	var rows [][]string
 	in, found, fenced := false, false, false
-	sc := bufio.NewScanner(strings.NewReader(md))
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
+	// Split rather than scan: a bufio.Scanner stops at a 64 KB line.
+	for _, line := range strings.Split(md, "\n") {
+		line = strings.TrimSpace(line)
 		// Fenced code blocks hold examples, not the pipeline.
 		if strings.HasPrefix(line, "```") || strings.HasPrefix(line, "~~~") {
 			fenced = !fenced

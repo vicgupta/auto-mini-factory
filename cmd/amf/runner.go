@@ -80,6 +80,9 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 	if err != nil {
 		return err
 	}
+	if _, err := gitIdentity(ctx, r.Root); err != nil {
+		return err
+	}
 
 	r.logf("#%d: %s", n, issue.Title)
 	if err := r.setStatus(ctx, n, labelInProgress); err != nil {
@@ -114,15 +117,19 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 		return err
 	}
 
+	// The PR exists, so the issue is done even if GitHub fails from here on.
 	verb := "opened"
 	if updated {
 		verb = "updated"
 	}
 	r.logf("#%d: %s %s", n, verb, pr.HTMLURL)
-	if err := r.GH.Comment(ctx, n, fmt.Sprintf("amf %s %s for this issue.", verb, pr.HTMLURL)); err != nil {
-		return err
+	if err := r.setStatus(ctx, n, labelDone); err != nil {
+		r.logf("#%d: could not set %s: %v", n, labelDone, err)
 	}
-	return r.setStatus(ctx, n, labelDone)
+	if err := r.GH.Comment(ctx, n, fmt.Sprintf("amf %s %s for this issue.", verb, pr.HTMLURL)); err != nil {
+		r.logf("#%d: could not comment: %v", n, err)
+	}
+	return nil
 }
 
 // process turns the issue into a PR: with a single claude run, or with the

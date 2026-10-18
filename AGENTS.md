@@ -24,6 +24,9 @@ checked against the source rather than from memory, and the change includes
 
 ## Testing
 
+- CI (`.github/workflows/ci.yml`) runs `gofmt`, `go vet` (also with
+  `-tags live`) and `go test -race` on Linux and macOS, and builds every
+  release platform, on each push to `main` and each PR.
 - `go test -race ./...` runs the offline suite: fake GitHub (`httptest`),
   real git repos in temp dirs, and shell scripts as the agents. Every change
   keeps it passing. Add a test for each bug fixed or edge case handled;
@@ -59,10 +62,12 @@ re-uploading).
 3. **Dry run:** `scripts/release.sh --dry-run vX.Y.Z` runs vet and tests,
    builds every platform, and checks the archives without publishing.
 4. **Release:** `scripts/release.sh vX.Y.Z notes.md`. From a clean `main`
-   that matches `origin/main`, it builds `darwin` and `linux` for `arm64` and
+   that matches `origin/main`, it waits for CI on that commit and refuses
+   if CI failed. It then builds `darwin` and `linux` for `arm64` and
    `amd64`, writes `checksums.txt`, runs this machine's binary to check its
    version, creates the tag and the release titled `amf vX.Y.Z` on the
    current commit, and checks that GitHub serves the archive it uploaded.
+   Each archive holds `amf`, `README.md`, `SPECS.md` and `LICENSE`.
 5. **Verify:** `amf update --check` should name the new version, as
    available or up to date.
 

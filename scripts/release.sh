@@ -12,6 +12,7 @@
 #     amf_<tag>_<os>_<arch>/amf
 #     amf_<tag>_<os>_<arch>/README.md
 #     amf_<tag>_<os>_<arch>/SPECS.md
+#     amf_<tag>_<os>_<arch>/LICENSE
 #
 # and checksums.txt lists each archive's SHA-256.
 set -eu
@@ -63,6 +64,19 @@ if ! $dry; then
 	if git rev-parse -q --verify "refs/tags/$tag" >/dev/null || git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
 		fail "$tag already exists"
 	fi
+	# CI must have passed on this exact commit. Right after a push its run
+	# may not exist yet, so wait for it to appear, then for it to finish.
+	sha=$(git rev-parse HEAD)
+	run=
+	for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
+		run=$(gh run list --repo "$repo" --workflow ci.yml --commit "$sha" --limit 1 --json databaseId -q '.[0].databaseId' 2>/dev/null || true)
+		[ -n "$run" ] && break
+		sleep 10
+	done
+	[ -n "$run" ] || fail "no CI run for $sha; check https://github.com/$repo/actions"
+	echo "Waiting for CI run $run on $sha"
+	gh run watch "$run" --repo "$repo" --exit-status >/dev/null || fail "CI failed on $sha: https://github.com/$repo/actions/runs/$run"
+	echo "CI passed on $sha"
 fi
 
 go vet ./...
@@ -80,7 +94,7 @@ for p in $platforms; do
 	echo "Building $name"
 	mkdir "$out/$name"
 	CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -ldflags "-s -w -X main.version=$tag" -o "$out/$name/amf" ./cmd/amf
-	cp README.md SPECS.md "$out/$name/"
+	cp README.md SPECS.md LICENSE "$out/$name/"
 	# COPYFILE_DISABLE keeps macOS tar from adding ._ metadata files.
 	(cd "$out" && COPYFILE_DISABLE=1 tar -czf "$name.tar.gz" "$name")
 	tar -tzf "$out/$name.tar.gz" | grep -qx "$name/amf" || fail "$name.tar.gz has no $name/amf"

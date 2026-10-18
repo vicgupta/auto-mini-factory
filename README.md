@@ -61,7 +61,8 @@ unset, so you can leave the optional `CLAUDE_CODE_OAUTH_TOKEN` as it is.
   free `.env.0001`, `.env.0002`, and so on, then keeps its real values in the
   new file, including any extra variables.
 - **Repo:** `GITHUB_REPO` is filled in from the checkout's GitHub `origin`.
-- **Git:** `.env` and `.env.NNNN` are added to `.git/info/exclude`, so the
+- **Git:** `.env` and `.env.NNNN` are added to `.git/info/exclude` (for the
+  folder you ran `amf init` in, even a subdirectory), so the
   tokens never show up in `git status`.
 - **Labels:** once `GITHUB_TOKEN` and `GITHUB_REPO` are filled in, `amf init`
   makes sure the repo has `amf:ready`, `amf:in-progress`, `amf:done` and
@@ -87,7 +88,7 @@ anything:
 
 ```
 $ amf doctor
-ok    amf           v0.3.0, the latest release
+ok    amf           v0.3.1, the latest release
 ok    git           git version 2.56.0
 ok    .env          /tmp/amf/.env
 ok    GITHUB_TOKEN  set, from /tmp/amf/.env
@@ -97,6 +98,7 @@ ok    repo          vicgupta/factory-demo-app, default branch main
 ok    labels        all 4 amf labels exist
 ok    checkout      /tmp/amf/factory-demo-app, the clone run and watch use here
 ok    git push      your git credentials can push to origin (checked with --dry-run)
+ok    git identity  commits as Vic Gupta <vicgupta@gmail.com>
 ok    pipeline      none in AGENTS.md on origin/main; amf runs claude once per issue
 ok    claudecode    /Users/vic/.local/bin/claude, 2.1.302 (Claude Code)
 warn  codex         codex is not installed; only needed by pipelines that use codex
@@ -231,6 +233,9 @@ See [SPECS.md](SPECS.md).
 go test -race ./...
 ```
 
+CI runs `gofmt`, `go vet` and these tests on Linux and macOS for every push
+and PR, and builds every release platform.
+
 Tests use `httptest` for GitHub, real git repos in temp dirs, and shell
 scripts standing in for `claude`, `codex` and `opencode`.
 
@@ -245,3 +250,7 @@ AMF_LIVE_DIR=/path/with/.env go test -tags live -run TestLive -v -timeout 90m ./
 `AMF_LIVE_PIPELINE=1` also tests pipelines, which commits an `AGENTS.md` to
 that repository's default branch and removes it afterwards. See
 `cmd/amf/live_test.go` for the other settings.
+
+## License
+
+MIT; see [LICENSE](LICENSE).

@@ -466,7 +466,7 @@ if [ -n "$ANTHROPIC_API_KEY" ]; then echo "api key should be dropped" >&2; exit 
 echo '{"type":"system","subtype":"init"}'
 echo hello > feature.txt
 echo '{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}'
-echo '{"type":"result","subtype":"success","is_error":false,"result":"Added feature.txt.\n\nVerified with ls.\n\nCloses #1\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"}'
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"Added feature.txt.\n\nVerified with ls.\n\nCloses #1\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"}'
 `)
 	r, log := newTestRunner(t, srv, root, claude)
 	r.ClaudeToken = "sk-ant-oat-test"

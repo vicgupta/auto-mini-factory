@@ -98,7 +98,13 @@ func cmdInit(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	}
 
 	if root, err := git(ctx, ".", "rev-parse", "--show-toplevel"); err == nil {
-		if err := excludeFromGit(ctx, root, "amf secrets", "/.env", "/.env.[0-9][0-9][0-9][0-9]"); err != nil {
+		// Exclude this folder's .env, which is only the top-level one when
+		// init runs at the top of the checkout.
+		dir := "/"
+		if rel, err := git(ctx, ".", "rev-parse", "--show-prefix"); err == nil && rel != "" {
+			dir = "/" + escapeGitPattern(rel)
+		}
+		if err := excludeFromGit(ctx, root, "amf secrets", dir+".env", dir+".env.[0-9][0-9][0-9][0-9]"); err != nil {
 			fmt.Fprintf(stderr, "amf: warning: could not update .git/info/exclude: %v\n", err)
 		}
 	}
@@ -199,6 +205,18 @@ func originRepo(ctx context.Context) string {
 		return ""
 	}
 	return repoFromRemote(url)
+}
+
+// escapeGitPattern escapes the characters gitignore patterns treat specially.
+func escapeGitPattern(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if strings.ContainsRune(`\*?[!# `, r) {
+			b.WriteRune('\\')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 // envKeys lists the keys in a .env file in the order they appear.

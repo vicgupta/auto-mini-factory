@@ -646,7 +646,7 @@ func (l *live) testPipeline(t *testing.T, clone string) {
 		os.WriteFile(failing, []byte(`#!/bin/sh
 prompt=$(cat)
 case "$prompt" in *"You are the eval stage"*)
-	echo '{"type":"result","subtype":"success","is_error":false,"result":"Test of the failure path.\n\nVERDICT: FAIL"}'
+	printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"Test of the failure path.\n\nVERDICT: FAIL"}'
 	exit 0;;
 esac
 printf '%s' "$prompt" | exec `+claude+` "$@"

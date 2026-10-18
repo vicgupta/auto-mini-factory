@@ -131,6 +131,16 @@ func (d *doctor) check(ctx context.Context) {
 		}
 	}
 
+	dir := root
+	if dir == "" {
+		dir = "."
+	}
+	if ident, err := gitIdentity(ctx, dir); err != nil {
+		d.line("FAIL", "git identity", "%v", err)
+	} else {
+		d.line("ok", "git identity", "commits as %s", ident)
+	}
+
 	// The pipeline, its skills, and the agents.
 	var p *Pipeline
 	pipelineKnown := false

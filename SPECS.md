@@ -57,7 +57,9 @@ SIGTERM cancel the current step; the issue is still marked failed.
    old file is copied to the next free `.env.NNNN` (0001, 0002, …, numbered
    above the highest that exists), and the new file is written atomically with
    permissions 0600.
-3. In a git checkout, adds `/.env` and `/.env.NNNN` to `.git/info/exclude`.
+3. In a git checkout, adds the `.env` and `.env.NNNN` it writes to
+   `.git/info/exclude`: `/.env` at the top of the checkout, or
+   `/<subdirectory>/.env` when run in a subdirectory.
 4. Once the token and repo are usable, checks that the repo exists and creates
    any of the four labels that are missing. Existing labels aren't changed.
    Until then it prints that labels weren't checked yet.
@@ -97,6 +99,7 @@ never prints a secret. The checks, in order:
 | `labels` | All four amf labels exist | `warn`, naming the missing ones |
 | `checkout` | The checkout `run` would use: the enclosing one, or `./<name>` | `warn` if `run` would clone first or origin isn't `GITHUB_REPO`; `FAIL` if `./<name>` isn't a clone or there's no origin |
 | `git push` | `git push --dry-run` to `origin` works with the user's git credentials, without prompting | `FAIL`, with git's message |
+| `git identity` | git has a name and email to commit with, in the checkout (or here); shows them | `FAIL`, with the `git config` commands to set them |
 | `pipeline` | Fetches the default branch; shows the pipeline from `AGENTS.md` on it, or that there is none | `FAIL` if the table doesn't parse |
 | `skill <stage>` | Each stage's skill downloads as in `run`; shows its size and SHA-256 | `FAIL` |
 | `claudecode`, `codex`, `opencode` | Installed; shows the path and `--version` | `FAIL` if a stage needs it (or, with no pipeline, for `claude`); else `warn` |
@@ -189,9 +192,10 @@ work. Starter skills are in this repo under `skills/`.
    `/.amf/` to `.git/info/exclude`.
 3. **Check.** The issue must be an open issue, not a PR. Fetch the default
    branch and read the pipeline from `AGENTS.md` on it. A table that doesn't
-   parse, or an agent that isn't installed, stops the run here without
-   changing the issue. `watch` then logs the error and tries again on its
-   next poll.
+   parse, an agent that isn't installed, or git having no name and email
+   to commit with (`git var GIT_AUTHOR_IDENT` and `GIT_COMMITTER_IDENT`)
+   stops the run here without changing the issue. `watch` then logs the
+   error and tries again on its next poll.
 4. **Claim.** Label the issue `amf:in-progress` and remove `amf:ready`.
 5. **Worktree.** Fetch the default branch and create
    `.amf/worktrees/issue-N` on `amf/issue-N`, reset to `origin/<default>`. A
@@ -224,9 +228,10 @@ work. Starter skills are in this repo under `skills/`.
    `Co-Authored-By`) and the agent's own `Closes`/`Fixes`/`Resolves #N` line
    from the summary, and the attribution lines from the plan and review too.
    That way each PR is credited to the user alone and closes the issue once.
-10. **Finish.** Comment `amf opened <PR URL> for this issue.` (`updated` for
-    a retry's PR), set `amf:done`, and remove the worktree. The branch and
-    logs are kept.
+10. **Finish.** Set `amf:done`, comment `amf opened <PR URL> for this
+    issue.` (`updated` for a retry's PR), and remove the worktree. The branch
+    and logs are kept. The PR exists by now, so if setting the label or
+    commenting fails, amf logs a warning and the run still succeeds.
 
 ### With a pipeline
 
@@ -278,7 +283,7 @@ work. Starter skills are in this repo under `skills/`.
 number of code rounds, with the review in a collapsed block. With a plan
 stage, the plan in a collapsed block.
 
-**On failure** in any step after Claim: set `amf:failed`, comment the error on
+**On failure** in any step after Claim, up to opening the PR: set `amf:failed`, comment the error on
 the issue, and keep the worktree and logs for inspection. This also happens if
 the run is interrupted. If Claim itself fails, the issue can be left on
 `amf:in-progress`, which `watch` skips; `amf run N` recovers it.

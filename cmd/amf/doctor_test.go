@@ -65,6 +65,7 @@ func TestDoctorAllGood(t *testing.T) {
 		`ok +labels +all 4 amf labels exist$`,
 		`ok +checkout +.*/work \(origin .*origin\.git\)$`,
 		`ok +git push +your git credentials can push`,
+		`ok +git identity +commits as amf test <amf@example\.com>$`,
 		`ok +pipeline +origin/main: code \(claudecode, default model\)$`,
 		`ok +claudecode +.*/claude, 1\.2\.3 \(Claude Code\)$`,
 		`warn +codex +.*no-codex is not installed; only needed by pipelines that use codex$`,
@@ -106,6 +107,13 @@ func TestDoctorBrokenSetup(t *testing.T) {
 	if strings.Contains(out, "wrong") || strings.Contains(out, "sk-ant-oat-x") {
 		t.Errorf("doctor printed a secret:\n%s", out)
 	}
+
+	// No git identity, outside a checkout.
+	cfg := filepath.Join(t.TempDir(), "gitconfig")
+	os.WriteFile(cfg, []byte("[user]\n\tuseConfigOnly = true\n"), 0o644)
+	t.Setenv("GIT_CONFIG_GLOBAL", cfg)
+	out, _ = doctorOutput(t)
+	wantLines(t, out, `FAIL +git identity +git has no name and email to commit with`)
 
 	// A folder in the way of the clone.
 	os.MkdirAll(filepath.Join(dir, "demo"), 0o755)

@@ -1052,3 +1052,123 @@ func (b *syncBuffer) String() string {
 	defer b.mu.Unlock()
 	return b.buf.String()
 }
+
+// --- v0.3.1 ---
+
+// failingGitHub proxies to srv, failing with 502 the requests fail picks.
+func failingGitHub(t *testing.T, srv *httptest.Server, fail func(r *http.Request) bool) *httptest.Server {
+	target, _ := url.Parse(srv.URL)
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if fail(r) {
+			writeJSON(w, 502, map[string]string{"message": "Bad Gateway"})
+			return
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(s.Close)
+	return s
+}
+
+func TestRunSucceedsOnceThePRExists(t *testing.T) {
+	ok := shResult + "cat >/dev/null\necho x > x.txt\nresult 'Done.'\n"
+
+	t.Run("comment fails", func(t *testing.T) {
+		root, _ := setupRepo(t)
+		gh, srv := newFakeGitHub(t)
+		gh.issues[1] = readyIssue(1, "Comment fails")
+		flaky := failingGitHub(t, srv, func(r *http.Request) bool {
+			return r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/comments")
+		})
+		r, log := newTestRunner(t, flaky, root, fakeAgent(t, "claude", ok))
+		if err := r.Run(context.Background(), 1); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if got := gh.labels(1); !reflect.DeepEqual(got, []string{"amf:done"}) {
+			t.Errorf("labels = %v", got)
+		}
+		if !strings.Contains(log.String(), "#1: could not comment") {
+			t.Errorf("log:\n%s", log)
+		}
+	})
+
+	t.Run("label fails", func(t *testing.T) {
+		root, _ := setupRepo(t)
+		gh, srv := newFakeGitHub(t)
+		gh.issues[1] = readyIssue(1, "Label fails")
+		var prOpened atomic.Bool
+		flaky := failingGitHub(t, srv, func(r *http.Request) bool {
+			if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/pulls") {
+				prOpened.Store(true)
+			}
+			return prOpened.Load() && r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/labels")
+		})
+		r, log := newTestRunner(t, flaky, root, fakeAgent(t, "claude", ok))
+		if err := r.Run(context.Background(), 1); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if slices.Contains(gh.labels(1), "amf:failed") {
+			t.Errorf("labels = %v", gh.labels(1))
+		}
+		if c := gh.comments[1]; len(c) != 1 || !strings.Contains(c[0], "amf opened") {
+			t.Errorf("comments = %q", c)
+		}
+		if !strings.Contains(log.String(), "#1: could not set amf:done") {
+			t.Errorf("log:\n%s", log)
+		}
+	})
+}
+
+func TestRunNeedsAGitIdentity(t *testing.T) {
+	root, _ := setupRepo(t)
+	// A machine where git has no name or email.
+	cfg := filepath.Join(t.TempDir(), "gitconfig")
+	os.WriteFile(cfg, []byte("[user]\n\tuseConfigOnly = true\n"), 0o644)
+	t.Setenv("GIT_CONFIG_GLOBAL", cfg)
+	gh, srv := newFakeGitHub(t)
+	gh.issues[1] = readyIssue(1, "No identity")
+	r, _ := newTestRunner(t, srv, root, fakeAgent(t, "claude", `echo "must not run" >&2; exit 9`))
+
+	err := r.Run(context.Background(), 1)
+	if err == nil || !strings.Contains(err.Error(), "git config --global user.email") {
+		t.Fatalf("error = %v", err)
+	}
+	if got := gh.labels(1); !reflect.DeepEqual(got, []string{"amf:ready"}) {
+		t.Errorf("labels = %v", got)
+	}
+	if len(gh.comments[1]) != 0 {
+		t.Errorf("comments = %q", gh.comments[1])
+	}
+}
+
+func TestInitInSubdirectoryExcludesEnv(t *testing.T) {
+	root, _ := setupRepo(t)
+	sub := filepath.Join(root, "sub dir", "a[1]")
+	os.MkdirAll(sub, 0o755)
+	t.Chdir(sub)
+	for range 2 { // the second run makes a backup, .env.0001
+		if err := run(context.Background(), []string{"init"}, nil, io.Discard, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		os.WriteFile(".env", []byte("GITHUB_TOKEN=github_pat_...\nEXTRA=secret\n"), 0o600)
+	}
+	if _, err := os.Stat(".env.0001"); err != nil {
+		t.Fatal(err)
+	}
+	if st := mustGit(t, root, "status", "--porcelain", "--untracked-files=all"); st != "" {
+		t.Fatalf(".env in a subdirectory should be ignored, status = %q", st)
+	}
+	// Only this folder's .env is excluded, not every .env in the repo.
+	os.WriteFile(filepath.Join(root, "sub dir", ".env"), []byte("x\n"), 0o644)
+	if st := mustGit(t, root, "status", "--porcelain", "--untracked-files=all"); st != "?? \"sub dir/.env\"" {
+		t.Fatalf("status = %q", st)
+	}
+}
+
+func TestParsePipelineAfterALongLine(t *testing.T) {
+	md := "# Agents\n\n" + strings.Repeat("x", 100<<10) + "\n\n## amf\n\n| Stage | Agent |\n|---|---|\n| code | codex |\n"
+	p, err := parsePipeline(md)
+	if err != nil || p == nil || p.Code.Agent != "codex" {
+		t.Fatalf("parsePipeline = %+v, %v", p, err)
+	}
+}
