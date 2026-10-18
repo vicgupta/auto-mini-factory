@@ -41,6 +41,7 @@ Usage:
   amf list [--state open|closed|all] [--label L]                  list issues, newest first, with their amf labels
   amf run <issue-number> [--timeout 30m]                          process one issue into a PR
   amf watch [--interval 60s] [--label amf:ready] [--timeout 30m]  process amf:ready issues as they arrive
+  amf update [--version vX.Y.Z] [--check]                         replace this amf binary with the latest (or given) release
   amf version
 
 Configuration is read from .env (or the environment):
@@ -86,6 +87,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return cmdRun(ctx, rest, stderr)
 	case "watch":
 		return cmdWatch(ctx, rest, stderr)
+	case "update":
+		return cmdUpdate(ctx, rest, stdout, stderr)
 	case "version", "--version":
 		fmt.Fprintln(stdout, "amf", buildVersion())
 		return nil

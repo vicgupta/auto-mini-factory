@@ -29,6 +29,7 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened)
 | `amf list [--state open\|closed\|all] [--label L]` | Lists issues, newest first, with every page fetched and PRs left out. Columns: `ISSUE`, `STATE` (with `--state all` only), `AMF` (the issue's `amf` and `amf:*` labels, or `-`) and `TITLE`. Prints `No … in owner/name.` when nothing matches. Needs no git checkout. |
 | `amf run <N> [--timeout 30m]` | Processes issue N once. |
 | `amf watch [--interval 60s] [--label amf:ready] [--timeout 30m]` | Polls open issues with the label (every page), oldest first, and processes them one at a time until interrupted. |
+| `amf update [--version vX.Y.Z] [--check]` | Replaces the running binary with the latest release, or with the given one, which can be a downgrade. Needs no `.env`. See below. |
 | `amf version` | Prints the version: the release tag, or the module version for `go install`. |
 
 **Exit codes:** 0 on success, 1 on error, 2 on a usage error. SIGINT and
@@ -104,6 +105,24 @@ placeholders and count as unset.
 the issue, and keep the worktree and log for inspection. This also happens if
 the run is interrupted. If Claim itself fails, the issue can be left on
 `amf:in-progress`, which `watch` skips; `amf run N` recovers it.
+
+## Updating (`amf update`)
+
+1. Resolve the target: `--version` (a leading `v` is added if missing), or
+   the tag that `https://github.com/vicgupta/auto-mini-factory/releases/latest`
+   redirects to. If it equals the running version, print `amf <v> is up to
+   date` and stop. `--check` stops here too and reports whether a newer
+   release is available.
+2. Download `amf_<tag>_<os>_<arch>.tar.gz` and `checksums.txt` from that
+   release. If the archive is missing, fail with `no amf <tag> for <os>/<arch>`.
+   If its SHA-256 doesn't match, fail.
+3. Write the archive's `amf` next to the running executable (symlinks
+   resolved) as a temporary file with permissions 0755. Run it with
+   `version`, and fail unless it prints `amf <tag>`.
+4. Rename it over the running executable. A folder that can't be written
+   fails with a hint to rerun with permission.
+
+Any failure leaves the installed binary unchanged.
 
 ## Files
 

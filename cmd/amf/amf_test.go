@@ -1,8 +1,11 @@
 package main
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -13,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -875,5 +879,110 @@ func TestListCommand(t *testing.T) {
 	}
 	if err := run(context.Background(), []string{"list", "--state", "bogus"}, nil, io.Discard, io.Discard); err == nil {
 		t.Error("expected an error for --state bogus")
+	}
+}
+
+// fakeReleases serves /releases/latest and one release's archive and checksums
+// the way GitHub does. The archive's amf is a script that prints reports.
+func fakeReleases(t *testing.T, tag, reports string, badSum bool) *httptest.Server {
+	t.Helper()
+	name := fmt.Sprintf("amf_%s_%s_%s", tag, runtime.GOOS, runtime.GOARCH)
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	script := []byte("#!/bin/sh\necho '" + reports + "'\n")
+	tw.WriteHeader(&tar.Header{Name: name + "/", Typeflag: tar.TypeDir, Mode: 0o755})
+	tw.WriteHeader(&tar.Header{Name: name + "/amf", Typeflag: tar.TypeReg, Mode: 0o755, Size: int64(len(script))})
+	tw.Write(script)
+	tw.Close()
+	gz.Close()
+	archive := buf.Bytes()
+	sum := sha256.Sum256(archive)
+	sums := fmt.Sprintf("%x  %s.tar.gz\n", sum, name)
+	if badSum {
+		sums = strings.Repeat("0", 64) + "  " + name + ".tar.gz\n"
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/releases/tag/"+tag, http.StatusFound)
+	})
+	mux.HandleFunc("GET /releases/download/"+tag+"/"+name+".tar.gz", func(w http.ResponseWriter, r *http.Request) { w.Write(archive) })
+	mux.HandleFunc("GET /releases/download/"+tag+"/checksums.txt", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, sums) })
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func newTestUpdater(t *testing.T, srv *httptest.Server, current string) (*updater, *bytes.Buffer) {
+	t.Helper()
+	exe := filepath.Join(t.TempDir(), "amf")
+	os.WriteFile(exe, []byte("old binary"), 0o755)
+	var out bytes.Buffer
+	return &updater{base: srv.URL, current: current, exe: exe, out: &out}, &out
+}
+
+func TestUpdateReplacesBinary(t *testing.T) {
+	srv := fakeReleases(t, "v9.9.9", "amf v9.9.9", false)
+	u, out := newTestUpdater(t, srv, "v0.0.7")
+	if err := u.run(context.Background(), "", false); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if b := mustRead(t, u.exe); !strings.Contains(b, "amf v9.9.9") {
+		t.Fatalf("binary not replaced: %q", b)
+	}
+	if st, _ := os.Stat(u.exe); st.Mode().Perm() != 0o755 {
+		t.Errorf("mode = %v", st.Mode().Perm())
+	}
+	if !strings.Contains(out.String(), "Updated amf v0.0.7 -> v9.9.9") {
+		t.Errorf("output = %q", out)
+	}
+	if m, _ := filepath.Glob(filepath.Join(filepath.Dir(u.exe), ".amf-update-*")); len(m) != 0 {
+		t.Errorf("temp files left behind: %v", m)
+	}
+}
+
+func TestUpdateNoChange(t *testing.T) {
+	srv := fakeReleases(t, "v9.9.9", "amf v9.9.9", false)
+	for _, tc := range []struct {
+		name, current, target string
+		check                 bool
+		want                  string
+	}{
+		{"up to date", "v9.9.9", "", false, "amf v9.9.9 is up to date"},
+		{"pinned, no v", "v9.9.9", "9.9.9", false, "is up to date"},
+		{"check only", "v0.0.7", "", true, "amf v9.9.9 is available (you have v0.0.7)"},
+	} {
+		u, out := newTestUpdater(t, srv, tc.current)
+		if err := u.run(context.Background(), tc.target, tc.check); err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if !strings.Contains(out.String(), tc.want) {
+			t.Errorf("%s: output = %q, want %q", tc.name, out, tc.want)
+		}
+		if mustRead(t, u.exe) != "old binary" {
+			t.Errorf("%s: binary should be unchanged", tc.name)
+		}
+	}
+}
+
+func TestUpdateRefusesBadDownloads(t *testing.T) {
+	for _, tc := range []struct {
+		name, reports string
+		badSum        bool
+		target, want  string
+	}{
+		{"checksum", "amf v9.9.9", true, "", "checksum mismatch"},
+		{"wrong version", "amf v1.0.0", false, "", `reports "amf v1.0.0"`},
+		{"missing release", "amf v9.9.9", false, "v8.8.8", "no amf v8.8.8 for " + runtime.GOOS + "/" + runtime.GOARCH},
+	} {
+		u, _ := newTestUpdater(t, fakeReleases(t, "v9.9.9", tc.reports, tc.badSum), "v0.0.7")
+		err := u.run(context.Background(), tc.target, false)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err = %v, want %q", tc.name, err, tc.want)
+		}
+		if mustRead(t, u.exe) != "old binary" {
+			t.Errorf("%s: binary should be unchanged", tc.name)
+		}
 	}
 }

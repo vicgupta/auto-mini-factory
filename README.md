@@ -25,6 +25,18 @@ go install github.com/vicgupta/auto-mini-factory/cmd/amf@latest
 
 Needs `git` and the [`claude`](https://claude.com/claude-code) CLI on `PATH`.
 
+To update later:
+
+```sh
+amf update            # replace this amf with the latest release
+amf update --check    # only say whether there is a newer one
+amf update --version v0.0.7   # install a specific release (also downgrades)
+```
+
+`amf update` downloads the same release archives as `install.sh`, checks them
+against `checksums.txt`, makes sure the new binary runs, then swaps it in place
+of the running one. It needs write access to the folder `amf` is in.
+
 ## Configure
 
 In a clone of the repo you want amf to work on, run:
