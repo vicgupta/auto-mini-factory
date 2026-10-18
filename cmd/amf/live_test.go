@@ -366,6 +366,18 @@ func TestLive(t *testing.T) {
 		}
 	})
 
+	t.Run("doctor", func(t *testing.T) {
+		out, _, code := l.amf("", nil, "doctor")
+		if code != 0 {
+			t.Errorf("amf doctor: exit %d", code)
+		}
+		for _, want := range []string{"github", "repo", "labels", "checkout", "git push", "pipeline", "claudecode"} {
+			if !regexp.MustCompile(`(?m)^ok +` + want + ` `).MatchString(out) {
+				t.Errorf("doctor: %s isn't ok:\n%s", want, out)
+			}
+		}
+	})
+
 	t.Run("issue and list", func(t *testing.T) {
 		n := l.newIssue("List check", "Not for amf to run.", "--no-label")
 		if got := l.labelsOf(n); len(got) != 0 {

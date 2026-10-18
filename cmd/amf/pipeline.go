@@ -278,18 +278,7 @@ func fetchSkill(ctx context.Context, client *http.Client, raw string) (string, e
 // loadPipeline reads the pipeline from AGENTS.md on origin/base and checks
 // that its agents are installed. It returns nil when the repo declares none.
 func (r *Runner) loadPipeline(ctx context.Context, base string) (*Pipeline, error) {
-	if _, err := git(ctx, r.Root, "fetch", "origin", base); err != nil {
-		return nil, err
-	}
-	ref := "origin/" + base + ":AGENTS.md"
-	if _, err := git(ctx, r.Root, "cat-file", "-e", ref); err != nil {
-		return nil, nil
-	}
-	md, err := git(ctx, r.Root, "show", ref)
-	if err != nil {
-		return nil, err
-	}
-	p, err := parsePipeline(md)
+	p, err := readPipeline(ctx, r.Root, base)
 	if p == nil || err != nil {
 		return p, err
 	}
@@ -299,6 +288,23 @@ func (r *Runner) loadPipeline(ctx context.Context, base string) (*Pipeline, erro
 		}
 	}
 	return p, nil
+}
+
+// readPipeline fetches base and parses the pipeline in AGENTS.md on
+// origin/base. It returns nil when the repo declares none.
+func readPipeline(ctx context.Context, root, base string) (*Pipeline, error) {
+	if _, err := git(ctx, root, "fetch", "origin", base); err != nil {
+		return nil, err
+	}
+	ref := "origin/" + base + ":AGENTS.md"
+	if _, err := git(ctx, root, "cat-file", "-e", ref); err != nil {
+		return nil, nil
+	}
+	md, err := git(ctx, root, "show", ref)
+	if err != nil {
+		return nil, err
+	}
+	return parsePipeline(md)
 }
 
 func (r *Runner) agentBin(agent string) string {

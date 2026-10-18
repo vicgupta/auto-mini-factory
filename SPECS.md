@@ -33,6 +33,7 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened)
 | `amf run <N> [--timeout 30m] [--eval-rounds 2]` | Processes issue N once. |
 | `amf watch [--interval 60s] [--label amf:ready] [--timeout 30m] [--eval-rounds 2]` | Polls open issues with the label (every page), oldest first, and processes them one at a time until interrupted. |
 | `amf pipeline [--fetch]` | Checks the pipeline in `AGENTS.md` of the enclosing checkout, as it is on disk. See below. |
+| `amf doctor` | Checks the whole setup, one line per check, changing nothing. See below. |
 | `amf update [--version vX.Y.Z] [--check]` | Replaces the running binary with the latest release, or with the given one, which can be a downgrade. Needs no `.env`. See below. |
 | `amf version` | Prints the version: the release tag, or the module version for `go install`. |
 
@@ -75,6 +76,34 @@ SIGTERM cancel the current step; the issue is still marked failed.
    failed.
 5. A table that doesn't parse is an error. Missing agents and failed skills
    end with `the pipeline has N problems` and exit 1.
+
+### `amf doctor`
+
+Prints one line per check, as `<status>  <check>  <detail>`. The status is
+`ok`, `warn` (works, but worth knowing), `FAIL`, or `skip` (an earlier check
+it depends on failed). Any `FAIL` ends with `doctor found N problems` and
+exit 1; warnings alone exit 0. It never clones, creates labels or pushes, and
+never prints a secret. The checks, in order:
+
+| Check | `ok` when | Otherwise |
+|---|---|---|
+| `amf` | The running version is the latest release | `warn`: a newer release (run `amf update`), a development build, or no answer from GitHub |
+| `git` | `git` runs; shows its version | `FAIL` |
+| `.env` | A `.env` was found where `run` looks; shows its path | `warn` if there is none (the environment is used); `FAIL` if it doesn't parse |
+| `GITHUB_TOKEN` | Set; says whether from `.env` or the environment | `FAIL` if unset or a placeholder |
+| `GITHUB_REPO` | Set and `owner/name` | `FAIL` |
+| `github` | `GET /user` accepts the token; shows the login | `FAIL` on 401 or no connection |
+| `repo` | The repo is readable; shows its default branch | `FAIL` on 404; `warn` if the account can't push |
+| `labels` | All four amf labels exist | `warn`, naming the missing ones |
+| `checkout` | The checkout `run` would use: the enclosing one, or `./<name>` | `warn` if `run` would clone first or origin isn't `GITHUB_REPO`; `FAIL` if `./<name>` isn't a clone or there's no origin |
+| `git push` | `git push --dry-run` to `origin` works with the user's git credentials, without prompting | `FAIL`, with git's message |
+| `pipeline` | Fetches the default branch; shows the pipeline from `AGENTS.md` on it, or that there is none | `FAIL` if the table doesn't parse |
+| `skill <stage>` | Each stage's skill downloads as in `run`; shows its size and SHA-256 | `FAIL` |
+| `claudecode`, `codex`, `opencode` | Installed; shows the path and `--version` | `FAIL` if a stage needs it (or, with no pipeline, for `claude`); else `warn` |
+| `claude login` | Always; says whether `CLAUDE_CODE_OAUTH_TOKEN` is set or Claude uses its own login | |
+
+Checks that need GitHub, the repo or a checkout are `skip` without them.
+Agents' own logins aren't checked: their CLIs can't report them reliably.
 
 ## Configuration
 

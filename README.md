@@ -80,6 +80,35 @@ already has.
 
 Keep `.env` out of git: add it to the target repo's `.gitignore`.
 
+### Check your setup
+
+`amf doctor` checks everything amf needs, one line each, without changing
+anything:
+
+```
+$ amf doctor
+ok    amf           v0.3.0, the latest release
+ok    git           git version 2.56.0
+ok    .env          /tmp/amf/.env
+ok    GITHUB_TOKEN  set, from /tmp/amf/.env
+ok    GITHUB_REPO   vicgupta/factory-demo-app, from /tmp/amf/.env
+ok    github        token accepted for @vicgupta at https://api.github.com
+ok    repo          vicgupta/factory-demo-app, default branch main
+ok    labels        all 4 amf labels exist
+ok    checkout      /tmp/amf/factory-demo-app, the clone run and watch use here
+ok    git push      your git credentials can push to origin (checked with --dry-run)
+ok    pipeline      none in AGENTS.md on origin/main; amf runs claude once per issue
+ok    claudecode    /Users/vic/.local/bin/claude, 2.1.302 (Claude Code)
+warn  codex         codex is not installed; only needed by pipelines that use codex
+ok    opencode      /Users/vic/.opencode/bin/opencode, opencode v2.0.32
+ok    claude login  CLAUDE_CODE_OAUTH_TOKEN is not set; claude uses its own login
+```
+
+Each line is `ok`, `warn` (works, but worth knowing), `FAIL`, or `skip` (an
+earlier check it needs failed). Any `FAIL` makes it exit 1. With a pipeline,
+it also downloads each skill, and an agent the pipeline uses but that isn't
+installed is a `FAIL`.
+
 ## Use
 
 Run `run` and `watch` inside a clone of `GITHUB_REPO`, or from any folder that
@@ -115,7 +144,8 @@ Without a pipeline (see below), amf runs Claude once:
    (`tail -f` it to follow along). Default timeout is 30 minutes (`--timeout`).
 4. Commits the changes (`Fix #N: <title>`), fails if there are none, and runs
    `git push --force -u origin amf/issue-N` with your own git credentials.
-5. Opens a PR with Claude's final message as the body plus `Closes #N`.
+5. Opens a PR with Claude's final message as the body plus `Closes #N`. On a
+   retry whose PR is still open, it updates that PR instead.
 6. Comments the PR link on the issue, labels it `amf:done`, removes the worktree.
 
 On any failure the issue gets `amf:failed` plus a comment with the reason,

@@ -205,7 +205,10 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
 	mux := http.NewServeMux()
 	const repo = "/repos/vic/demo"
 	mux.HandleFunc("GET "+repo, func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, 200, map[string]string{"default_branch": "main"})
+		writeJSON(w, 200, map[string]any{"default_branch": "main", "permissions": map[string]bool{"push": true}})
+	})
+	mux.HandleFunc("GET /user", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, map[string]string{"login": "vic"})
 	})
 	mux.HandleFunc("POST "+repo+"/issues", func(w http.ResponseWriter, r *http.Request) {
 		var in struct {

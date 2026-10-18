@@ -42,6 +42,7 @@ Usage:
   amf run <issue-number> [--timeout 30m] [--eval-rounds 2]        process one issue into a PR
   amf watch [--interval 60s] [--label amf:ready] [--timeout 30m]  process amf:ready issues as they arrive (also takes --eval-rounds)
   amf pipeline [--fetch]                                          check the plan/code/eval pipeline in this checkout's AGENTS.md
+  amf doctor                                                      check the setup here, one line per check, changing nothing
   amf update [--version vX.Y.Z] [--check]                         replace this amf binary with the latest (or given) release
   amf version
 
@@ -96,6 +97,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return cmdWatch(ctx, rest, stderr)
 	case "pipeline":
 		return cmdPipeline(ctx, rest, stdout, stderr)
+	case "doctor":
+		return cmdDoctor(ctx, rest, stdout, stderr)
 	case "update":
 		return cmdUpdate(ctx, rest, stdout, stderr)
 	case "version", "--version":

@@ -73,11 +73,19 @@ func loadConfig(paths ...string) (Config, error) {
 	if cfg.Repo == "" {
 		return cfg, errors.New("GITHUB_REPO is not set (run amf init, then edit .env)")
 	}
-	if owner, name, ok := strings.Cut(cfg.Repo, "/"); !ok || owner == "" || name == "" || strings.Contains(name, "/") {
-		return cfg, fmt.Errorf("GITHUB_REPO must look like owner/name, got %q", cfg.Repo)
+	if err := validRepo(cfg.Repo); err != nil {
+		return cfg, err
 	}
 	cfg.CloneURL = get("AMF_CLONE_URL", "https://github.com/"+cfg.Repo+".git")
 	return cfg, nil
+}
+
+// validRepo checks that repo looks like owner/name.
+func validRepo(repo string) error {
+	if owner, name, ok := strings.Cut(repo, "/"); !ok || owner == "" || name == "" || strings.Contains(name, "/") {
+		return fmt.Errorf("GITHUB_REPO must look like owner/name, got %q", repo)
+	}
+	return nil
 }
 
 // normalizeRepo accepts owner/name or a github.com URL for it.
