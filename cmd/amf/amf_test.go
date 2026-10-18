@@ -76,6 +76,21 @@ func TestLoadConfig(t *testing.T) {
 	}
 }
 
+func TestNormalizeRepo(t *testing.T) {
+	for _, in := range []string{
+		"vic/demo",
+		"vic/demo/",
+		"https://github.com/vic/demo",
+		"https://github.com/vic/demo/",
+		"https://github.com/vic/demo.git",
+		"git@github.com:vic/demo.git",
+	} {
+		if got := normalizeRepo(in); got != "vic/demo" {
+			t.Errorf("normalizeRepo(%q) = %q, want %q", in, got, "vic/demo")
+		}
+	}
+}
+
 func TestParseArgs(t *testing.T) {
 	fs := flag.NewFlagSet("x", flag.ContinueOnError)
 	b := fs.String("b", "", "")
