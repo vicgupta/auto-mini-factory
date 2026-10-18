@@ -347,7 +347,7 @@ func needsWork(is Issue) bool {
 func (r *Runner) Watch(ctx context.Context, label string, interval time.Duration) error {
 	r.logf("watching %s for issues labeled %q every %s (Ctrl-C to stop)", r.Repo, label, interval)
 	for {
-		issues, err := r.GH.ListOpenIssues(ctx, label)
+		issues, err := r.GH.ListIssues(ctx, "open", label, true)
 		if err != nil && ctx.Err() == nil {
 			r.logf("listing issues: %v", err)
 		}

@@ -38,6 +38,7 @@ const usage = `amf turns GitHub issues into pull requests with Claude Code.
 Usage:
   amf init                                                        write .env (backing up an existing one) and create amf's labels
   amf issue "Title" [-b body | -f file.md] [--no-label]           create an issue (body may also come from stdin)
+  amf list [--state open|closed|all] [--label L]                  list issues, newest first, with their amf labels
   amf run <issue-number> [--timeout 30m]                          process one issue into a PR
   amf watch [--interval 60s] [--label amf:ready] [--timeout 30m]  process amf:ready issues as they arrive
   amf version
@@ -77,6 +78,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	switch cmd, rest := args[0], args[1:]; cmd {
 	case "init":
 		return cmdInit(ctx, rest, stdout, stderr)
+	case "list":
+		return cmdList(ctx, rest, stdout, stderr)
 	case "issue":
 		return cmdIssue(ctx, rest, stdin, stdout, stderr)
 	case "run":

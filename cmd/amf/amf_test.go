@@ -220,15 +220,29 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
 		writeJSON(w, 201, is)
 	})
 	mux.HandleFunc("GET "+repo+"/issues", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		var out []Issue
 		for n := 1; n <= len(f.issues); n++ {
-			if is := f.issues[n]; is.State == "open" && is.HasLabel(r.URL.Query().Get("labels")) {
+			is := f.issues[n]
+			if (q.Get("state") == "all" || is.State == q.Get("state")) && (q.Get("labels") == "" || is.HasLabel(q.Get("labels"))) {
 				out = append(out, *is)
 			}
 		}
-		writeJSON(w, 200, out)
+		if q.Get("direction") != "asc" {
+			slices.Reverse(out)
+		}
+		// Paginate like GitHub: per_page items per page, a Link header to the next.
+		perPage, _ := strconv.Atoi(q.Get("per_page"))
+		page, _ := strconv.Atoi(q.Get("page"))
+		page = max(page, 1)
+		start, end := min((page-1)*perPage, len(out)), min(page*perPage, len(out))
+		if end < len(out) {
+			q.Set("page", strconv.Itoa(page+1))
+			w.Header().Set("Link", fmt.Sprintf(`<http://%s%s?%s>; rel="next", <http://%s/x>; rel="last"`, r.Host, r.URL.Path, q.Encode(), r.Host))
+		}
+		writeJSON(w, 200, out[start:end])
 	})
 	mux.HandleFunc("GET "+repo+"/labels/{name}", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
@@ -805,5 +819,61 @@ func TestInitCreatesLabels(t *testing.T) {
 	os.WriteFile(".env", []byte("GITHUB_TOKEN=nope\nGITHUB_REPO=vic/demo\n"), 0o600)
 	if err := run(context.Background(), []string{"init"}, nil, io.Discard, io.Discard); err == nil || !strings.Contains(err.Error(), "rejected GITHUB_TOKEN") {
 		t.Fatalf("expected bad-token error, got %v", err)
+	}
+}
+
+func TestListIssuesPaginates(t *testing.T) {
+	gh, srv := newFakeGitHub(t)
+	for n := 1; n <= 250; n++ {
+		gh.issues[n] = &Issue{Number: n, Title: fmt.Sprint("issue ", n), State: "open"}
+	}
+	gh.issues[7].PullRequest = &struct{}{}
+	c := newGitHub(Config{Token: "test-token", Repo: "vic/demo", APIURL: srv.URL})
+
+	issues, err := c.ListIssues(context.Background(), "open", "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 249 || issues[0].Number != 1 || issues[248].Number != 250 {
+		t.Fatalf("got %d issues (first #%d), want 249 oldest first without the PR", len(issues), issues[0].Number)
+	}
+	if slices.ContainsFunc(issues, func(is Issue) bool { return is.Number == 7 }) {
+		t.Fatal("pull requests should be left out")
+	}
+}
+
+func TestListCommand(t *testing.T) {
+	gh, srv := newFakeGitHub(t)
+	gh.issues[1] = &Issue{Number: 1, Title: "Old done", State: "closed", Labels: []Label{{Name: "amf:done"}, {Name: "bug"}}}
+	gh.issues[2] = &Issue{Number: 2, Title: "Waiting", State: "open", Labels: []Label{{Name: "amf:ready"}}}
+	gh.issues[3] = &Issue{Number: 3, Title: "Plain\tissue", State: "open"}
+	gh.issues[4] = &Issue{Number: 4, Title: "A PR", State: "open", PullRequest: &struct{}{}}
+	t.Chdir(t.TempDir())
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	t.Setenv("GITHUB_REPO", "vic/demo")
+	t.Setenv("AMF_API_URL", srv.URL)
+	list := func(args ...string) string {
+		t.Helper()
+		var out bytes.Buffer
+		if err := run(context.Background(), append([]string{"list"}, args...), nil, &out, io.Discard); err != nil {
+			t.Fatalf("amf list %v: %v", args, err)
+		}
+		return out.String()
+	}
+
+	if got, want := list(), "ISSUE  AMF        TITLE\n#3     -          Plain issue\n#2     amf:ready  Waiting\n"; got != want {
+		t.Errorf("amf list =\n%s\nwant\n%s", got, want)
+	}
+	if got := list("--state", "all"); !strings.Contains(got, "STATE") || !strings.Contains(got, "#1     closed  amf:done") {
+		t.Errorf("amf list --state all =\n%s", got)
+	}
+	if got := list("--label", "amf:ready"); strings.Contains(got, "#3") || !strings.Contains(got, "#2") {
+		t.Errorf("amf list --label amf:ready =\n%s", got)
+	}
+	if got := list("--state", "closed", "--label", "amf:failed"); got != "No closed issues labeled amf:failed in vic/demo.\n" {
+		t.Errorf("empty list = %q", got)
+	}
+	if err := run(context.Background(), []string{"list", "--state", "bogus"}, nil, io.Discard, io.Discard); err == nil {
+		t.Error("expected an error for --state bogus")
 	}
 }

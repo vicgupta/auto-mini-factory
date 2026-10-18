@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -74,17 +75,23 @@ func isStatus(err error, status int) bool {
 }
 
 func (g *GitHub) do(ctx context.Context, method, path string, in, out any) error {
+	_, err := g.send(ctx, method, path, in, out)
+	return err
+}
+
+// send is do, also returning the response headers (for pagination).
+func (g *GitHub) send(ctx context.Context, method, path string, in, out any) (http.Header, error) {
 	var body io.Reader
 	if in != nil {
 		b, err := json.Marshal(in)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		body = bytes.NewReader(b)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, g.base+path, body)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+g.token)
 	req.Header.Set("Accept", "application/vnd.github+json")
@@ -94,7 +101,7 @@ func (g *GitHub) do(ctx context.Context, method, path string, in, out any) error
 	}
 	resp, err := g.http.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
@@ -107,12 +114,12 @@ func (g *GitHub) do(ctx context.Context, method, path string, in, out any) error
 		if json.Unmarshal(raw, &parsed) == nil && parsed.Message != "" {
 			msg = parsed.Message
 		}
-		return &APIError{Method: method, Path: path, Status: resp.StatusCode, Message: msg}
+		return nil, &APIError{Method: method, Path: path, Status: resp.StatusCode, Message: msg}
 	}
 	if out == nil {
-		return nil
+		return resp.Header, nil
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	return resp.Header, json.NewDecoder(resp.Body).Decode(out)
 }
 
 func (g *GitHub) repoPath(format string, a ...any) string {
@@ -148,27 +155,51 @@ func (g *GitHub) GetIssue(ctx context.Context, n int) (Issue, error) {
 	return is, err
 }
 
-// ListOpenIssues returns up to 100 open issues (not pull requests) carrying
-// label, oldest first.
-func (g *GitHub) ListOpenIssues(ctx context.Context, label string) ([]Issue, error) {
-	q := url.Values{
-		"state":     {"open"},
-		"labels":    {label},
-		"sort":      {"created"},
-		"direction": {"asc"},
-		"per_page":  {"100"},
+// ListIssues returns every issue (not pull request) in the given state
+// (open, closed or all) carrying label, or any label if label is empty,
+// following GitHub's pagination. Issues are oldest first if asc, else newest first.
+func (g *GitHub) ListIssues(ctx context.Context, state, label string, asc bool) ([]Issue, error) {
+	q := url.Values{"state": {state}, "sort": {"created"}, "direction": {"desc"}, "per_page": {"100"}}
+	if asc {
+		q.Set("direction", "asc")
 	}
-	var all []Issue
-	if err := g.do(ctx, "GET", g.repoPath("/issues?%s", q.Encode()), nil, &all); err != nil {
-		return nil, err
+	if label != "" {
+		q.Set("labels", label)
 	}
-	issues := all[:0]
-	for _, is := range all {
-		if is.PullRequest == nil {
-			issues = append(issues, is)
+	var issues []Issue
+	for path := g.repoPath("/issues?%s", q.Encode()); path != ""; {
+		var page []Issue
+		header, err := g.send(ctx, "GET", path, nil, &page)
+		if err != nil {
+			return nil, err
+		}
+		for _, is := range page {
+			if is.PullRequest == nil {
+				issues = append(issues, is)
+			}
+		}
+		if path, err = g.nextPage(header); err != nil {
+			return nil, err
 		}
 	}
 	return issues, nil
+}
+
+// nextPage is the path of the rel="next" page in a Link header, or "" on the last page.
+func (g *GitHub) nextPage(h http.Header) (string, error) {
+	for _, link := range strings.Split(h.Get("Link"), ",") {
+		target, params, ok := strings.Cut(strings.TrimSpace(link), ";")
+		if !ok || !strings.Contains(params, `rel="next"`) {
+			continue
+		}
+		target = strings.Trim(strings.TrimSpace(target), "<>")
+		path, ok := strings.CutPrefix(target, g.base)
+		if !ok {
+			return "", fmt.Errorf("github pagination link %q is outside %s", target, g.base)
+		}
+		return path, nil
+	}
+	return "", nil
 }
 
 // LabelSpec describes a repository label.

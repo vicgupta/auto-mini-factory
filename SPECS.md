@@ -26,8 +26,9 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened)
 |---|---|
 | `amf init` | Writes `./.env` and creates the labels (see below). |
 | `amf issue "Title" [-b body \| -f file \| -f -] [--label L] [--no-label]` | Creates an issue labeled `amf:ready`. The body can also come from stdin when it's piped. Prints `#N <url>`. |
+| `amf list [--state open\|closed\|all] [--label L]` | Lists issues, newest first, with every page fetched and PRs left out. Columns: `ISSUE`, `STATE` (with `--state all` only), `AMF` (the issue's `amf` and `amf:*` labels, or `-`) and `TITLE`. Prints `No … in owner/name.` when nothing matches. Needs no git checkout. |
 | `amf run <N> [--timeout 30m]` | Processes issue N once. |
-| `amf watch [--interval 60s] [--label amf:ready] [--timeout 30m]` | Polls open issues with the label, oldest first (first 100 only), and processes them one at a time until interrupted. |
+| `amf watch [--interval 60s] [--label amf:ready] [--timeout 30m]` | Polls open issues with the label (every page), oldest first, and processes them one at a time until interrupted. |
 | `amf version` | Prints the version: the release tag, or the module version for `go install`. |
 
 **Exit codes:** 0 on success, 1 on error, 2 on a usage error. SIGINT and
@@ -128,4 +129,3 @@ amf only ever adds to `.git/info/exclude`. It never edits a tracked `.gitignore`
 - Running issues in parallel. `watch` processes one at a time.
 - Reviewing, merging, or retrying failed PRs. People do that.
 - Sandboxing Claude.
-- More than 100 open `amf:ready` issues per poll.
