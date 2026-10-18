@@ -215,7 +215,9 @@ func (r *Runner) runClaude(ctx context.Context, wt string, issue Issue, branch s
 
 	ctx, cancel := context.WithTimeout(ctx, r.Timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, r.Claude, "-p", "--dangerously-skip-permissions", "--output-format", "json")
+	// stream-json writes one JSON message per line as Claude works, so the log
+	// fills in live; it requires --verbose in print mode.
+	cmd := exec.CommandContext(ctx, r.Claude, "-p", "--dangerously-skip-permissions", "--output-format", "stream-json", "--verbose")
 	cmd.Dir = wt
 	cmd.Env = r.claudeEnv(os.Environ())
 	cmd.Stdin = strings.NewReader(buildPrompt(r.Repo, branch, issue))
@@ -233,35 +235,67 @@ func (r *Runner) runClaude(ctx context.Context, wt string, issue Issue, branch s
 	return parseClaudeResult(stdout.Bytes())
 }
 
-// parseClaudeResult extracts the final message from `claude -p --output-format json`.
-// Depending on the Claude Code version that is a single result object or an
-// array of messages ending in one. Anything else is treated as plain text.
+// claudeResult is the final message Claude prints in its JSON output formats.
+type claudeResult struct {
+	Type    string `json:"type"`
+	Subtype string `json:"subtype"`
+	IsError bool   `json:"is_error"`
+	Result  string `json:"result"`
+}
+
+// parseClaudeResult extracts the final message from Claude's output. That is
+// stream-json (one message per line, ending in a result), or for
+// `--output-format json` a single result object or an array of messages
+// ending in one, depending on the Claude Code version. Output that isn't JSON
+// is treated as plain text.
 func parseClaudeResult(out []byte) (string, error) {
 	out = bytes.TrimSpace(out)
-	type result struct {
-		Type    string `json:"type"`
-		Subtype string `json:"subtype"`
-		IsError bool   `json:"is_error"`
-		Result  string `json:"result"`
+	res, ok, isJSON := lastResult(out)
+	if !isJSON {
+		return string(out), nil
 	}
-	var res result
-	if err := json.Unmarshal(out, &res); err != nil || res.Type != "result" {
-		var msgs []result
-		if json.Unmarshal(out, &msgs) != nil {
-			return string(out), nil
-		}
-		found := false
-		for i := len(msgs) - 1; i >= 0 && !found; i-- {
-			res, found = msgs[i], msgs[i].Type == "result"
-		}
-		if !found {
-			return "", errors.New("claude output has no result message")
-		}
+	if !ok {
+		return "", errors.New("claude output has no result message")
 	}
 	if res.IsError {
 		return "", fmt.Errorf("claude reported an error (%s): %s", res.Subtype, truncate(res.Result, 500))
 	}
 	return res.Result, nil
+}
+
+// lastResult finds the last result message in out. isJSON is false when out
+// isn't in any of Claude's JSON formats.
+func lastResult(out []byte) (res claudeResult, ok, isJSON bool) {
+	if json.Unmarshal(out, &res) == nil {
+		return res, res.Type == "result", true
+	}
+	var msgs []claudeResult
+	if json.Unmarshal(out, &msgs) == nil {
+		return lastOfType(msgs)
+	}
+	lines := bytes.Split(out, []byte("\n"))
+	msgs = msgs[:0]
+	for _, line := range lines {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		var m claudeResult
+		if json.Unmarshal(line, &m) != nil {
+			return claudeResult{}, false, false
+		}
+		msgs = append(msgs, m)
+	}
+	return lastOfType(msgs)
+}
+
+func lastOfType(msgs []claudeResult) (claudeResult, bool, bool) {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Type == "result" {
+			return msgs[i], true, true
+		}
+	}
+	return claudeResult{}, false, true
 }
 
 func (r *Runner) setStatus(ctx context.Context, n int, status string) error {

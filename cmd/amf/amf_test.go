@@ -119,6 +119,14 @@ func TestParseClaudeResult(t *testing.T) {
 	if _, err := parseClaudeResult([]byte(`[{"type":"system"}]`)); err == nil {
 		t.Fatal("expected array without a result to fail")
 	}
+	// stream-json: one message per line.
+	got, err = parseClaudeResult([]byte("{\"type\":\"system\",\"subtype\":\"init\"}\n{\"type\":\"assistant\"}\n{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"From stream\"}\n"))
+	if err != nil || got != "From stream" {
+		t.Fatalf("stream-json: got %q, %v", got, err)
+	}
+	if _, err := parseClaudeResult([]byte("{\"type\":\"system\"}\n{\"type\":\"assistant\"}\n")); err == nil {
+		t.Fatal("expected stream without a result to fail")
+	}
 	if got, _ := parseClaudeResult([]byte("plain text\n")); got != "plain text" {
 		t.Fatalf("plain text: got %q", got)
 	}
@@ -332,11 +340,13 @@ func TestRunOpensPR(t *testing.T) {
 	claude := fakeClaude(t, `
 prompt=$(cat)
 case "$prompt" in *"Add feature file"*"Please add feature.txt"*) ;; *) echo "bad prompt: $prompt" >&2; exit 4;; esac
-case "$*" in *--dangerously-skip-permissions*) ;; *) echo "missing flag: $*" >&2; exit 5;; esac
+case "$*" in *--dangerously-skip-permissions*"--output-format stream-json --verbose"*) ;; *) echo "missing flag: $*" >&2; exit 5;; esac
 if [ -n "$GITHUB_TOKEN" ]; then echo "token leaked" >&2; exit 3; fi
 if [ "$CLAUDE_CODE_OAUTH_TOKEN" != "sk-ant-oat-test" ]; then echo "oauth token missing" >&2; exit 6; fi
 if [ -n "$ANTHROPIC_API_KEY" ]; then echo "api key should be dropped" >&2; exit 7; fi
+echo '{"type":"system","subtype":"init"}'
 echo hello > feature.txt
+echo '{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}'
 echo '{"type":"result","subtype":"success","is_error":false,"result":"Added feature.txt.\n\nVerified with ls."}'
 `)
 	r, log := newTestRunner(t, srv, root, claude)
@@ -607,4 +617,77 @@ func mustRead(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return string(b)
+}
+
+func TestNewRunnerClonesOutsideCheckout(t *testing.T) {
+	_, origin := setupRepo(t)
+	_, srv := newFakeGitHub(t)
+	dir := t.TempDir()
+	t.Chdir(dir)
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	t.Setenv("GITHUB_REPO", "vic/demo")
+	t.Setenv("AMF_API_URL", srv.URL)
+	t.Setenv("AMF_CLONE_URL", origin)
+	ctx := context.Background()
+
+	var log bytes.Buffer
+	r, err := newRunner(ctx, time.Minute, &log)
+	if err != nil {
+		t.Fatalf("newRunner: %v\n%s", err, log.String())
+	}
+	if want, _ := filepath.EvalSymlinks(filepath.Join(dir, "demo")); mustEval(t, r.Root) != want {
+		t.Fatalf("Root = %s, want %s", r.Root, want)
+	}
+	if !strings.Contains(log.String(), "cloning vic/demo into") {
+		t.Fatalf("log = %q", log.String())
+	}
+	if got := mustGit(t, r.Root, "log", "--format=%s", "-1"); got != "initial" {
+		t.Fatalf("clone HEAD = %q", got)
+	}
+
+	// The next run reuses the clone.
+	log.Reset()
+	if _, err := newRunner(ctx, time.Minute, &log); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(log.String(), "using the clone at") {
+		t.Fatalf("log = %q", log.String())
+	}
+
+	// A folder with the repo's name that isn't its clone is left alone.
+	t.Chdir(t.TempDir())
+	os.Mkdir("demo", 0o755)
+	if _, err := newRunner(ctx, time.Minute, io.Discard); err == nil || !strings.Contains(err.Error(), "is not a clone of vic/demo") {
+		t.Fatalf("expected not-a-clone error, got %v", err)
+	}
+}
+
+func TestNewRunnerUnknownRepo(t *testing.T) {
+	_, srv := newFakeGitHub(t)
+	t.Chdir(t.TempDir())
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	t.Setenv("GITHUB_REPO", "vicc/demo")
+	t.Setenv("AMF_API_URL", srv.URL)
+	_, err := newRunner(context.Background(), time.Minute, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "GITHUB_REPO vicc/demo was not found") {
+		t.Fatalf("expected not-found error, got %v", err)
+	}
+	if m, _ := filepath.Glob("*"); len(m) != 0 {
+		t.Fatalf("nothing should be cloned for an unknown repo, got %v", m)
+	}
+
+	t.Setenv("GITHUB_TOKEN", "wrong-token")
+	t.Setenv("GITHUB_REPO", "vic/demo")
+	if _, err := newRunner(context.Background(), time.Minute, io.Discard); err == nil || !strings.Contains(err.Error(), "rejected GITHUB_TOKEN") {
+		t.Fatalf("expected bad-token error, got %v", err)
+	}
+}
+
+func mustEval(t *testing.T, p string) string {
+	t.Helper()
+	r, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
 }

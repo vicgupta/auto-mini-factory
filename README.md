@@ -65,7 +65,10 @@ Keep `.env` out of git: add it to the target repo's `.gitignore`.
 
 ## Use
 
-Run `run` and `watch` from inside a local clone of `GITHUB_REPO`.
+Run `run` and `watch` inside a clone of `GITHUB_REPO`, or from any folder that
+holds your `.env`. There, amf clones the repo into `./<name>` the first time
+(using your git credentials) and reuses that clone afterwards. amf checks
+`GITHUB_REPO` against GitHub first, so a typo fails with a clear message.
 
 ```sh
 amf issue "Add dark mode" -b "Use CSS variables for the palette"
@@ -82,10 +85,11 @@ amf watch --interval 60s    # process issues labeled `amf`, one at a time
 1. Labels the issue `amf:in-progress`.
 2. Fetches the default branch and creates a worktree at
    `.amf/worktrees/issue-N` on branch `amf/issue-N` from `origin/<default>`.
-3. Runs `claude -p --dangerously-skip-permissions --output-format json` in the
+3. Runs `claude -p --dangerously-skip-permissions --output-format stream-json --verbose` in the
    worktree with the issue as the prompt. Claude is told to make the change,
-   run the project's tests/build, and not touch git. Output goes to
-   `.amf/logs/issue-N.log`. Default timeout is 30 minutes (`--timeout`).
+   run the project's tests/build, and not touch git. Output streams to
+   `.amf/logs/issue-N.log` as it works, one JSON message per line
+   (`tail -f` it to follow along). Default timeout is 30 minutes (`--timeout`).
 4. Commits the changes (`Fix #N: <title>`), fails if there are none, and runs
    `git push --force -u origin amf/issue-N` with your own git credentials.
 5. Opens a PR with Claude's final message as the body plus `Closes #N`.
@@ -111,6 +115,10 @@ code you're executing on your machine.
 - `GITHUB_TOKEN` is stripped from Claude's environment, but Claude can still
   read files on disk, including `.env` at the top of your checkout. For full
   isolation, run amf in a container or VM.
+
+## Spec
+
+See [SPECS.md](SPECS.md).
 
 ## Develop
 

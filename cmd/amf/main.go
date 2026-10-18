@@ -48,8 +48,10 @@ Configuration is read from .env (or the environment):
   CLAUDE_CODE_OAUTH_TOKEN  optional subscription token for Claude Code (claude setup-token)
   AMF_CLAUDE     path to the claude binary (default "claude")
   AMF_API_URL    GitHub API base URL (default https://api.github.com)
+  AMF_CLONE_URL  URL to clone GITHUB_REPO from (default https://github.com/GITHUB_REPO.git)
 
-run and watch must be started inside a clone of GITHUB_REPO.
+run and watch work in the enclosing git checkout. Started anywhere else, they
+clone GITHUB_REPO into ./<name> (or reuse that clone) and work there.
 `
 
 var errUsage = errors.New("usage")
@@ -187,24 +189,28 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 }
 
 func newRunner(ctx context.Context, timeout time.Duration, log io.Writer) (*Runner, error) {
-	root, err := git(ctx, ".", "rev-parse", "--show-toplevel")
-	if err != nil {
-		return nil, errors.New("run amf inside a git clone of GITHUB_REPO")
-	}
 	cfg, err := loadConfig(envPaths(ctx)...)
 	if err != nil {
 		return nil, err
 	}
+	gh := newGitHub(cfg)
+	if err := checkRepo(ctx, gh, cfg.Repo); err != nil {
+		return nil, err
+	}
+	root, err := checkoutRoot(ctx, cfg, log)
+	if err != nil {
+		return nil, err
+	}
 	if origin, err := git(ctx, root, "remote", "get-url", "origin"); err != nil {
-		return nil, errors.New("this checkout has no origin remote")
-	} else if !strings.EqualFold(normalizeRepo(strings.TrimPrefix(origin, "ssh://git@github.com/")), cfg.Repo) {
+		return nil, fmt.Errorf("%s has no origin remote", root)
+	} else if !strings.EqualFold(repoFromRemote(origin), cfg.Repo) && origin != cfg.CloneURL {
 		fmt.Fprintf(log, "amf: warning: origin is %s but GITHUB_REPO is %s\n", origin, cfg.Repo)
 	}
 	if err := excludeFromGit(ctx, root, "amf worktrees and logs", "/.amf/"); err != nil {
 		return nil, err
 	}
 	return &Runner{
-		GH:          newGitHub(cfg),
+		GH:          gh,
 		Repo:        cfg.Repo,
 		Root:        root,
 		Claude:      cfg.Claude,

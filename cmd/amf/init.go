@@ -163,11 +163,7 @@ func originRepo(ctx context.Context) string {
 	if err != nil {
 		return ""
 	}
-	repo := normalizeRepo(strings.TrimPrefix(url, "ssh://git@github.com/"))
-	if owner, name, ok := strings.Cut(repo, "/"); !ok || owner == "" || name == "" || strings.ContainsAny(name, "/:") || strings.Contains(owner, ":") {
-		return ""
-	}
-	return repo
+	return repoFromRemote(url)
 }
 
 // envKeys lists the keys in a .env file in the order they appear.

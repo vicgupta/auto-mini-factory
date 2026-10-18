@@ -16,6 +16,9 @@ type Config struct {
 	Repo   string // GITHUB_REPO, as owner/name
 	APIURL string // AMF_API_URL, defaults to https://api.github.com
 	Claude string // AMF_CLAUDE, path to the claude binary, defaults to "claude"
+	// CloneURL is AMF_CLONE_URL, where to clone GITHUB_REPO from when amf
+	// isn't started inside a checkout. Defaults to https://github.com/<repo>.git.
+	CloneURL string
 
 	// ClaudeToken is CLAUDE_CODE_OAUTH_TOKEN, a subscription token from
 	// `claude setup-token`. Optional: without it Claude uses its own login.
@@ -69,6 +72,7 @@ func loadConfig(paths ...string) (Config, error) {
 	if owner, name, ok := strings.Cut(cfg.Repo, "/"); !ok || owner == "" || name == "" || strings.Contains(name, "/") {
 		return cfg, fmt.Errorf("GITHUB_REPO must look like owner/name, got %q", cfg.Repo)
 	}
+	cfg.CloneURL = get("AMF_CLONE_URL", "https://github.com/"+cfg.Repo+".git")
 	return cfg, nil
 }
 
