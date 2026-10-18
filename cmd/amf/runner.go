@@ -234,17 +234,29 @@ func (r *Runner) runClaude(ctx context.Context, wt string, issue Issue, branch s
 }
 
 // parseClaudeResult extracts the final message from `claude -p --output-format json`.
-// Anything that isn't that JSON is treated as plain text output.
+// Depending on the Claude Code version that is a single result object or an
+// array of messages ending in one. Anything else is treated as plain text.
 func parseClaudeResult(out []byte) (string, error) {
 	out = bytes.TrimSpace(out)
-	var res struct {
+	type result struct {
 		Type    string `json:"type"`
 		Subtype string `json:"subtype"`
 		IsError bool   `json:"is_error"`
 		Result  string `json:"result"`
 	}
+	var res result
 	if err := json.Unmarshal(out, &res); err != nil || res.Type != "result" {
-		return string(out), nil
+		var msgs []result
+		if json.Unmarshal(out, &msgs) != nil {
+			return string(out), nil
+		}
+		found := false
+		for i := len(msgs) - 1; i >= 0 && !found; i-- {
+			res, found = msgs[i], msgs[i].Type == "result"
+		}
+		if !found {
+			return "", errors.New("claude output has no result message")
+		}
 	}
 	if res.IsError {
 		return "", fmt.Errorf("claude reported an error (%s): %s", res.Subtype, truncate(res.Result, 500))

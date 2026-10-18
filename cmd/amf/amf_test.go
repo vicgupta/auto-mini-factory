@@ -93,6 +93,17 @@ func TestParseClaudeResult(t *testing.T) {
 	if _, err := parseClaudeResult([]byte(`{"type":"result","subtype":"error_max_turns","is_error":true,"result":"x"}`)); err == nil {
 		t.Fatal("expected error result to fail")
 	}
+	// Newer Claude Code versions print an array of messages ending in the result.
+	got, err = parseClaudeResult([]byte(`[{"type":"system","subtype":"init"},{"type":"assistant"},{"type":"result","subtype":"success","is_error":false,"result":"From array"}]`))
+	if err != nil || got != "From array" {
+		t.Fatalf("array: got %q, %v", got, err)
+	}
+	if _, err := parseClaudeResult([]byte(`[{"type":"result","subtype":"error_during_execution","is_error":true,"result":"boom"}]`)); err == nil {
+		t.Fatal("expected error result in array to fail")
+	}
+	if _, err := parseClaudeResult([]byte(`[{"type":"system"}]`)); err == nil {
+		t.Fatal("expected array without a result to fail")
+	}
 	if got, _ := parseClaudeResult([]byte("plain text\n")); got != "plain text" {
 		t.Fatalf("plain text: got %q", got)
 	}
