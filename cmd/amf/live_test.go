@@ -466,6 +466,21 @@ func TestLive(t *testing.T) {
 		}
 	})
 
+	t.Run("untrusted author", func(t *testing.T) {
+		n := l.newIssue("Untrusted", "Create the file `live/"+l.id+"/untrusted.txt` containing exactly: no")
+		_, errOut, code := l.amf("", []string{"AMF_TRUSTED=someone-else-" + l.id}, "run", strconv.Itoa(n))
+		if code != 1 || !strings.Contains(errOut, "not in AMF_TRUSTED") || strings.Contains(errOut, "running claude") {
+			t.Errorf("exit %d:\n%s", code, errOut)
+		}
+		l.wantLabels(n, labelFailed)
+		if cs := l.comments(n); len(cs) != 1 || !strings.Contains(cs[0], "AMF_TRUSTED") {
+			t.Errorf("comments = %q", cs)
+		}
+		if l.branchExists(fmt.Sprintf("amf/issue-%d", n)) {
+			t.Error("a branch was pushed")
+		}
+	})
+
 	t.Run("no changes fails the issue", func(t *testing.T) {
 		n := l.newIssue("Nothing to do", "This is a test of amf's failure handling. Do not create, edit or delete any files. Reply only with: No changes needed.")
 		_, _, code := l.amf("", nil, "run", strconv.Itoa(n), "--timeout", "15m")

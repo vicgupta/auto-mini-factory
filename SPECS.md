@@ -47,8 +47,8 @@ SIGTERM cancel the current step; the issue is still marked failed.
 
 ### `amf init`
 
-1. Builds `.env` from a template of `GITHUB_TOKEN`, `GITHUB_REPO` and
-   `CLAUDE_CODE_OAUTH_TOKEN`.
+1. Builds `.env` from a template of `GITHUB_TOKEN`, `GITHUB_REPO`,
+   `CLAUDE_CODE_OAUTH_TOKEN` and `AMF_TRUSTED`.
    - Real values from an existing `.env` are kept, and so are any extra
      variables.
    - A missing `GITHUB_REPO` is filled in from the checkout's GitHub `origin`.
@@ -97,6 +97,7 @@ never prints a secret. The checks, in order:
 | `github` | `GET /user` accepts the token; shows the login | `FAIL` on 401 or no connection |
 | `repo` | The repo is readable; shows its default branch | `FAIL` on 404; `warn` if the account can't push |
 | `labels` | All four amf labels exist | `warn`, naming the missing ones |
+| `trusted` | `AMF_TRUSTED` is set; lists the logins | `warn` if unset (anyone's issues run), or if it leaves out the token's account, which `amf issue` opens issues as |
 | `checkout` | The checkout `run` would use: the enclosing one, or `./<name>` | `warn` if `run` would clone first or origin isn't `GITHUB_REPO`; `FAIL` if `./<name>` isn't a clone or there's no origin |
 | `git push` | `git push --dry-run` to `origin` works with the user's git credentials, without prompting | `FAIL`, with git's message |
 | `git identity` | git has a name and email to commit with, in the checkout (or here); shows them | `FAIL`, with the `git config` commands to set them |
@@ -121,6 +122,7 @@ space, a trailing comment. A leading byte order mark is ignored.
 | `GITHUB_TOKEN` | required | API access: Contents, Issues, Pull requests (read & write) |
 | `GITHUB_REPO` | required | `owner/name`; github.com URLs are accepted |
 | `CLAUDE_CODE_OAUTH_TOKEN` | unset | Claude subscription token, passed to Claude |
+| `AMF_TRUSTED` | unset | GitHub logins, separated by commas or spaces (a leading `@` is allowed, case is ignored). When set, amf only works on issues they opened. Unset means anyone's |
 | `AMF_CLAUDE` | `claude` | Path to the Claude CLI |
 | `AMF_CODEX` | `codex` | Path to the Codex CLI, for pipelines |
 | `AMF_OPENCODE` | `opencode` | Path to the opencode CLI, for pipelines |
@@ -197,6 +199,11 @@ work. Starter skills are in this repo under `skills/`.
    stops the run here without changing the issue. `watch` then logs the
    error and tries again on its next poll.
 4. **Claim.** Label the issue `amf:in-progress` and remove `amf:ready`.
+   - **Trust:** with `AMF_TRUSTED` set, an issue whose author (`user.login`,
+     ignoring case) isn't listed fails here, before any worktree or agent.
+     The comment names the author and says to reopen it from a trusted
+     account or add the author to `AMF_TRUSTED`, then add `amf:ready`. Being
+     marked failed, it isn't picked up by `watch` again.
 5. **Worktree.** Fetch the default branch and create
    `.amf/worktrees/issue-N` on `amf/issue-N`, reset to `origin/<default>`. A
    worktree left from an earlier run is discarded first.
@@ -324,6 +331,11 @@ amf only ever adds to `.git/info/exclude`. It never edits a tracked `.gitignore`
 
 - Agents run with every permission check off. An issue's body is effectively
   code run on the user's machine, so label only issues you trust.
+- Labels need triage access, but amf reads the issue's text when it runs,
+  not when it was labeled, so its author can change it in between.
+  `AMF_TRUSTED` limits amf to issues opened by the listed users. Other
+  people can't edit those, apart from collaborators with write access.
+  Comments are never read.
 - A skill is instructions run the same way. Reference only skills you
   control or have reviewed, at a tag or commit, ideally with a `sha256` pin.
   The pipeline itself changes only through a merge to the default branch.

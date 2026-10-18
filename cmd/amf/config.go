@@ -25,6 +25,10 @@ type Config struct {
 	// ClaudeToken is CLAUDE_CODE_OAUTH_TOKEN, a subscription token from
 	// `claude setup-token`. Optional: without it Claude uses its own login.
 	ClaudeToken string
+
+	// Trusted is AMF_TRUSTED, the lower-case GitHub logins whose issues amf
+	// works on. Nil means anyone's.
+	Trusted []string
 }
 
 // loadConfig reads the first .env file in paths that exists. Variables set in
@@ -66,6 +70,7 @@ func loadConfig(paths ...string) (Config, error) {
 		Opencode: get("AMF_OPENCODE", "opencode"),
 
 		ClaudeToken: get("CLAUDE_CODE_OAUTH_TOKEN", ""),
+		Trusted:     parseTrusted(get("AMF_TRUSTED", "")),
 	}
 	if cfg.Token == "" {
 		return cfg, errors.New("GITHUB_TOKEN is not set (run amf init, then edit .env)")
@@ -78,6 +83,19 @@ func loadConfig(paths ...string) (Config, error) {
 	}
 	cfg.CloneURL = get("AMF_CLONE_URL", "https://github.com/"+cfg.Repo+".git")
 	return cfg, nil
+}
+
+// parseTrusted splits AMF_TRUSTED, a list of GitHub logins separated by
+// commas or spaces, each optionally starting with @. Logins are compared
+// ignoring case, so they're lower-cased.
+func parseTrusted(s string) []string {
+	var logins []string
+	for _, f := range strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == ' ' || r == '\t' }) {
+		if l := strings.ToLower(strings.TrimPrefix(f, "@")); l != "" {
+			logins = append(logins, l)
+		}
+	}
+	return logins
 }
 
 // validRepo checks that repo looks like owner/name.

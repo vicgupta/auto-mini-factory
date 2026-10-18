@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -22,6 +23,7 @@ import (
 type doctor struct {
 	w     *tabwriter.Writer
 	fails int
+	login string // the token's account, once GitHub accepted it
 }
 
 func (d *doctor) line(status, check, format string, a ...any) {
@@ -101,6 +103,21 @@ func (d *doctor) check(ctx context.Context) {
 	} else {
 		for _, c := range []string{"github", "repo", "labels"} {
 			d.line("skip", c, "needs GITHUB_TOKEN and GITHUB_REPO")
+		}
+	}
+
+	// Whose issues amf works on.
+	switch {
+	case !parsed:
+		d.line("skip", "trusted", ".env didn't parse")
+	case cfg.Trusted == nil:
+		d.line("warn", "trusted", "AMF_TRUSTED is not set; amf works on issues opened by anyone (agents run them with every permission check off)")
+	default:
+		list := "@" + strings.Join(cfg.Trusted, ", @")
+		if d.login != "" && !slices.Contains(cfg.Trusted, strings.ToLower(d.login)) {
+			d.line("warn", "trusted", "only issues opened by %s; the token's account, @%s, isn't one, so issues from amf issue won't run", list, d.login)
+		} else {
+			d.line("ok", "trusted", "only issues opened by %s", list)
 		}
 	}
 
@@ -248,6 +265,7 @@ func (d *doctor) checkGitHub(ctx context.Context, gh *GitHub, cfg Config) string
 		d.line("skip", "labels", "needs GitHub")
 		return ""
 	case user.Login != "":
+		d.login = user.Login
 		d.line("ok", "github", "token accepted for @%s at %s", user.Login, cfg.APIURL)
 	default:
 		d.line("ok", "github", "%s is reachable", cfg.APIURL)

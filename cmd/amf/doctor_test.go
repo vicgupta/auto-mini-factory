@@ -58,6 +58,7 @@ func TestDoctorAllGood(t *testing.T) {
 	t.Setenv("AMF_CLAUDE", fakeAgent(t, "claude", `echo "1.2.3 (Claude Code)"`))
 	t.Setenv("AMF_CODEX", filepath.Join(t.TempDir(), "no-codex"))
 	t.Setenv("AMF_OPENCODE", fakeAgent(t, "opencode", `echo "opencode v2"`))
+	t.Setenv("AMF_TRUSTED", "vic,teammate")
 
 	out, err := doctorOutput(t)
 	if err != nil {
@@ -72,6 +73,7 @@ func TestDoctorAllGood(t *testing.T) {
 		`ok +github +token accepted for @vic at http`,
 		`ok +repo +vic/demo, default branch main$`,
 		`ok +labels +all 4 amf labels exist$`,
+		`ok +trusted +only issues opened by @vic, @teammate$`,
 		`ok +checkout +.*/work \(origin .*origin\.git\)$`,
 		`ok +git push +your git credentials can push`,
 		`ok +git identity +commits as amf test <amf@example\.com>$`,
@@ -169,12 +171,18 @@ func TestDoctorPipelineProblems(t *testing.T) {
 	}
 	wantLines(t, out,
 		`warn +labels +missing amf:ready, amf:in-progress, amf:done, amf:failed`,
+		`warn +trusted +AMF_TRUSTED is not set; amf works on issues opened by anyone`,
 		`ok +pipeline +origin/main: code \(codex, default model\) -> eval \(codex, default model\)$`,
 		`FAIL +skill eval +downloading skill https://127\.0\.0\.1:1/eval/SKILL\.md`,
 		// claude isn't used by this pipeline.
 		`warn +claudecode +.*no-claude is not installed; only needed by pipelines that use claudecode$`,
 		`FAIL +codex +.*no-codex is not installed, and the pipeline's code and eval stages use it$`,
 	)
+	// The token's own account, which amf issue opens issues as, isn't trusted.
+	t.Setenv("AMF_TRUSTED", "teammate")
+	out, _ = doctorOutput(t)
+	wantLines(t, out, `warn +trusted +only issues opened by @teammate; the token's account, @vic, isn't one`)
+
 	// A broken table is a problem too.
 	os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte("## amf\n\n| Stage | Agent |\n|---|---|\n| code | gemini |\n"), 0o644)
 	mustGit(t, root, "commit", "-qam", "break it")

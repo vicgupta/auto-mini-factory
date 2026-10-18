@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -44,7 +45,10 @@ type Runner struct {
 	Opencode string // opencode binary, for pipelines
 	// ClaudeToken, when set, is passed to Claude as CLAUDE_CODE_OAUTH_TOKEN.
 	ClaudeToken string
-	Timeout     time.Duration // per agent run
+	// Trusted, when set, limits amf to issues opened by these lower-case
+	// logins: agents run an issue's text with every permission check off.
+	Trusted []string
+	Timeout time.Duration // per agent run
 	// EvalRounds is how many times a pipeline's eval stage may send a change
 	// back to the code stage.
 	EvalRounds int
@@ -112,6 +116,10 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 		}
 	}()
 
+	if err := r.checkAuthor(issue); err != nil {
+		return err
+	}
+
 	pr, updated, err := r.process(ctx, issue, base, pipeline)
 	if err != nil {
 		return err
@@ -130,6 +138,24 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 		r.logf("#%d: could not comment: %v", n, err)
 	}
 	return nil
+}
+
+// checkAuthor fails an issue whose author isn't in Trusted. It runs after
+// Claim, so the issue is marked failed once and watch doesn't retry it.
+func (r *Runner) checkAuthor(issue Issue) error {
+	if r.Trusted == nil || slices.Contains(r.Trusted, strings.ToLower(issue.User.Login)) {
+		return nil
+	}
+	who := "@" + issue.User.Login
+	if issue.User.Login == "" {
+		who = "an unknown author"
+	}
+	return &stageError{
+		msg: fmt.Sprintf("#%d was opened by %s, who is not in AMF_TRUSTED", issue.Number, who),
+		comment: fmt.Sprintf("amf only works on issues opened by the GitHub users in its `AMF_TRUSTED` setting, "+
+			"and this one was opened by %s, so amf didn't run it. To have amf work on it, open it again from a "+
+			"trusted account, or add the author to `AMF_TRUSTED` and add the `%s` label again.", who, labelReady),
+	}
 }
 
 // process turns the issue into a PR: with a single claude run, or with the

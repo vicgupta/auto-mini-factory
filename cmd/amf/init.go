@@ -18,6 +18,7 @@ var envTemplate = []struct{ key, placeholder, comment string }{
 	{"GITHUB_TOKEN", "github_pat_...", "Contents, Issues, Pull requests: read & write"},
 	{"GITHUB_REPO", "owner/name", ""},
 	{"CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-...", "optional: Claude subscription token from `claude setup-token`"},
+	{"AMF_TRUSTED", "login1,login2...", "optional: only work on issues opened by these GitHub users"},
 }
 
 // isPlaceholder reports whether v is an unfilled value from the template.
@@ -113,6 +114,9 @@ func cmdInit(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		fmt.Fprintf(stdout, "Next: edit %s and fill in %s.\n", path, strings.Join(todo, ", "))
 		if slices.Contains(todo, "CLAUDE_CODE_OAUTH_TOKEN") {
 			fmt.Fprintln(stdout, "CLAUDE_CODE_OAUTH_TOKEN is optional; leave the placeholder to use your existing Claude login.")
+		}
+		if slices.Contains(todo, "AMF_TRUSTED") {
+			fmt.Fprintln(stdout, "AMF_TRUSTED is optional, but recommended: with the placeholder, amf works on issues opened by anyone.")
 		}
 	}
 

@@ -52,6 +52,7 @@ This writes `.env` with every variable amf uses:
 GITHUB_TOKEN=github_pat_...   # Contents, Issues, Pull requests: read & write
 GITHUB_REPO=owner/name
 CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...   # optional: Claude subscription token from `claude setup-token`
+AMF_TRUSTED=login1,login2...   # optional: only work on issues opened by these GitHub users
 ```
 
 Edit it and replace the placeholders. Placeholders ending in `...` count as
@@ -88,7 +89,7 @@ anything:
 
 ```
 $ amf doctor
-ok    amf           v0.3.1, the latest release
+ok    amf           v0.4.0, the latest release
 ok    git           git version 2.56.0
 ok    .env          /tmp/amf/.env
 ok    GITHUB_TOKEN  set, from /tmp/amf/.env
@@ -96,6 +97,7 @@ ok    GITHUB_REPO   vicgupta/factory-demo-app, from /tmp/amf/.env
 ok    github        token accepted for @vicgupta at https://api.github.com
 ok    repo          vicgupta/factory-demo-app, default branch main
 ok    labels        all 4 amf labels exist
+ok    trusted       only issues opened by @vicgupta
 ok    checkout      /tmp/amf/factory-demo-app, the clone run and watch use here
 ok    git push      your git credentials can push to origin (checked with --dry-run)
 ok    git identity  commits as Vic Gupta <vicgupta@gmail.com>
@@ -216,7 +218,12 @@ Claude runs with all permission checks off, so an issue body is effectively
 code you're executing on your machine.
 
 - Only label issues you trust. On a public repo only people with triage
-  access can add labels, but anyone can write an issue body.
+  access can add labels, but anyone can write an issue body, and its author
+  can edit it after you label it.
+- Set `AMF_TRUSTED=you,teammate` to have amf work only on issues those
+  GitHub users opened. Anyone else's issue is marked `amf:failed` with a
+  comment saying why, and no agent runs. Unset, amf works on anyone's issue,
+  and `amf doctor` warns about it.
 - `GITHUB_TOKEN` is stripped from Claude's environment, but Claude can still
   read files on disk, including `.env` at the top of your checkout. For full
   isolation, run amf in a container or VM.

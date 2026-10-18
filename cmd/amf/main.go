@@ -53,6 +53,7 @@ Configuration is read from .env (or the environment):
   AMF_CLAUDE     path to the claude binary (default "claude")
   AMF_CODEX      path to the codex binary (default "codex"), for pipelines
   AMF_OPENCODE   path to the opencode binary (default "opencode"), for pipelines
+  AMF_TRUSTED    optional GitHub logins, comma-separated; amf only works on their issues
   AMF_API_URL    GitHub API base URL (default https://api.github.com)
   AMF_CLONE_URL  URL to clone GITHUB_REPO from (default https://github.com/GITHUB_REPO.git)
 
@@ -246,6 +247,7 @@ func newRunner(ctx context.Context, timeout time.Duration, evalRounds int, log i
 		Codex:       cfg.Codex,
 		Opencode:    cfg.Opencode,
 		ClaudeToken: cfg.ClaudeToken,
+		Trusted:     cfg.Trusted,
 		Timeout:     timeout,
 		EvalRounds:  evalRounds,
 		Log:         log,

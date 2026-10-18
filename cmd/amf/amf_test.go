@@ -635,7 +635,7 @@ func TestExcludeAMFDir(t *testing.T) {
 }
 
 func TestMain(m *testing.M) {
-	for _, k := range []string{"GITHUB_TOKEN", "GITHUB_REPO", "CLAUDE_CODE_OAUTH_TOKEN", "AMF_API_URL", "AMF_CLONE_URL", "AMF_CLAUDE", "AMF_CODEX", "AMF_OPENCODE", "AMF_RELEASES_URL"} {
+	for _, k := range []string{"GITHUB_TOKEN", "GITHUB_REPO", "CLAUDE_CODE_OAUTH_TOKEN", "AMF_API_URL", "AMF_CLONE_URL", "AMF_CLAUDE", "AMF_CODEX", "AMF_OPENCODE", "AMF_RELEASES_URL", "AMF_TRUSTED"} {
 		os.Unsetenv(k)
 	}
 	os.Setenv("AMF_API_URL", "http://127.0.0.1:1") // unreachable unless a test sets a fake
@@ -661,6 +661,7 @@ func TestInitWritesTemplate(t *testing.T) {
 		"GITHUB_TOKEN=github_pat_...   # Contents, Issues, Pull requests: read & write\n",
 		"GITHUB_REPO=owner/name\n",
 		"CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...",
+		"AMF_TRUSTED=login1,login2...   # optional: only work on issues opened by these GitHub users\n",
 	} {
 		if !strings.Contains(string(b), want) {
 			t.Errorf(".env missing %q:\n%s", want, b)

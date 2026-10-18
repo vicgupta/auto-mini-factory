@@ -42,6 +42,9 @@ type Issue struct {
 	HTMLURL     string    `json:"html_url"`
 	Labels      []Label   `json:"labels"`
 	PullRequest *struct{} `json:"pull_request,omitempty"`
+	User        struct {
+		Login string `json:"login"`
+	} `json:"user"`
 }
 
 func (is Issue) HasLabel(name string) bool {

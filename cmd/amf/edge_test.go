@@ -1172,3 +1172,87 @@ func TestParsePipelineAfterALongLine(t *testing.T) {
 		t.Fatalf("parsePipeline = %+v, %v", p, err)
 	}
 }
+
+// --- AMF_TRUSTED ---
+
+func TestParseTrusted(t *testing.T) {
+	if got := parseTrusted(" @Vic, teammate  other,,"); !reflect.DeepEqual(got, []string{"vic", "teammate", "other"}) {
+		t.Errorf("parseTrusted = %q", got)
+	}
+	if got := parseTrusted(""); got != nil {
+		t.Errorf("parseTrusted(\"\") = %q", got)
+	}
+}
+
+func TestLoadConfigTrusted(t *testing.T) {
+	env := filepath.Join(t.TempDir(), ".env")
+	os.WriteFile(env, []byte("GITHUB_TOKEN=tok\nGITHUB_REPO=vic/demo\nAMF_TRUSTED=vic,Teammate\n"), 0o600)
+	if cfg, err := loadConfig(env); err != nil || !reflect.DeepEqual(cfg.Trusted, []string{"vic", "teammate"}) {
+		t.Fatalf("cfg.Trusted = %q, %v", cfg.Trusted, err)
+	}
+	os.WriteFile(env, []byte("GITHUB_TOKEN=tok\nGITHUB_REPO=vic/demo\nAMF_TRUSTED=login1,login2...\n"), 0o600)
+	if cfg, _ := loadConfig(env); cfg.Trusted != nil {
+		t.Fatalf("a placeholder should leave AMF_TRUSTED unset, got %q", cfg.Trusted)
+	}
+}
+
+func TestRunOnlyTrustedAuthors(t *testing.T) {
+	root, _ := setupRepo(t)
+	gh, srv := newFakeGitHub(t)
+	byAuthor := func(n int, login string) *Issue {
+		is := readyIssue(n, "From "+login)
+		is.User.Login = login
+		return is
+	}
+	gh.issues[1] = byAuthor(1, "Teammate")
+	gh.issues[2] = byAuthor(2, "stranger")
+	gh.issues[3] = byAuthor(3, "")
+	ran := filepath.Join(t.TempDir(), "ran")
+	r, log := newTestRunner(t, srv, root, fakeAgent(t, "claude", shResult+`prompt=$(cat)
+printf '%s\n' "$prompt" | grep '^# #' >> `+ran+`
+echo x > x.txt
+result 'ok'`))
+	r.Trusted = []string{"vic", "teammate"}
+
+	if err := r.Run(context.Background(), 1); err != nil {
+		t.Fatalf("trusted author: %v\nlog:\n%s", err, log)
+	}
+	for n, who := range map[int]string{2: "@stranger", 3: "an unknown author"} {
+		err := r.Run(context.Background(), n)
+		if err == nil || !strings.Contains(err.Error(), "not in AMF_TRUSTED") {
+			t.Errorf("#%d: error = %v", n, err)
+		}
+		if got := gh.labels(n); !reflect.DeepEqual(got, []string{"amf:failed"}) {
+			t.Errorf("#%d labels = %v", n, got)
+		}
+		if c := gh.comments[n]; len(c) != 1 || !strings.Contains(c[0], who) || !strings.Contains(c[0], "AMF_TRUSTED") || strings.Contains(c[0], "```") {
+			t.Errorf("#%d comments = %q", n, c)
+		}
+		if _, err := os.Stat(filepath.Join(root, ".amf", "worktrees", fmt.Sprintf("issue-%d", n))); !os.IsNotExist(err) {
+			t.Errorf("#%d got a worktree", n)
+		}
+	}
+	if b := mustRead(t, ran); b != "# #1: From Teammate\n" {
+		t.Errorf("claude ran for:\n%s", b)
+	}
+	if len(gh.prs) != 1 {
+		t.Errorf("PRs = %v", gh.prs)
+	}
+}
+
+func TestWatchDoesntRetryUntrustedIssues(t *testing.T) {
+	root, _ := setupRepo(t)
+	gh, srv := newFakeGitHub(t)
+	gh.issues[1] = readyIssue(1, "Untrusted")
+	gh.issues[1].User.Login = "stranger"
+	r, _ := newTestRunner(t, srv, root, fakeAgent(t, "claude", "exit 9"))
+	r.Trusted = []string{"vic"}
+	var out syncBuffer
+	r.Log = &out
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	r.Watch(ctx, "amf:ready", 20*time.Millisecond)
+	if c := gh.comments[1]; len(c) != 1 {
+		t.Errorf("watch commented %d times: %q", len(c), c)
+	}
+}
