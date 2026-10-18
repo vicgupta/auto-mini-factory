@@ -34,6 +34,15 @@ func wantLines(t *testing.T, out string, want ...string) {
 	}
 }
 
+// withGitUser gives git a name and email, as setupRepo does, for tests that
+// don't need a repo; CI machines have none.
+func withGitUser(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "gitconfig")
+	os.WriteFile(cfg, []byte("[user]\n\tname = amf test\n\temail = amf@example.com\n"), 0o644)
+	t.Setenv("GIT_CONFIG_GLOBAL", cfg)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+}
+
 func TestDoctorAllGood(t *testing.T) {
 	root, origin := setupPipelineRepo(t, "## amf\n\n| Stage | Agent |\n|---|---|\n| code | claudecode |\n")
 	gh, srv := newFakeGitHub(t)
@@ -79,6 +88,7 @@ func TestDoctorAllGood(t *testing.T) {
 }
 
 func TestDoctorBrokenSetup(t *testing.T) {
+	withGitUser(t)
 	_, srv := newFakeGitHub(t)
 	dir := t.TempDir()
 	t.Chdir(dir)
@@ -122,6 +132,7 @@ func TestDoctorBrokenSetup(t *testing.T) {
 }
 
 func TestDoctorConfigProblems(t *testing.T) {
+	withGitUser(t)
 	dir := t.TempDir()
 	t.Chdir(dir)
 	t.Setenv("AMF_RELEASES_URL", "http://127.0.0.1:1")
