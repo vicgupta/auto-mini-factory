@@ -7,6 +7,18 @@ without running a platform.
 ## Install
 
 ```sh
+curl -fsSL https://raw.githubusercontent.com/vicgupta/auto-mini-factory/main/install.sh | sh
+```
+
+This downloads the latest release binary for macOS or Linux (amd64/arm64),
+checks it against the release's `checksums.txt`, and installs it to
+`/usr/local/bin` if that's writable, otherwise `~/.local/bin`. To choose,
+set `AMF_VERSION=v0.0.2` or `AMF_INSTALL_DIR=...` on the `sh` side of the
+pipe, e.g. `... | AMF_INSTALL_DIR=~/bin sh`.
+
+Or with Go:
+
+```sh
 go install github.com/vicgupta/auto-mini-factory/cmd/amf@latest
 # or, from a clone: go build -o amf ./cmd/amf
 ```
