@@ -98,6 +98,8 @@ func TestDoctorBrokenSetup(t *testing.T) {
 	t.Setenv("AMF_API_URL", srv.URL)
 	t.Setenv("AMF_RELEASES_URL", "http://127.0.0.1:1")
 	t.Setenv("AMF_CLAUDE", filepath.Join(t.TempDir(), "no-claude"))
+	t.Setenv("AMF_CODEX", filepath.Join(t.TempDir(), "no-codex"))
+	t.Setenv("AMF_OPENCODE", filepath.Join(t.TempDir(), "no-opencode"))
 
 	out, err := doctorOutput(t)
 	if err == nil || err.Error() != "doctor found 2 problems" {
@@ -113,7 +115,9 @@ func TestDoctorBrokenSetup(t *testing.T) {
 		`warn +checkout +not in a git checkout; run and watch will clone vic/demo into .*/demo$`,
 		`skip +git push `,
 		`skip +pipeline `,
-		`FAIL +claudecode +.*no-claude is not installed; amf runs it for every issue$`,
+		`FAIL +claudecode +.*no-claude is not installed, and neither is any other agent; amf needs one of claude, codex or opencode$`,
+		`warn +codex +.*no-codex is not installed either$`,
+		`warn +opencode +.*no-opencode is not installed either$`,
 		`ok +claude login +CLAUDE_CODE_OAUTH_TOKEN is set, from .*/\.env; claude runs with it$`,
 	)
 	if strings.Contains(out, "wrong") || strings.Contains(out, "sk-ant-oat-x") {
@@ -189,4 +193,43 @@ func TestDoctorPipelineProblems(t *testing.T) {
 	mustGit(t, root, "push", "-q", "origin", "main")
 	out, _ = doctorOutput(t)
 	wantLines(t, out, `FAIL +pipeline +.*unknown agent "gemini"`)
+}
+
+func TestDoctorFallbackAgent(t *testing.T) {
+	root, origin := setupRepo(t) // no AGENTS.md, so no pipeline
+	_, srv := newFakeGitHub(t)
+	t.Chdir(root)
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	t.Setenv("GITHUB_REPO", "vic/demo")
+	t.Setenv("AMF_API_URL", srv.URL)
+	t.Setenv("AMF_CLONE_URL", origin)
+	t.Setenv("AMF_RELEASES_URL", "http://127.0.0.1:1")
+	t.Setenv("AMF_CLAUDE", filepath.Join(t.TempDir(), "no-claude"))
+	t.Setenv("AMF_CODEX", fakeAgent(t, "codex", `echo "codex-cli 9"`))
+	t.Setenv("AMF_OPENCODE", filepath.Join(t.TempDir(), "no-opencode"))
+
+	out, _ := doctorOutput(t)
+	wantLines(t, out,
+		`ok +pipeline +none in AGENTS\.md on origin/main; amf runs codex once per issue$`,
+		`warn +claudecode +.*no-claude is not installed; amf runs codex instead, unless --agent or a pipeline names claudecode$`,
+		`ok +codex +.*/codex, codex-cli 9; runs issues without a pipeline$`,
+		`warn +opencode +.*no-opencode is not installed; amf runs codex instead, unless --agent or a pipeline names opencode$`,
+	)
+	if strings.Contains(out, "FAIL  claudecode") {
+		t.Errorf("a missing claude is fine when codex is installed:\n%s", out)
+	}
+
+	// amf pipeline says the same.
+	var stdout bytes.Buffer
+	if err := run(context.Background(), []string{"pipeline"}, nil, &stdout, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "so amf runs codex with its built-in prompt: the first installed of claude, codex and opencode") {
+		t.Errorf("amf pipeline = %q", stdout.String())
+	}
+	t.Setenv("AMF_CODEX", filepath.Join(t.TempDir(), "no-codex"))
+	stdout.Reset()
+	if err := run(context.Background(), []string{"pipeline"}, nil, &stdout, io.Discard); err == nil || !strings.Contains(stdout.String(), "no coding agent is installed") {
+		t.Errorf("amf pipeline with no agent: %v, %q", err, stdout.String())
+	}
 }

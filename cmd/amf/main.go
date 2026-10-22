@@ -33,17 +33,17 @@ func buildVersion() string {
 	return version
 }
 
-const usage = `amf turns GitHub issues into pull requests with Claude Code.
+const usage = `amf turns GitHub issues into pull requests with coding agents: Claude Code, Codex or opencode.
 
 Usage:
-  amf init                                                        write .env (backing up an existing one) and create amf's labels
-  amf issue "Title" [-b body | -f file.md] [--no-label]           create an issue (body may also come from stdin)
-  amf list [--state open|closed|all] [--label L]                  list issues, newest first, with their amf labels
-  amf run <issue-number> [--timeout 30m] [--eval-rounds 2]        process one issue into a PR
-  amf watch [--interval 60s] [--label amf:ready] [--timeout 30m]  process amf:ready issues as they arrive (also takes --eval-rounds)
-  amf pipeline [--fetch]                                          check the plan/code/eval pipeline in this checkout's AGENTS.md
-  amf doctor                                                      check the setup here, one line per check, changing nothing
-  amf update [--version vX.Y.Z] [--check]                         replace this amf binary with the latest (or given) release
+  amf init                                                    write .env (backing up an existing one) and create amf's labels
+  amf issue "Title" [-b body | -f file.md] [--no-label]       create an issue (body may also come from stdin)
+  amf list [--state open|closed|all] [--label L]              list issues, newest first, with their amf labels
+  amf run <issue-number> [--agent A] [--timeout 30m]          process one issue into a PR (also takes --eval-rounds)
+  amf watch [--agent A] [--interval 60s] [--label amf:ready]  process amf:ready issues as they arrive (also takes --timeout, --eval-rounds)
+  amf pipeline [--fetch]                                      check the plan/code/eval pipeline in this checkout's AGENTS.md
+  amf doctor                                                  check the setup here, one line per check, changing nothing
+  amf update [--version vX.Y.Z] [--check]                     replace this amf binary with the latest (or given) release
   amf version
 
 Configuration is read from .env (or the environment):
@@ -51,14 +51,18 @@ Configuration is read from .env (or the environment):
   GITHUB_REPO    owner/name
   CLAUDE_CODE_OAUTH_TOKEN  optional subscription token for Claude Code (claude setup-token)
   AMF_CLAUDE     path to the claude binary (default "claude")
-  AMF_CODEX      path to the codex binary (default "codex"), for pipelines
-  AMF_OPENCODE   path to the opencode binary (default "opencode"), for pipelines
+  AMF_CODEX      path to the codex binary (default "codex")
+  AMF_OPENCODE   path to the opencode binary (default "opencode")
   AMF_TRUSTED    optional GitHub logins, comma-separated; amf only works on their issues
   AMF_API_URL    GitHub API base URL (default https://api.github.com)
   AMF_CLONE_URL  URL to clone GITHUB_REPO from (default https://github.com/GITHUB_REPO.git)
 
 run and watch work in the enclosing git checkout. Started anywhere else, they
 clone GITHUB_REPO into ./<name> (or reuse that clone) and work there.
+
+Without a pipeline, each issue gets one agent run: the agent --agent names
+(claudecode, codex or opencode), or else the first installed of claude, codex
+and opencode, in that order.
 
 A repo can declare a pipeline in its AGENTS.md: a table under "## amf" with a
 plan, code and eval stage, each naming a skill URL, an agent (claudecode,
@@ -169,19 +173,20 @@ func cmdRun(ctx context.Context, args []string, stderr io.Writer) error {
 	fs.SetOutput(stderr)
 	timeout := fs.Duration("timeout", 30*time.Minute, "maximum time each agent run may take")
 	evalRounds := fs.Int("eval-rounds", 2, "how many times a pipeline's eval stage may send the change back to code")
+	agent := fs.String("agent", "", agentFlagHelp)
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return errUsage
 	}
 	if len(pos) != 1 {
-		fmt.Fprintln(stderr, "usage: amf run <issue-number> [--timeout 30m] [--eval-rounds 2]")
+		fmt.Fprintln(stderr, "usage: amf run <issue-number> [--agent claudecode|codex|opencode] [--timeout 30m] [--eval-rounds 2]")
 		return errUsage
 	}
 	n, err := strconv.Atoi(strings.TrimPrefix(pos[0], "#"))
 	if err != nil || n <= 0 {
 		return fmt.Errorf("invalid issue number %q", pos[0])
 	}
-	r, err := newRunner(ctx, *timeout, *evalRounds, stderr)
+	r, err := newRunner(ctx, *timeout, *evalRounds, *agent, stderr)
 	if err != nil {
 		return err
 	}
@@ -195,34 +200,49 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 	label := fs.String("label", labelReady, "process open issues with this label")
 	timeout := fs.Duration("timeout", 30*time.Minute, "maximum time each agent run may take")
 	evalRounds := fs.Int("eval-rounds", 2, "how many times a pipeline's eval stage may send the change back to code")
+	agent := fs.String("agent", "", agentFlagHelp)
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return errUsage
 	}
 	if len(pos) != 0 {
-		fmt.Fprintln(stderr, "usage: amf watch [--interval 60s] [--label amf:ready] [--timeout 30m] [--eval-rounds 2]")
+		fmt.Fprintln(stderr, "usage: amf watch [--agent claudecode|codex|opencode] [--interval 60s] [--label amf:ready] [--timeout 30m] [--eval-rounds 2]")
 		return errUsage
 	}
 	if *interval <= 0 {
 		return errors.New("--interval must be positive")
 	}
-	r, err := newRunner(ctx, *timeout, *evalRounds, stderr)
+	r, err := newRunner(ctx, *timeout, *evalRounds, *agent, stderr)
 	if err != nil {
 		return err
 	}
 	return r.Watch(ctx, *label, *interval)
 }
 
-func newRunner(ctx context.Context, timeout time.Duration, evalRounds int, log io.Writer) (*Runner, error) {
+// agentFlagHelp describes --agent for run and watch.
+const agentFlagHelp = "agent for issues without a pipeline: claudecode, codex or opencode (default: the first installed, in that order)"
+
+func newRunner(ctx context.Context, timeout time.Duration, evalRounds int, agentFlag string, log io.Writer) (*Runner, error) {
 	if timeout <= 0 {
 		return nil, errors.New("--timeout must be positive")
 	}
 	if evalRounds < 0 {
 		return nil, errors.New("--eval-rounds can't be negative")
 	}
+	agent, err := parseAgent(agentFlag)
+	if err != nil {
+		return nil, err
+	}
 	cfg, err := loadConfig(envPaths(ctx)...)
 	if err != nil {
 		return nil, err
+	}
+	// A named agent must be there; the fallback order only applies without --agent.
+	agents := &Runner{Claude: cfg.Claude, Codex: cfg.Codex, Opencode: cfg.Opencode, Agent: agent}
+	if agent != "" {
+		if _, err := agents.defaultAgent(); err != nil {
+			return nil, err
+		}
 	}
 	gh := newGitHub(cfg)
 	if err := checkRepo(ctx, gh, cfg.Repo); err != nil {
@@ -247,6 +267,7 @@ func newRunner(ctx context.Context, timeout time.Duration, evalRounds int, log i
 		Claude:      cfg.Claude,
 		Codex:       cfg.Codex,
 		Opencode:    cfg.Opencode,
+		Agent:       agent,
 		ClaudeToken: cfg.ClaudeToken,
 		Trusted:     cfg.Trusted,
 		Timeout:     timeout,

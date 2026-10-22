@@ -34,8 +34,7 @@ func cmdPipeline(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	path := filepath.Join(root, "AGENTS.md")
 	md, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		fmt.Fprintf(stdout, "No AGENTS.md in %s, so amf runs claude with its built-in prompt.\n", root)
-		return nil
+		return noPipeline(ctx, stdout, "No AGENTS.md in "+root)
 	}
 	if err != nil {
 		return err
@@ -45,8 +44,7 @@ func cmdPipeline(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		return err
 	}
 	if p == nil {
-		fmt.Fprintf(stdout, "No ## amf table in %s, so amf runs claude with its built-in prompt.\n", path)
-		return nil
+		return noPipeline(ctx, stdout, "No ## amf table in "+path)
 	}
 
 	// Only the agent paths are needed, so a .env without a token is fine.
@@ -96,5 +94,18 @@ func cmdPipeline(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	if problems > 0 {
 		return fmt.Errorf("the pipeline has %d %s", problems, plural(problems, "problem", "problems"))
 	}
+	return nil
+}
+
+// noPipeline reports which agent amf runs without a pipeline: the first
+// installed of claude, codex and opencode. None installed is an error.
+func noPipeline(ctx context.Context, stdout io.Writer, why string) error {
+	cfg, _ := loadConfig(envPaths(ctx)...)
+	agent, err := (&Runner{Claude: cfg.Claude, Codex: cfg.Codex, Opencode: cfg.Opencode}).defaultAgent()
+	if err != nil {
+		fmt.Fprintf(stdout, "%s, so amf runs one agent with its built-in prompt, but %v.\n", why, err)
+		return errors.New("the pipeline has 1 problem")
+	}
+	fmt.Fprintf(stdout, "%s, so amf runs %s with its built-in prompt: the first installed of claude, codex and opencode, unless --agent names one.\n", why, agentName(agent))
 	return nil
 }

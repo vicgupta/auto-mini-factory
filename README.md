@@ -1,8 +1,8 @@
 # amf — autonomous mini factory
 
-One stdlib-only Go binary that turns GitHub issues into pull requests with
-Claude Code, or with a plan → code → eval pipeline of Claude Code, Codex and
-opencode. For a solo developer or small team that wants coding agents without
+One stdlib-only Go binary that turns GitHub issues into pull requests with a
+coding agent (Claude Code, Codex or opencode, whichever you have), or with a
+plan → code → eval pipeline of them. For a solo developer or small team that wants coding agents without
 running a platform.
 
 ## Install
@@ -17,6 +17,12 @@ checks it against the release's `checksums.txt`, and installs it to
 set `AMF_VERSION=v0.0.2` or `AMF_INSTALL_DIR=...` on the `sh` side of the
 pipe, e.g. `... | AMF_INSTALL_DIR=~/bin sh`.
 
+On Windows, download `amf_<version>_windows_amd64.zip` (or `_arm64`) from the
+[latest release](https://github.com/vicgupta/auto-mini-factory/releases/latest),
+unzip it, and put `amf.exe` in a folder on your `PATH`. After that,
+`amf update` keeps it current. The Windows build is cross-compiled and its
+self-update is unit-tested, but it hasn't been run on a Windows machine yet.
+
 Or with Go:
 
 ```sh
@@ -24,7 +30,10 @@ go install github.com/vicgupta/auto-mini-factory/cmd/amf@latest
 # or, from a clone: go build -o amf ./cmd/amf
 ```
 
-Needs `git` and the [`claude`](https://claude.com/claude-code) CLI on `PATH`.
+Needs `git` and at least one coding agent on `PATH`:
+[`claude`](https://claude.com/claude-code), [`codex`](https://github.com/openai/codex)
+or [`opencode`](https://opencode.ai). amf uses the first of those it finds, in
+that order, unless you pick one with `--agent`.
 
 To update later:
 
@@ -102,8 +111,8 @@ ok    checkout      /tmp/amf/factory-demo-app, the clone run and watch use here
 ok    git push      your git credentials can push to origin (checked with --dry-run)
 ok    git identity  commits as Vic Gupta <vicgupta@gmail.com>
 ok    pipeline      none in AGENTS.md on origin/main; amf runs claude once per issue
-ok    claudecode    /Users/vic/.local/bin/claude, 2.1.302 (Claude Code)
-warn  codex         codex is not installed; only needed by pipelines that use codex
+ok    claudecode    /Users/vic/.local/bin/claude, 2.1.302 (Claude Code); runs issues without a pipeline
+warn  codex         codex is not installed; amf runs claude instead, unless --agent or a pipeline names codex
 ok    opencode      /Users/vic/.opencode/bin/opencode, opencode v2.0.32
 ok    claude login  CLAUDE_CODE_OAUTH_TOKEN is not set; claude uses its own login
 ```
@@ -132,11 +141,23 @@ amf list --label amf:failed # just the ones that failed
 
 amf run 42                  # process one issue now
 amf watch --interval 60s    # process issues labeled `amf:ready`, one at a time
+amf watch --agent codex     # ...with Codex, even if Claude Code is installed
 ```
+
+### Choosing the agent
+
+Without a pipeline, each issue gets one agent run. By default amf uses the
+first installed of `claude`, `codex` and `opencode`, so a machine with only
+Codex just works. To pick one, pass `--agent claudecode` (or `claude`),
+`--agent codex` or `--agent opencode` to `amf run` or `amf watch`. A named
+agent must be installed; amf won't quietly fall back to another. If no agent
+is installed, amf leaves the issue on `amf:ready` and `watch` tries again on
+its next poll. `amf doctor` shows which agent amf would use. A repo with a
+pipeline ignores `--agent`, because the pipeline names each stage's agent.
 
 ### What `amf run N` does
 
-Without a pipeline (see below), amf runs Claude once:
+Without a pipeline (see below), amf runs one agent once. With Claude Code:
 
 1. Labels the issue `amf:in-progress` and removes `amf:ready`.
 2. Fetches the default branch and creates a worktree at
@@ -146,9 +167,11 @@ Without a pipeline (see below), amf runs Claude once:
    run the project's tests/build, and not touch git. Output streams to
    `.amf/logs/issue-N.log` as it works, one JSON message per line
    (`tail -f` it to follow along). Default timeout is 30 minutes (`--timeout`).
+   Codex and opencode run the same way, with the commands in
+   [docs/SPECS.md](docs/SPECS.md#agents).
 4. Commits the changes (`Fix #N: <title>`), fails if there are none, and runs
    `git push --force -u origin amf/issue-N` with your own git credentials.
-5. Opens a PR with Claude's final message as the body plus `Closes #N`. On a
+5. Opens a PR with the agent's final message as the body plus `Closes #N`. On a
    retry whose PR is still open, it updates that PR instead.
 6. Comments the PR link on the issue, labels it `amf:done`, removes the worktree.
 
@@ -214,7 +237,7 @@ Relabel them `amf:ready`, or run `amf watch --label amf`.
 
 ## Security
 
-Claude runs with all permission checks off, so an issue body is effectively
+Agents run with all permission checks off, so an issue body is effectively
 code you're executing on your machine.
 
 - Only label issues you trust. On a public repo only people with triage
@@ -224,8 +247,8 @@ code you're executing on your machine.
   GitHub users opened. Anyone else's issue is marked `amf:failed` with a
   comment saying why, and no agent runs. Unset, amf works on anyone's issue,
   and `amf doctor` warns about it.
-- `GITHUB_TOKEN` is stripped from Claude's environment, but Claude can still
-  read files on disk, including `.env` at the top of your checkout. For full
+- `GITHUB_TOKEN` is stripped from every agent's environment, but agents can
+  still read files on disk, including `.env` at the top of your checkout. For full
   isolation, run amf in a container or VM.
 - A pipeline's skills are instructions run the same way. Use skills you
   control or have reviewed, at a tag, ideally pinned with `#sha256=`.

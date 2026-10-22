@@ -499,17 +499,12 @@ func TestRunAgentFailures(t *testing.T) {
 		{"exit status", `cat >/dev/null; echo boom >&2; exit 2`, "claude: exit status 2 (log: "},
 		{"error result", `cat >/dev/null; echo '{"type":"result","subtype":"error_max_turns","is_error":true,"result":"ran out"}'`, "claude reported an error (error_max_turns): ran out"},
 		{"no result", `cat >/dev/null; echo hi > x.txt; echo '{"type":"system","subtype":"init"}'`, "no result message"},
-		{"missing binary", "", "claude: "},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root, _ := setupRepo(t)
 			gh, srv := newFakeGitHub(t)
 			gh.issues[1] = readyIssue(1, "Anything")
-			claude := filepath.Join(t.TempDir(), "no-claude")
-			if tc.script != "" {
-				claude = fakeAgent(t, "claude", tc.script)
-			}
-			r, _ := newTestRunner(t, srv, root, claude)
+			r, _ := newTestRunner(t, srv, root, fakeAgent(t, "claude", tc.script))
 			err := r.Run(context.Background(), 1)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("error = %v, want %q", err, tc.want)
@@ -1254,5 +1249,165 @@ func TestWatchDoesntRetryUntrustedIssues(t *testing.T) {
 	r.Watch(ctx, "amf:ready", 20*time.Millisecond)
 	if c := gh.comments[1]; len(c) != 1 {
 		t.Errorf("watch commented %d times: %q", len(c), c)
+	}
+}
+
+// --- the agent for issues without a pipeline ---
+
+// fakeDefaultCodex is codex run without a pipeline: no model, its final
+// message written to the -o file inside the worktree's .amf/.
+const fakeDefaultCodex = `
+case "$*" in "exec --dangerously-bypass-approvals-and-sandbox -o "*"/.amf/code.md -") ;; *) echo "bad args: $*" >&2; exit 5;; esac
+if [ -n "$GITHUB_TOKEN$CLAUDE_CODE_OAUTH_TOKEN" ]; then echo "token leaked" >&2; exit 3; fi
+case "$(cat)" in *"Add feature file"*) ;; *) echo "bad prompt" >&2; exit 4;; esac
+echo hello > feature.txt
+echo "Added feature.txt with codex." > "$4"
+`
+
+// fakeDefaultOpencode is opencode run without a pipeline, writing its final
+// reply to the file the prompt names.
+const fakeDefaultOpencode = `
+[ "$*" = run ] || { echo "bad args: $*" >&2; exit 5; }
+out=$(cat | sed -n 's/.*final reply, exactly as you give it, to the file \(.*\)\.$/\1/p')
+echo hello > feature.txt
+echo "Added feature.txt with opencode." > "$out"
+`
+
+func TestDefaultAgentFallsBack(t *testing.T) {
+	missing := func(t *testing.T, name string) string { return filepath.Join(t.TempDir(), "no-"+name) }
+	for _, tc := range []struct {
+		name                    string
+		claude, codex, opencode func(t *testing.T) string
+		agent                   string // --agent
+		want                    string // in the PR body
+	}{
+		{"claude when installed",
+			func(t *testing.T) string {
+				return fakeAgent(t, "claude", `cat >/dev/null; echo hello > feature.txt; echo '{"type":"result","subtype":"success","is_error":false,"result":"Added feature.txt with claude."}'`)
+			},
+			func(t *testing.T) string { return fakeAgent(t, "codex", "echo codex must not run >&2; exit 9") },
+			func(t *testing.T) string { return fakeAgent(t, "opencode", "echo opencode must not run >&2; exit 9") },
+			"", "with claude."},
+		{"codex without claude",
+			func(t *testing.T) string { return missing(t, "claude") },
+			func(t *testing.T) string { return fakeAgent(t, "codex", fakeDefaultCodex) },
+			func(t *testing.T) string { return fakeAgent(t, "opencode", "echo opencode must not run >&2; exit 9") },
+			"", "with codex."},
+		{"opencode without claude or codex",
+			func(t *testing.T) string { return missing(t, "claude") },
+			func(t *testing.T) string { return missing(t, "codex") },
+			func(t *testing.T) string { return fakeAgent(t, "opencode", fakeDefaultOpencode) },
+			"", "with opencode."},
+		{"--agent codex over an installed claude",
+			func(t *testing.T) string { return fakeAgent(t, "claude", "echo claude must not run >&2; exit 9") },
+			func(t *testing.T) string { return fakeAgent(t, "codex", fakeDefaultCodex) },
+			func(t *testing.T) string { return missing(t, "opencode") },
+			agentCodex, "with codex."},
+		{"--agent opencode",
+			func(t *testing.T) string { return fakeAgent(t, "claude", "echo claude must not run >&2; exit 9") },
+			func(t *testing.T) string { return fakeAgent(t, "codex", "echo codex must not run >&2; exit 9") },
+			func(t *testing.T) string { return fakeAgent(t, "opencode", fakeDefaultOpencode) },
+			agentOpencode, "with opencode."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, _ := setupRepo(t)
+			gh, srv := newFakeGitHub(t)
+			gh.issues[1] = readyIssue(1, "Add feature file")
+			t.Setenv("GITHUB_TOKEN", "must-not-leak")
+			r, log := newTestRunner(t, srv, root, tc.claude(t))
+			r.Codex, r.Opencode, r.Agent = tc.codex(t), tc.opencode(t), tc.agent
+			if err := r.Run(context.Background(), 1); err != nil {
+				t.Fatalf("Run: %v\nlog:\n%s", err, log)
+			}
+			if len(gh.prs) != 1 || !strings.Contains(gh.prs[0]["body"], tc.want) {
+				t.Fatalf("PRs = %v, want a body with %q", gh.prs, tc.want)
+			}
+			if got := gh.labels(1); !reflect.DeepEqual(got, []string{"amf:done"}) {
+				t.Errorf("labels = %v", got)
+			}
+		})
+	}
+}
+
+func TestNoAgentInstalledLeavesIssueAlone(t *testing.T) {
+	root, _ := setupRepo(t)
+	gh, srv := newFakeGitHub(t)
+	gh.issues[1] = readyIssue(1, "Anything")
+	r, _ := newTestRunner(t, srv, root, filepath.Join(t.TempDir(), "no-claude"))
+	r.Codex = filepath.Join(t.TempDir(), "no-codex")
+	r.Opencode = filepath.Join(t.TempDir(), "no-opencode")
+
+	err := r.Run(context.Background(), 1)
+	if err == nil || !strings.Contains(err.Error(), "no coding agent is installed (tried ") ||
+		!strings.Contains(err.Error(), "no-claude, ") || !strings.Contains(err.Error(), "no-opencode)") {
+		t.Fatalf("error = %v", err)
+	}
+	// Found before Claim: the issue keeps amf:ready, so watch tries again later.
+	if got := gh.labels(1); !reflect.DeepEqual(got, []string{"amf:ready"}) {
+		t.Errorf("labels = %v", got)
+	}
+	if len(gh.comments[1]) != 0 {
+		t.Errorf("comments = %q", gh.comments[1])
+	}
+	if _, err := os.Stat(filepath.Join(root, ".amf", "worktrees", "issue-1")); !os.IsNotExist(err) {
+		t.Errorf("no worktree expected: %v", err)
+	}
+
+	// A named agent that isn't installed doesn't fall back to another one.
+	r.Claude = fakeAgent(t, "claude", "echo claude must not run >&2; exit 9")
+	r.Agent = agentCodex
+	if err := r.Run(context.Background(), 1); err == nil || !strings.Contains(err.Error(), "--agent codex: ") {
+		t.Fatalf("error = %v", err)
+	}
+	if got := gh.labels(1); !reflect.DeepEqual(got, []string{"amf:ready"}) {
+		t.Errorf("labels = %v", got)
+	}
+}
+
+func TestAgentFlag(t *testing.T) {
+	for in, want := range map[string]string{"": "", "claude": agentClaude, "ClaudeCode": agentClaude, " codex ": agentCodex, "opencode": agentOpencode} {
+		if got, err := parseAgent(in); err != nil || got != want {
+			t.Errorf("parseAgent(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	if _, err := parseAgent("gemini"); err == nil || !strings.Contains(err.Error(), "--agent must be claudecode, codex or opencode") {
+		t.Errorf("parseAgent(gemini) = %v", err)
+	}
+
+	// run and watch reject a bad or missing agent before talking to GitHub.
+	t.Chdir(t.TempDir())
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	t.Setenv("GITHUB_REPO", "vic/demo")
+	t.Setenv("AMF_CODEX", filepath.Join(t.TempDir(), "no-codex"))
+	for _, args := range [][]string{{"run", "1", "--agent", "gemini"}, {"watch", "--agent=gemini"}} {
+		if err := run(context.Background(), args, nil, io.Discard, io.Discard); err == nil || !strings.Contains(err.Error(), "--agent must be") {
+			t.Errorf("amf %v: %v", args, err)
+		}
+	}
+	for _, args := range [][]string{{"run", "1", "--agent", "codex"}, {"watch", "--agent", "codex"}} {
+		if err := run(context.Background(), args, nil, io.Discard, io.Discard); err == nil || !strings.Contains(err.Error(), "--agent codex: ") {
+			t.Errorf("amf %v: %v", args, err)
+		}
+	}
+}
+
+func TestAgentFlagIgnoredWithPipeline(t *testing.T) {
+	root, _ := setupPipelineRepo(t, "## amf\n\n| Stage | Agent |\n|---|---|\n| code | codex |\n")
+	gh, srv := newFakeGitHub(t)
+	gh.issues[1] = readyIssue(1, "Add feature file")
+	r, log := newTestRunner(t, srv, root, fakeAgent(t, "claude", "echo claude must not run >&2; exit 9"))
+	r.Codex = fakeAgent(t, "codex", `
+while [ "$1" != "-o" ]; do shift; done
+cat >/dev/null; echo hello > feature.txt; echo "Pipeline codex." > "$2"
+`)
+	r.Agent = agentClaude
+	if err := r.Run(context.Background(), 1); err != nil {
+		t.Fatalf("Run: %v\nlog:\n%s", err, log)
+	}
+	if !strings.Contains(log.String(), "ignoring --agent claudecode: AGENTS.md on origin/main declares a pipeline") {
+		t.Errorf("log = %s", log)
+	}
+	if len(gh.prs) != 1 || !strings.Contains(gh.prs[0]["body"], "Pipeline codex.") {
+		t.Fatalf("PRs = %v", gh.prs)
 	}
 }

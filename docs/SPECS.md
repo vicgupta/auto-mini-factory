@@ -1,14 +1,16 @@
 # amf specification
 
 amf (autonomous mini factory) turns labeled GitHub issues into pull requests by
-running coding agents headless in a git worktree. By default that's one Claude
-Code run. A repo can instead declare a plan → code → eval pipeline in its
+running coding agents headless in a git worktree. By default that's one run of
+a single agent: the one `--agent` names, or else the first installed of Claude
+Code, Codex and opencode. A repo can instead declare a plan → code → eval pipeline in its
 `AGENTS.md`, with a skill, agent and model for each stage. amf is a single Go
 binary that uses only the standard library, for one developer or a small team
 that doesn't want to run a platform.
 
-**Needs:** `git` and the `claude` CLI on `PATH`, and a GitHub token for one
-repository. A pipeline also needs whichever of `codex` and `opencode` it names.
+**Needs:** `git` and at least one of the `claude`, `codex` and `opencode`
+CLIs on `PATH`, and a GitHub token for one repository. A pipeline needs
+whichever agents it names.
 
 ## Issue lifecycle
 
@@ -30,8 +32,8 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened)
 | `amf init` | Writes `./.env` and creates the labels (see below). |
 | `amf issue "Title" [-b body \| -f file \| -f -] [--label L] [--no-label]` | Creates an issue labeled `amf:ready`. The body can also come from stdin when it's piped. Prints `#N <url>`. |
 | `amf list [--state open\|closed\|all] [--label L]` | Lists issues, newest first, with every page fetched and PRs left out. Columns: `ISSUE`, `STATE` (with `--state all` only), `AMF` (the issue's `amf` and `amf:*` labels, or `-`) and `TITLE`. Prints `No … in owner/name.` when nothing matches. Needs no git checkout. |
-| `amf run <N> [--timeout 30m] [--eval-rounds 2]` | Processes issue N once. |
-| `amf watch [--interval 60s] [--label amf:ready] [--timeout 30m] [--eval-rounds 2]` | Polls open issues with the label (every page), oldest first, and processes them one at a time until interrupted. |
+| `amf run <N> [--agent A] [--timeout 30m] [--eval-rounds 2]` | Processes issue N once. |
+| `amf watch [--agent A] [--interval 60s] [--label amf:ready] [--timeout 30m] [--eval-rounds 2]` | Polls open issues with the label (every page), oldest first, and processes them one at a time until interrupted. |
 | `amf pipeline [--fetch]` | Checks the pipeline in `AGENTS.md` of the enclosing checkout, as it is on disk. See below. |
 | `amf doctor` | Checks the whole setup, one line per check, changing nothing. See below. |
 | `amf update [--version vX.Y.Z] [--check]` | Replaces the running binary with the latest release, or with the given one, which can be a downgrade. Needs no `.env`. See below. |
@@ -41,6 +43,16 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened)
   must be positive.
 - `--eval-rounds` is how many times a pipeline's eval stage may send the
   change back to the code stage. A negative value is an error.
+- `--agent` picks the agent for issues without a pipeline: `claudecode`
+  (or `claude`), `codex` or `opencode`, ignoring case. Without it, amf uses
+  the first installed of `claude`, `codex` and `opencode`, in that order,
+  checked for each issue. A named agent must be installed: `run` and `watch`
+  fail at startup with `--agent <agent>: <path> is not installed`, and never
+  fall back to another. Any other value is an error. A repo with a pipeline
+  ignores `--agent`, since the pipeline names each stage's agent; amf logs
+  `ignoring --agent <agent>` for each such issue.
+- `watch` logs at startup which agent issues without a pipeline run, or a
+  warning if none is installed.
 
 **Exit codes:** 0 on success, 1 on error, 2 on a usage error. SIGINT and
 SIGTERM cancel the current step; the issue is still marked failed.
@@ -68,8 +80,10 @@ SIGTERM cancel the current step; the issue is still marked failed.
 
 1. Must run inside a git checkout. Reads `AGENTS.md` at its top level from
    disk, so a change can be checked before it's merged.
-2. Without `AGENTS.md`, or without an `## amf` table in it, prints that amf
-   runs claude with its built-in prompt, and exits 0.
+2. Without `AGENTS.md`, or without an `## amf` table in it, prints which
+   agent amf runs with its built-in prompt (the first installed of `claude`,
+   `codex` and `opencode`, unless `--agent` names one) and exits 0. If none
+   is installed it says so and exits 1.
 3. Otherwise prints the stages (`STAGE`, `AGENT`, `MODEL`, `SKILL`), then one
    line per agent: `ok` with its path, or `missing`. Agent paths come from
    the environment and `.env`; no token is needed.
@@ -103,7 +117,7 @@ never prints a secret. The checks, in order:
 | `git identity` | git has a name and email to commit with, in the checkout (or here); shows them | `FAIL`, with the `git config` commands to set them |
 | `pipeline` | Fetches the default branch; shows the pipeline from `AGENTS.md` on it, or that there is none | `FAIL` if the table doesn't parse |
 | `skill <stage>` | Each stage's skill downloads as in `run`; shows its size and SHA-256 | `FAIL` |
-| `claudecode`, `codex`, `opencode` | Installed; shows the path and `--version` | `FAIL` if a stage needs it (or, with no pipeline, for `claude`); else `warn` |
+| `claudecode`, `codex`, `opencode` | Installed; shows the path and `--version`. With no pipeline, the first installed adds `runs issues without a pipeline`, and the `pipeline` line names it | `FAIL` if a stage needs it. With no pipeline, one `FAIL` on `claudecode` if no agent is installed at all; otherwise `warn` naming the agent amf runs instead |
 | `claude login` | Always; says whether `CLAUDE_CODE_OAUTH_TOKEN` is set or Claude uses its own login | |
 
 Checks that need GitHub, the repo or a checkout are `skip` without them.
@@ -124,8 +138,8 @@ space, a trailing comment. A leading byte order mark is ignored.
 | `CLAUDE_CODE_OAUTH_TOKEN` | unset | Claude subscription token, passed to Claude |
 | `AMF_TRUSTED` | unset | GitHub logins, separated by commas or spaces (a leading `@` is allowed, case is ignored). When set, amf only works on issues they opened. Unset means anyone's |
 | `AMF_CLAUDE` | `claude` | Path to the Claude CLI |
-| `AMF_CODEX` | `codex` | Path to the Codex CLI, for pipelines |
-| `AMF_OPENCODE` | `opencode` | Path to the opencode CLI, for pipelines |
+| `AMF_CODEX` | `codex` | Path to the Codex CLI |
+| `AMF_OPENCODE` | `opencode` | Path to the opencode CLI |
 | `AMF_API_URL` | `https://api.github.com` | GitHub API base URL |
 | `AMF_CLONE_URL` | `https://github.com/<repo>.git` | Where to clone the repo from |
 
@@ -160,8 +174,8 @@ A repo declares a pipeline with a table under an `## amf` heading in
 
 `run` and `watch` read the table from `AGENTS.md` on `origin/<default>`, so a
 pipeline only changes through a merge, and `watch` uses it from the next
-issue on. A repo without the file or the table is processed with one
-`claude` run, as described below.
+issue on. A repo without the file or the table is processed with one agent
+run, as described below.
 
 **Skills** are put into each stage's prompt as text, after amf's own
 instructions, which win where they conflict. amf's prompt fixes each stage's
@@ -182,7 +196,7 @@ work. Starter skills are in this repo under `skills/`.
 - **Environment:** see step 6 below. Codex and opencode keep their own
   logins and API keys.
 - **Output files:** the final-message files are `.amf/<stage>.md` inside the
-  worktree, which git ignores.
+  worktree (`.amf/code.md` without a pipeline), which git ignores.
 
 ## Processing one issue
 
@@ -193,8 +207,10 @@ work. Starter skills are in this repo under `skills/`.
    there. Refuse if `./<name>` exists but isn't a clone of the repo. Add
    `/.amf/` to `.git/info/exclude`.
 3. **Check.** The issue must be an open issue, not a PR. Fetch the default
-   branch and read the pipeline from `AGENTS.md` on it. A table that doesn't
-   parse, an agent that isn't installed, or git having no name and email
+   branch and read the pipeline from `AGENTS.md` on it. Without a pipeline,
+   pick the agent (see `--agent` above). A table that doesn't parse, an agent
+   that isn't installed (a stage's, the one `--agent` names, or with neither,
+   all three: `no coding agent is installed (tried …)`), or git having no name and email
    to commit with (`git var GIT_AUTHOR_IDENT` and `GIT_COMMITTER_IDENT`)
    stops the run here without changing the issue. `watch` then logs the
    error and tries again on its next poll.
@@ -207,8 +223,8 @@ work. Starter skills are in this repo under `skills/`.
 5. **Worktree.** Fetch the default branch and create
    `.amf/worktrees/issue-N` on `amf/issue-N`, reset to `origin/<default>`. A
    worktree left from an earlier run is discarded first.
-6. **Agent.** Without a pipeline, run Claude as in the Agents table above,
-   with no model.
+6. **Agent.** Without a pipeline, run the agent picked in step 3 as in the
+   Agents table above, with no model. amf logs `#N: running <claude|codex|opencode>`.
    - **Prompt:** the issue's title and body, plus instructions to make the
      smallest complete change, run the project's tests and build, not touch
      git or GitHub, and reply with only a PR description.
@@ -223,7 +239,7 @@ work. Starter skills are in this repo under `skills/`.
    "With a pipeline" below.
 7. **Commit.** Stage everything and commit as `Fix #N: <title>` with the body
    `Closes #N`. Fail if the branch doesn't change any file compared with
-   `origin/<default>`, even if Claude made commits of its own.
+   `origin/<default>`, even if the agent made commits of its own.
 8. **Push.** `git push --force -u origin amf/issue-N`, with the user's git
    credentials.
 9. **PR.** Open `amf/issue-N` → `<default>`, titled `Fix #N: <title>`. If
@@ -302,15 +318,25 @@ the run is interrupted. If Claim itself fails, the issue can be left on
    redirects to. If it equals the running version, print `amf <v> is up to
    date` and stop. `--check` stops here too and reports whether a newer
    release is available.
-2. Download `amf_<tag>_<os>_<arch>.tar.gz` and `checksums.txt` from that
-   release. If the archive is missing, fail with `no amf <tag> for <os>/<arch>`.
-   If its SHA-256 doesn't match, fail. The binary is
-   `amf_<tag>_<os>_<arch>/amf` inside the archive; if it isn't there, fail.
-3. Write the archive's `amf` next to the running executable (symlinks
-   resolved) as a temporary file with permissions 0755. Run it with
+2. Download the archive for this platform and `checksums.txt` from that
+   release: `amf_<tag>_<os>_<arch>.tar.gz` on macOS and Linux, or
+   `amf_<tag>_windows_<arch>.zip` on Windows. If the archive is missing, fail
+   with `no amf <tag> for <os>/<arch>`. If its SHA-256 doesn't match, fail.
+   The binary is `amf_<tag>_<os>_<arch>/amf` inside the archive
+   (`…/amf.exe` on Windows); if it isn't there, fail.
+3. Write the binary next to the running executable (symlinks resolved) as a
+   temporary file with permissions 0755, named `.amf-update-*` (with `.exe`
+   on Windows, which runs only executable extensions). Run it with
    `version`, and fail unless it prints `amf <tag>`.
-4. Rename it over the running executable. A folder that can't be written
-   fails with a hint to rerun with permission.
+4. Rename it over the running executable. Windows can't replace a running
+   `.exe`, so there amf first renames it to `amf.exe.old`, then moves the new
+   one in, restoring the old one if that fails. The next update removes
+   `amf.exe.old`. A folder that can't be written fails with a hint to rerun
+   with permission (`sudo`, or a terminal run as administrator on Windows).
+
+Releases have archives for `darwin`, `linux` and `windows`, each on `amd64`
+and `arm64`. `install.sh` covers macOS and Linux; on Windows it points to the
+release's `.zip`.
 
 Any failure leaves the installed binary unchanged.
 
@@ -320,7 +346,7 @@ Any failure leaves the installed binary unchanged.
 |---|---|
 | `.env`, `.env.NNNN` | Configuration and its backups (permissions 0600, git-excluded) |
 | `.amf/worktrees/issue-N/` | Working copy for an issue in progress or failed |
-| `.amf/logs/issue-N.log` | Claude's stream-json output for the latest run of issue N, without a pipeline |
+| `.amf/logs/issue-N.log` | The agent's output for the latest run of issue N, without a pipeline (stream-json for Claude) |
 | `.amf/logs/issue-N-<stage>.log` | Each pipeline stage's output: `plan`, `code-K`, `eval-K` |
 | `.amf/runs/issue-N/` | The latest pipeline run's `plan.md` and `eval-K.md` |
 | `.amf/opencode.json` | The config amf runs opencode with |

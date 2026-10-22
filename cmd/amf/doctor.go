@@ -158,7 +158,13 @@ func (d *doctor) check(ctx context.Context) {
 		d.line("ok", "git identity", "commits as %s", ident)
 	}
 
-	// The pipeline, its skills, and the agents.
+	// The pipeline, its skills, and the agents. Without a pipeline, amf runs
+	// the first installed agent (unless run or watch get --agent).
+	fallback, fallbackErr := (&Runner{Claude: cfg.Claude, Codex: cfg.Codex, Opencode: cfg.Opencode}).defaultAgent()
+	runs := "no agent (none is installed)"
+	if fallbackErr == nil {
+		runs = agentName(fallback)
+	}
 	var p *Pipeline
 	pipelineKnown := false
 	switch {
@@ -170,7 +176,7 @@ func (d *doctor) check(ctx context.Context) {
 			d.line("FAIL", "pipeline", "%v", err)
 		} else if p == nil {
 			pipelineKnown = true
-			d.line("ok", "pipeline", "none in AGENTS.md on origin/%s; amf runs claude once per issue", base)
+			d.line("ok", "pipeline", "none in AGENTS.md on origin/%s; amf runs %s once per issue", base, runs)
 		} else {
 			pipelineKnown = true
 			d.line("ok", "pipeline", "origin/%s: %s", base, describePipeline(p))
@@ -195,29 +201,34 @@ func (d *doctor) check(ctx context.Context) {
 		if bin == "" {
 			bin = agentCommand[agent]
 		}
-		var users []string // why it's needed
+		var users []string // the pipeline stages that need it
 		if p != nil {
 			for _, s := range p.stages() {
 				if s.Agent == agent {
 					users = append(users, s.Name)
 				}
 			}
-		} else if agent == agentClaude {
-			users = []string{"every issue"}
 		}
 		path, err := exec.LookPath(bin)
 		switch {
+		case err == nil && p == nil && agent == fallback:
+			d.line("ok", agent, "%s, %s; runs issues without a pipeline", path, agentVersion(ctx, path))
 		case err == nil:
 			d.line("ok", agent, "%s, %s", path, agentVersion(ctx, path))
-		case len(users) > 0 && p != nil:
+		case len(users) > 0:
 			n := len(users)
 			d.line("FAIL", agent, "%s is not installed, and the pipeline's %s %s %s it", bin, strings.Join(users, " and "), plural(n, "stage", "stages"), plural(n, "uses", "use"))
-		case len(users) > 0:
-			d.line("FAIL", agent, "%s is not installed; amf runs it for every issue", bin)
-		case pipelineKnown:
-			d.line("warn", agent, "%s is not installed; only needed by pipelines that use %s", bin, agent)
+		case p == nil && fallbackErr != nil && agent == agentOrder[0]:
+			// One problem, reported once: there is no agent at all.
+			d.line("FAIL", agent, "%s is not installed, and neither is any other agent; amf needs one of claude, codex or opencode", bin)
+		case p == nil && fallbackErr != nil:
+			d.line("warn", agent, "%s is not installed either", bin)
+		case p == nil && !pipelineKnown:
+			d.line("warn", agent, "%s is not installed; needed if the pipeline uses %s (without one, amf runs %s)", bin, agent, runs)
+		case p == nil:
+			d.line("warn", agent, "%s is not installed; amf runs %s instead, unless --agent or a pipeline names %s", bin, runs, agent)
 		default:
-			d.line("warn", agent, "%s is not installed; needed if the pipeline uses %s", bin, agent)
+			d.line("warn", agent, "%s is not installed; only needed by pipelines that use %s", bin, agent)
 		}
 	}
 	if cfg.ClaudeToken != "" {

@@ -8,8 +8,8 @@
 #
 # Each archive is laid out the way install.sh and `amf update` expect:
 #
-#   amf_<tag>_<os>_<arch>.tar.gz
-#     amf_<tag>_<os>_<arch>/amf
+#   amf_<tag>_<os>_<arch>.tar.gz          (.zip for windows)
+#     amf_<tag>_<os>_<arch>/amf            (amf.exe for windows)
 #     amf_<tag>_<os>_<arch>/README.md
 #     amf_<tag>_<os>_<arch>/SPECS.md
 #     amf_<tag>_<os>_<arch>/LICENSE
@@ -18,7 +18,7 @@
 set -eu
 
 repo="vicgupta/auto-mini-factory"
-platforms="darwin/arm64 darwin/amd64 linux/arm64 linux/amd64"
+platforms="darwin/arm64 darwin/amd64 linux/arm64 linux/amd64 windows/arm64 windows/amd64"
 
 fail() {
 	echo "release: $*" >&2
@@ -55,6 +55,7 @@ if ! $dry; then
 fi
 
 cd "$(dirname "$0")/.."
+command -v zip >/dev/null 2>&1 && command -v unzip >/dev/null 2>&1 || fail "zip and unzip are required for the windows archives"
 
 if ! $dry; then
 	[ -z "$(git status --porcelain --untracked-files=no)" ] || fail "commit or stash your changes first"
@@ -93,13 +94,21 @@ for p in $platforms; do
 	name="amf_${tag}_${os}_${arch}"
 	echo "Building $name"
 	mkdir "$out/$name"
-	CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -ldflags "-s -w -X main.version=$tag" -o "$out/$name/amf" ./cmd/amf
+	bin=amf
+	[ "$os" = windows ] && bin=amf.exe
+	CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -ldflags "-s -w -X main.version=$tag" -o "$out/$name/$bin" ./cmd/amf
 	cp README.md docs/SPECS.md LICENSE "$out/$name/"
-	# COPYFILE_DISABLE keeps macOS tar from adding ._ metadata files.
-	(cd "$out" && COPYFILE_DISABLE=1 tar -czf "$name.tar.gz" "$name")
-	tar -tzf "$out/$name.tar.gz" | grep -qx "$name/amf" || fail "$name.tar.gz has no $name/amf"
+	if [ "$os" = windows ]; then
+		# -X leaves out extra file attributes, as COPYFILE_DISABLE does for tar.
+		(cd "$out" && zip -qrX "$name.zip" "$name")
+		unzip -Z1 "$out/$name.zip" | grep -qx "$name/$bin" || fail "$name.zip has no $name/$bin"
+	else
+		# COPYFILE_DISABLE keeps macOS tar from adding ._ metadata files.
+		(cd "$out" && COPYFILE_DISABLE=1 tar -czf "$name.tar.gz" "$name")
+		tar -tzf "$out/$name.tar.gz" | grep -qx "$name/$bin" || fail "$name.tar.gz has no $name/$bin"
+	fi
 done
-(cd "$out" && sha256 amf_*.tar.gz >checksums.txt)
+(cd "$out" && sha256 amf_*.tar.gz amf_*.zip >checksums.txt)
 
 # Run this machine's build from its archive, as install.sh would.
 case "$(uname -s)" in
@@ -127,7 +136,7 @@ if $dry; then
 fi
 
 gh release create "$tag" --repo "$repo" --target "$(git rev-parse HEAD)" --title "amf $tag" \
-	--notes-file "$notes" "$out"/amf_*.tar.gz "$out/checksums.txt"
+	--notes-file "$notes" "$out"/amf_*.tar.gz "$out"/amf_*.zip "$out/checksums.txt"
 git fetch -q --tags origin
 
 # Check what GitHub serves. Its download cache can lag for a few minutes.

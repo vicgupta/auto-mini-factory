@@ -41,8 +41,11 @@ type Runner struct {
 	Repo     string // owner/name, for the prompt
 	Root     string // top level of the local checkout
 	Claude   string // claude binary
-	Codex    string // codex binary, for pipelines
-	Opencode string // opencode binary, for pipelines
+	Codex    string // codex binary
+	Opencode string // opencode binary
+	// Agent is the agent for issues without a pipeline (claudecode, codex or
+	// opencode), from --agent. "" means the first installed, in agentOrder.
+	Agent string
 	// ClaudeToken, when set, is passed to Claude as CLAUDE_CODE_OAUTH_TOKEN.
 	ClaudeToken string
 	// Trusted, when set, limits amf to issues opened by these lower-case
@@ -84,6 +87,14 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 	if err != nil {
 		return err
 	}
+	agent := ""
+	if pipeline == nil {
+		if agent, err = r.defaultAgent(); err != nil {
+			return err
+		}
+	} else if r.Agent != "" {
+		r.logf("#%d: ignoring --agent %s: AGENTS.md on origin/%s declares a pipeline, which names each stage's agent", n, r.Agent, base)
+	}
 	if _, err := gitIdentity(ctx, r.Root); err != nil {
 		return err
 	}
@@ -120,7 +131,7 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 		return err
 	}
 
-	pr, updated, err := r.process(ctx, issue, base, pipeline)
+	pr, updated, err := r.process(ctx, issue, base, pipeline, agent)
 	if err != nil {
 		return err
 	}
@@ -158,10 +169,10 @@ func (r *Runner) checkAuthor(issue Issue) error {
 	}
 }
 
-// process turns the issue into a PR: with a single claude run, or with the
+// process turns the issue into a PR: with a single run of agent, or with the
 // repo's pipeline when its AGENTS.md declares one. updated is true when the
 // branch already had an open PR, which now has the new title and body.
-func (r *Runner) process(ctx context.Context, issue Issue, base string, p *Pipeline) (pr PullRequest, updated bool, err error) {
+func (r *Runner) process(ctx context.Context, issue Issue, base string, p *Pipeline, agent string) (pr PullRequest, updated bool, err error) {
 	n := issue.Number
 	branch := fmt.Sprintf("amf/issue-%d", n)
 	wt := filepath.Join(r.Root, ".amf", "worktrees", fmt.Sprintf("issue-%d", n))
@@ -174,9 +185,10 @@ func (r *Runner) process(ctx context.Context, issue Issue, base string, p *Pipel
 	title := fmt.Sprintf("Fix #%d: %s", n, issue.Title)
 	var summary, extra string
 	if p == nil {
-		r.logf("#%d: running claude (timeout %s)", n, r.Timeout)
+		r.logf("#%d: running %s (timeout %s)", n, agentName(agent), r.Timeout)
 		log := filepath.Join(r.Root, ".amf", "logs", fmt.Sprintf("issue-%d.log", n))
-		if summary, err = r.runAgent(ctx, agentClaude, "", wt, buildPrompt(r.Repo, branch, issue), log, ""); err != nil {
+		out := filepath.Join(wt, ".amf", "code.md") // for agents that write their final message to a file
+		if summary, err = r.runAgent(ctx, agent, "", wt, buildPrompt(r.Repo, branch, issue), log, out); err != nil {
 			return PullRequest{}, false, err
 		}
 		if err := commitAll(ctx, wt, title, n, base); err != nil {
@@ -413,6 +425,14 @@ func needsWork(is Issue) bool {
 // until ctx is cancelled.
 func (r *Runner) Watch(ctx context.Context, label string, interval time.Duration) error {
 	r.logf("watching %s for issues labeled %q every %s (Ctrl-C to stop)", r.Repo, label, interval)
+	switch agent, err := r.defaultAgent(); {
+	case r.Agent != "":
+		r.logf("issues without a pipeline run %s (--agent)", agentName(r.Agent))
+	case err != nil:
+		r.logf("warning: %v; issues without a pipeline wait until one is installed", err)
+	default:
+		r.logf("issues without a pipeline run %s, the first installed of claude, codex and opencode", agentName(agent))
+	}
 	for {
 		issues, err := r.GH.ListIssues(ctx, "open", label, true)
 		if err != nil && ctx.Err() == nil {

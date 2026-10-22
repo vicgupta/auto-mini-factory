@@ -22,6 +22,7 @@ done
 case "$(uname -s)" in
 Darwin) os=darwin ;;
 Linux) os=linux ;;
+MINGW* | MSYS* | CYGWIN*) fail "on Windows, download amf_<version>_windows_<arch>.zip from https://github.com/$repo/releases/latest and put amf.exe on your PATH; amf update keeps it current" ;;
 *) fail "unsupported OS $(uname -s); use: go install github.com/$repo/cmd/amf@latest" ;;
 esac
 

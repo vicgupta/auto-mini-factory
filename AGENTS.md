@@ -44,9 +44,9 @@ Releases are for the maintainer (the repo owner) only; end users never run
 this and get new versions with `amf update`. Publish only with
 `scripts/release.sh`, which refuses unless `gh` is logged in as the owner;
 never build or upload archives by hand. `install.sh` and `amf update` find
-the binary at `amf_<tag>_<os>_<arch>/amf` inside each archive, and an archive
-without that folder breaks both (this happened to v0.1.1 and was fixed by
-re-uploading).
+the binary at `amf_<tag>_<os>_<arch>/amf` (`amf.exe` in the Windows `.zip`)
+inside each archive, and an archive without that folder breaks both (this
+happened to v0.1.1 and was fixed by re-uploading).
 
 1. **Pick the version.** Bump the patch (`v0.1.1` → `v0.1.2`) for fixes,
    docs and packaging, and the minor (`v0.1.x` → `v0.2.0`) for new commands,
@@ -63,12 +63,13 @@ re-uploading).
    builds every platform, and checks the archives without publishing.
 4. **Release:** `scripts/release.sh vX.Y.Z notes.md`. From a clean `main`
    that matches `origin/main`, it waits for CI on that commit and refuses
-   if CI failed. It then builds `darwin` and `linux` for `arm64` and
-   `amd64`, writes `checksums.txt`, runs this machine's binary to check its
+   if CI failed. It then builds `darwin`, `linux` and `windows` for `arm64`
+   and `amd64` (`.tar.gz`, and `.zip` for Windows; it needs `zip` and
+   `unzip`), writes `checksums.txt`, runs this machine's binary to check its
    version, creates the tag and the release titled `amf vX.Y.Z` on the
    current commit, and checks that GitHub serves the archive it uploaded.
-   Each archive holds `amf`, `README.md`, `SPECS.md` (from `docs/`) and
-   `LICENSE`.
+   Each archive holds `amf` (`amf.exe` on Windows), `README.md`, `SPECS.md`
+   (from `docs/`) and `LICENSE`.
 5. **Verify:** `amf update --check` should name the new version, as
    available or up to date.
 

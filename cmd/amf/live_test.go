@@ -469,7 +469,7 @@ func TestLive(t *testing.T) {
 	t.Run("untrusted author", func(t *testing.T) {
 		n := l.newIssue("Untrusted", "Create the file `live/"+l.id+"/untrusted.txt` containing exactly: no")
 		_, errOut, code := l.amf("", []string{"AMF_TRUSTED=someone-else-" + l.id}, "run", strconv.Itoa(n))
-		if code != 1 || !strings.Contains(errOut, "not in AMF_TRUSTED") || strings.Contains(errOut, "running claude") {
+		if code != 1 || !strings.Contains(errOut, "not in AMF_TRUSTED") || regexp.MustCompile(`: running (claude|codex|opencode) `).MatchString(errOut) {
 			t.Errorf("exit %d:\n%s", code, errOut)
 		}
 		l.wantLabels(n, labelFailed)

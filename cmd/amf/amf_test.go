@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -764,7 +765,7 @@ func TestNewRunnerClonesOutsideCheckout(t *testing.T) {
 	ctx := context.Background()
 
 	var log bytes.Buffer
-	r, err := newRunner(ctx, time.Minute, 2, &log)
+	r, err := newRunner(ctx, time.Minute, 2, "", &log)
 	if err != nil {
 		t.Fatalf("newRunner: %v\n%s", err, log.String())
 	}
@@ -780,7 +781,7 @@ func TestNewRunnerClonesOutsideCheckout(t *testing.T) {
 
 	// The next run reuses the clone.
 	log.Reset()
-	if _, err := newRunner(ctx, time.Minute, 2, &log); err != nil {
+	if _, err := newRunner(ctx, time.Minute, 2, "", &log); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(log.String(), "using the clone at") {
@@ -790,7 +791,7 @@ func TestNewRunnerClonesOutsideCheckout(t *testing.T) {
 	// A folder with the repo's name that isn't its clone is left alone.
 	t.Chdir(t.TempDir())
 	os.Mkdir("demo", 0o755)
-	if _, err := newRunner(ctx, time.Minute, 2, io.Discard); err == nil || !strings.Contains(err.Error(), "is not a clone of vic/demo") {
+	if _, err := newRunner(ctx, time.Minute, 2, "", io.Discard); err == nil || !strings.Contains(err.Error(), "is not a clone of vic/demo") {
 		t.Fatalf("expected not-a-clone error, got %v", err)
 	}
 }
@@ -801,7 +802,7 @@ func TestNewRunnerUnknownRepo(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "test-token")
 	t.Setenv("GITHUB_REPO", "vicc/demo")
 	t.Setenv("AMF_API_URL", srv.URL)
-	_, err := newRunner(context.Background(), time.Minute, 2, io.Discard)
+	_, err := newRunner(context.Background(), time.Minute, 2, "", io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "GITHUB_REPO vicc/demo was not found") {
 		t.Fatalf("expected not-found error, got %v", err)
 	}
@@ -811,7 +812,7 @@ func TestNewRunnerUnknownRepo(t *testing.T) {
 
 	t.Setenv("GITHUB_TOKEN", "wrong-token")
 	t.Setenv("GITHUB_REPO", "vic/demo")
-	if _, err := newRunner(context.Background(), time.Minute, 2, io.Discard); err == nil || !strings.Contains(err.Error(), "rejected GITHUB_TOKEN") {
+	if _, err := newRunner(context.Background(), time.Minute, 2, "", io.Discard); err == nil || !strings.Contains(err.Error(), "rejected GITHUB_TOKEN") {
 		t.Fatalf("expected bad-token error, got %v", err)
 	}
 }
@@ -926,31 +927,46 @@ func TestListCommand(t *testing.T) {
 }
 
 // fakeReleases serves /releases/latest and one release's archive and checksums
-// the way GitHub does. The archive's amf is a script that prints reports.
+// the way GitHub does, for this platform. The archive's amf is a script that
+// prints reports.
 func fakeReleases(t *testing.T, tag, reports string, badSum bool) *httptest.Server {
+	return fakeReleasesFor(t, tag, reports, badSum, runtime.GOOS, runtime.GOARCH)
+}
+
+// fakeReleasesFor is fakeReleases for another platform: a .zip holding
+// amf.exe for windows, else a .tar.gz holding amf.
+func fakeReleasesFor(t *testing.T, tag, reports string, badSum bool, goos, goarch string) *httptest.Server {
 	t.Helper()
-	name := fmt.Sprintf("amf_%s_%s_%s", tag, runtime.GOOS, runtime.GOARCH)
-	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
-	tw := tar.NewWriter(gz)
+	folder, file, bin := releaseArchive(tag, goos, goarch)
 	script := []byte("#!/bin/sh\necho '" + reports + "'\n")
-	tw.WriteHeader(&tar.Header{Name: name + "/", Typeflag: tar.TypeDir, Mode: 0o755})
-	tw.WriteHeader(&tar.Header{Name: name + "/amf", Typeflag: tar.TypeReg, Mode: 0o755, Size: int64(len(script))})
-	tw.Write(script)
-	tw.Close()
-	gz.Close()
+	var buf bytes.Buffer
+	if goos == "windows" {
+		zw := zip.NewWriter(&buf)
+		zw.Create(folder + "/")
+		w, _ := zw.CreateHeader(&zip.FileHeader{Name: folder + "/" + bin, Method: zip.Deflate})
+		w.Write(script)
+		zw.Close()
+	} else {
+		gz := gzip.NewWriter(&buf)
+		tw := tar.NewWriter(gz)
+		tw.WriteHeader(&tar.Header{Name: folder + "/", Typeflag: tar.TypeDir, Mode: 0o755})
+		tw.WriteHeader(&tar.Header{Name: folder + "/" + bin, Typeflag: tar.TypeReg, Mode: 0o755, Size: int64(len(script))})
+		tw.Write(script)
+		tw.Close()
+		gz.Close()
+	}
 	archive := buf.Bytes()
 	sum := sha256.Sum256(archive)
-	sums := fmt.Sprintf("%x  %s.tar.gz\n", sum, name)
+	sums := fmt.Sprintf("%x  %s\n", sum, file)
 	if badSum {
-		sums = strings.Repeat("0", 64) + "  " + name + ".tar.gz\n"
+		sums = strings.Repeat("0", 64) + "  " + file + "\n"
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /releases/latest", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/releases/tag/"+tag, http.StatusFound)
 	})
-	mux.HandleFunc("GET /releases/download/"+tag+"/"+name+".tar.gz", func(w http.ResponseWriter, r *http.Request) { w.Write(archive) })
+	mux.HandleFunc("GET /releases/download/"+tag+"/"+file, func(w http.ResponseWriter, r *http.Request) { w.Write(archive) })
 	mux.HandleFunc("GET /releases/download/"+tag+"/checksums.txt", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, sums) })
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -962,7 +978,7 @@ func newTestUpdater(t *testing.T, srv *httptest.Server, current string) (*update
 	exe := filepath.Join(t.TempDir(), "amf")
 	os.WriteFile(exe, []byte("old binary"), 0o755)
 	var out bytes.Buffer
-	return &updater{base: srv.URL, current: current, exe: exe, out: &out}, &out
+	return &updater{base: srv.URL, current: current, exe: exe, out: &out, goos: runtime.GOOS, goarch: runtime.GOARCH}, &out
 }
 
 func TestUpdateReplacesBinary(t *testing.T) {
@@ -1038,5 +1054,52 @@ func TestCleanSummary(t *testing.T) {
 	}
 	if got := cleanSummary("Closes #4\nReal text", 3); got != "Closes #4\nReal text" {
 		t.Fatalf("other issue numbers must stay: %q", got)
+	}
+}
+
+func TestUpdateWindows(t *testing.T) {
+	// The Windows path, run here: a .zip holding amf.exe, a temp file ending
+	// in .exe, and the running binary moved aside rather than overwritten.
+	srv := fakeReleasesFor(t, "v9.9.9", "amf v9.9.9", false, "windows", "amd64")
+	dir := t.TempDir()
+	exe := filepath.Join(dir, "amf.exe")
+	os.WriteFile(exe, []byte("old binary"), 0o755)
+	os.WriteFile(exe+".old", []byte("from the update before"), 0o755)
+	var out bytes.Buffer
+	u := &updater{base: srv.URL, current: "v0.4.1", exe: exe, out: &out, goos: "windows", goarch: "amd64"}
+	if err := u.run(context.Background(), "", false); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "Downloading amf v9.9.9 for windows/amd64") {
+		t.Errorf("output = %q", out.String())
+	}
+	if b := mustRead(t, exe); !strings.Contains(b, "amf v9.9.9") {
+		t.Fatalf("amf.exe not replaced: %q", b)
+	}
+	if b := mustRead(t, exe+".old"); b != "old binary" {
+		t.Errorf("amf.exe.old = %q, want the binary that was running", b)
+	}
+	if m, _ := filepath.Glob(filepath.Join(dir, ".amf-update-*")); len(m) != 0 {
+		t.Errorf("temp files left behind: %v", m)
+	}
+
+	// A zip without amf.exe in the expected folder is refused.
+	bad := fakeReleasesFor(t, "v9.9.9", "amf v9.9.9", false, "windows", "arm64")
+	u2 := &updater{base: bad.URL, current: "v0.4.1", exe: exe, out: io.Discard, goos: "windows", goarch: "amd64"}
+	if err := u2.run(context.Background(), "", false); err == nil || !strings.Contains(err.Error(), "no amf v9.9.9 for windows/amd64") {
+		t.Errorf("error = %v", err)
+	}
+}
+
+func TestReleaseArchive(t *testing.T) {
+	for _, tc := range []struct{ goos, file, bin string }{
+		{"windows", "amf_v1.2.3_windows_amd64.zip", "amf.exe"},
+		{"linux", "amf_v1.2.3_linux_amd64.tar.gz", "amf"},
+		{"darwin", "amf_v1.2.3_darwin_amd64.tar.gz", "amf"},
+	} {
+		folder, file, bin := releaseArchive("v1.2.3", tc.goos, "amd64")
+		if folder != "amf_v1.2.3_"+tc.goos+"_amd64" || file != tc.file || bin != tc.bin {
+			t.Errorf("releaseArchive(%s) = %s, %s, %s", tc.goos, folder, file, bin)
+		}
 	}
 }
