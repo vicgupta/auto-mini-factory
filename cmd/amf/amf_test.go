@@ -84,6 +84,7 @@ func TestLoadConfig(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "")
 	t.Setenv("GITHUB_REPO", "")
 	t.Setenv("AMF_API_URL", "")
+	t.Setenv("AMF_CLAUDE", "") // checks the default
 
 	cfg, err := loadConfig(filepath.Join(dir, "missing"), env)
 	if err != nil {
@@ -640,6 +641,13 @@ func TestMain(m *testing.M) {
 		os.Unsetenv(k)
 	}
 	os.Setenv("AMF_API_URL", "http://127.0.0.1:1") // unreachable unless a test sets a fake
+	// Hide any real agents on this machine, as CI has none: a test that needs
+	// one sets a fake. The live tests run the real ones.
+	if os.Getenv("AMF_LIVE_DIR") == "" {
+		for _, k := range []string{"AMF_CLAUDE", "AMF_CODEX", "AMF_OPENCODE"} {
+			os.Setenv(k, "amf-test-no-such-agent")
+		}
+	}
 	if _, err := exec.LookPath("git"); err != nil {
 		fmt.Println("skipping: git not installed")
 		return

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 )
@@ -185,6 +186,15 @@ func (g *GitHub) ListIssues(ctx context.Context, state, label string, asc bool) 
 			return nil, err
 		}
 	}
+	// GitHub sorts by created_at, which has one-second resolution, so issues
+	// opened in the same second can come back in either order. Issue numbers
+	// always increase, so they settle ties.
+	slices.SortStableFunc(issues, func(a, b Issue) int {
+		if asc {
+			return a.Number - b.Number
+		}
+		return b.Number - a.Number
+	})
 	return issues, nil
 }
 

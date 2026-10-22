@@ -31,9 +31,9 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened)
 |---|---|
 | `amf init` | Writes `./.env` and creates the labels (see below). |
 | `amf issue "Title" [-b body \| -f file \| -f -] [--label L] [--no-label]` | Creates an issue labeled `amf:ready`. The body can also come from stdin when it's piped. Prints `#N <url>`. |
-| `amf list [--state open\|closed\|all] [--label L]` | Lists issues, newest first, with every page fetched and PRs left out. Columns: `ISSUE`, `STATE` (with `--state all` only), `AMF` (the issue's `amf` and `amf:*` labels, or `-`) and `TITLE`. Prints `No … in owner/name.` when nothing matches. Needs no git checkout. |
+| `amf list [--state open\|closed\|all] [--label L]` | Lists issues, newest first (highest number first), with every page fetched and PRs left out. Columns: `ISSUE`, `STATE` (with `--state all` only), `AMF` (the issue's `amf` and `amf:*` labels, or `-`) and `TITLE`. Prints `No … in owner/name.` when nothing matches. Needs no git checkout. |
 | `amf run <N> [--agent A] [--timeout 30m] [--eval-rounds 2]` | Processes issue N once. |
-| `amf watch [--agent A] [--interval 60s] [--label amf:ready] [--timeout 30m] [--eval-rounds 2]` | Polls open issues with the label (every page), oldest first, and processes them one at a time until interrupted. |
+| `amf watch [--agent A] [--interval 60s] [--label amf:ready] [--timeout 30m] [--eval-rounds 2]` | Polls open issues with the label (every page), oldest first by issue number (GitHub's `created_at` can tie for issues opened in the same second), and processes them one at a time until interrupted. |
 | `amf pipeline [--fetch]` | Checks the pipeline in `AGENTS.md` of the enclosing checkout, as it is on disk. See below. |
 | `amf doctor` | Checks the whole setup, one line per check, changing nothing. See below. |
 | `amf update [--version vX.Y.Z] [--check]` | Replaces the running binary with the latest release, or with the given one, which can be a downgrade. Needs no `.env`. See below. |

@@ -308,6 +308,8 @@ func TestLoadConfigEdgeCases(t *testing.T) {
 
 	p := write("GITHUB_TOKEN=tok\nGITHUB_REPO=file/repo\nAMF_API_URL=http://ghe.example/api/v3/\nAMF_CODEX=/opt/codex\nAMF_OPENCODE=/opt/oc\n")
 	t.Setenv("GITHUB_REPO", "env/repo")
+	t.Setenv("AMF_CODEX", "") // from the file, not TestMain's placeholder
+	t.Setenv("AMF_OPENCODE", "")
 	cfg, err := loadConfig(p)
 	if err != nil {
 		t.Fatal(err)
@@ -388,6 +390,7 @@ func TestPipelineCommandEdgeCases(t *testing.T) {
 	var out bytes.Buffer
 
 	os.WriteFile(agents, []byte("# Agents\n\nNo pipeline.\n"), 0o644)
+	t.Setenv("AMF_CLAUDE", fakeAgent(t, "claude", "exit 0"))
 	if err := run(ctx, []string{"pipeline"}, nil, &out, io.Discard); err != nil || !strings.Contains(out.String(), "No ## amf table") {
 		t.Fatalf("no table: %v, %q", err, out.String())
 	}
@@ -1409,5 +1412,32 @@ cat >/dev/null; echo hello > feature.txt; echo "Pipeline codex." > "$2"
 	}
 	if len(gh.prs) != 1 || !strings.Contains(gh.prs[0]["body"], "Pipeline codex.") {
 		t.Fatalf("PRs = %v", gh.prs)
+	}
+}
+
+func TestListIssuesOrdersByNumber(t *testing.T) {
+	// GitHub's created_at has one-second resolution, so two issues opened in
+	// the same second can come back in either order. watch must still take
+	// the older one first.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, []Issue{{Number: 79, State: "open"}, {Number: 78, State: "open"}, {Number: 80, State: "open"}})
+	}))
+	t.Cleanup(srv.Close)
+	c := newGitHub(Config{Token: "t", Repo: "vic/demo", APIURL: srv.URL})
+	for _, tc := range []struct {
+		asc  bool
+		want []int
+	}{{true, []int{78, 79, 80}}, {false, []int{80, 79, 78}}} {
+		issues, err := c.ListIssues(context.Background(), "open", "", tc.asc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []int
+		for _, is := range issues {
+			got = append(got, is.Number)
+		}
+		if !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("asc=%v: got %v, want %v", tc.asc, got, tc.want)
+		}
 	}
 }
