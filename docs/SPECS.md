@@ -33,15 +33,24 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened)
 | `amf init` | Writes `./.env` and creates the labels (see below). |
 | `amf issue "Title" [-b body \| -f file \| -f -] [--label L] [--no-label]` | Creates an issue labeled `amf:ready`. The body can also come from stdin when it's piped. Prints `#N <url>`. |
 | `amf list [--state open\|closed\|all] [--label L]` | Lists issues, newest first (highest number first), with every page fetched and PRs left out. Columns: `ISSUE`, `STATE` (with `--state all` only), `AMF` (the issue's `amf` and `amf:*` labels, or `-`) and `TITLE`. Prints `No … in owner/name.` when nothing matches. Needs no git checkout. |
-| `amf run <N> [--agent A] [--timeout 30m] [--eval-rounds 2]` | Processes issue N once. |
-| `amf watch [--agent A] [--interval 60s] [--label amf:ready] [--timeout 30m] [--eval-rounds 2]` | Polls open issues with the label (every page), oldest first by issue number (GitHub's `created_at` can tie for issues opened in the same second), and processes them one at a time until interrupted. |
+| `amf run <N> [--agent A] [--agent-timeout 60m] [--eval-rounds 2]` | Processes issue N once. |
+| `amf watch [--agent A] [--interval 60s] [--label amf:ready] [--agent-timeout 60m] [--eval-rounds 2]` | Polls open issues with the label (every page), oldest first by issue number (GitHub's `created_at` can tie for issues opened in the same second), and processes them one at a time until interrupted. |
 | `amf pipeline [--fetch]` | Checks the pipeline in `AGENTS.md` of the enclosing checkout, as it is on disk. See below. |
 | `amf doctor` | Checks the whole setup, one line per check, changing nothing. See below. |
 | `amf update [--version vX.Y.Z] [--check]` | Replaces the running binary with the latest release, or with the given one, which can be a downgrade. Needs no `.env`. See below. |
 | `amf version` | Prints the version: the release tag, or the module version for `go install`. |
 
-- `--timeout` limits each agent run, not the whole issue. It and `--interval`
-  must be positive.
+- `--agent-timeout` limits each agent run, not the whole issue; the old
+  `--timeout` is accepted as a deprecated alias of it. Both must be at least
+  1m and at most 24h, and 0 and negatives are errors; every out-of-range or
+  unparsable value is a startup error naming where it came from, such as
+  `AMF_AGENT_TIMEOUT="5x": not a duration`. `AMF_AGENT_TIMEOUT` (.env or the
+  environment) sets the limit without a flag, and a flag overrides it;
+  without either, each agent run gets 60 minutes. The limit is per run, not
+  per issue: a plan plus eval rounds run under pipelines can take several
+  times it. A run's process group gets SIGTERM all together on expiry and, if
+  it is still there after amf's 15s grace period, SIGKILL; Ctrl-C kills it the
+  same way. `--interval` also must be positive.
 - `--eval-rounds` is how many times a pipeline's eval stage may send the
   change back to the code stage. A negative value is an error.
 - `--agent` picks the agent for issues without a pipeline: `claudecode`
@@ -68,18 +77,18 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened)
   warning that none is available.
 
 **Exit codes:** 0 on success, 1 on error, 2 on a usage error. SIGINT and
-SIGTERM cancel the current step; the issue is still marked failed.
+SIGTERM cancel the current step, with the run's process group killed as on
+expiry; the issue is still marked failed.
 
 ### `amf init`
 
 1. Builds `.env` from a template of `GITHUB_TOKEN`, `GITHUB_REPO`,
    `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
-   `OPENCODE_MODEL`, `AMF_TRUSTED` and `AMF_POSTGRES_URL`.
-   - `OPENCODE_MODEL` and `AMF_POSTGRES_URL` are written commented out, as
-     `# OPENCODE_MODEL=opencode/big-pickle   # Use 'opencode models' to list all the models`
-     and
-     `# AMF_POSTGRES_URL=postgres://user:password@localhost:5432/postgres   # optional: also save the logs to database amflogs on this PostgreSQL server`,
-     until they have a real value. Neither is one of the values `init` asks
+   `OPENCODE_MODEL`, `AMF_AGENT_TIMEOUT`, `AMF_TRUSTED` and
+   `AMF_POSTGRES_URL`.
+   - `OPENCODE_MODEL`, `AMF_AGENT_TIMEOUT` and `AMF_POSTGRES_URL` are written
+     commented out, as `# OPENCODE_MODEL=opencode/big-pickle   # Use 'opencode models' to list all the models`
+     until they have a real value. None is one of the values `init` asks
      you to fill in.
    - Real values from an existing `.env` are kept, and so are any extra
      variables.
@@ -166,6 +175,7 @@ space, a trailing comment. A leading byte order mark is ignored.
 | `AMF_TRUSTED` | unset | GitHub logins, separated by commas or spaces (a leading `@` is allowed, case is ignored). When set, amf only works on issues they opened. Unset means anyone's |
 | `AMF_POSTGRES_URL` | unset | A PostgreSQL server that `run` and `watch` also write their logs to. See [Logging to PostgreSQL](#logging-to-postgresql) |
 | `AMF_CLAUDE` | `claude` | Path to the Claude CLI |
+| `AMF_AGENT_TIMEOUT` | `60m` | How long each agent run may take, as a Go duration; `--agent-timeout` (or its alias `--timeout`) overrides it. Must be at least 1m and at most 24h |
 | `AMF_CODEX` | `codex` | Path to the Codex CLI |
 | `AMF_OPENCODE` | `opencode` | Path to the opencode CLI |
 | `AMF_API_URL` | `https://api.github.com` | GitHub API base URL |
@@ -265,7 +275,19 @@ work. Starter skills are in this repo under `skills/`.
      `ANTHROPIC_API_KEY` from `.env` or the environment is passed to Claude.
      `OPENAI_API_KEY` from `.env` or the environment is passed to Codex.
    - **Log:** output streams live to `.amf/logs/issue-N.log`.
-   - **Timeout:** the agent is killed after `--timeout`.
+   - **Timeout:** each run may take at most `--agent-timeout` (or
+     `AMF_AGENT_TIMEOUT`; the default is 60m). On expiry amf signals the
+     run's whole process group with SIGTERM, then, if it is still there
+     after a 15s grace period, SIGKILL: the agent, the shells it spawns and
+     their MCP servers are all stopped, as on Ctrl-C. The run fails;
+     whatever the agent printed stays in its log, ending with a
+     `amf: killed after <elapsed> timeout (SIGTERM, then SIGKILL after 15s)`
+     line, and an agent with a final-message file has what was written kept
+     as `.amf/logs/<log>.partial.md`. amf logs an `agent.timeout` event, and
+     the issue's comment names the agent, the stage and the limit, and how
+     to retry with more time. A timed-out run pushes nothing and opens or
+     updates no PR, and its worktree is removed; the logs and partial output
+     stay.
    - **Summary:** the final message becomes the summary.
 
    With a pipeline, this step and the next are replaced by the steps in
@@ -341,7 +363,9 @@ stage, the plan in a collapsed block.
 
 **On failure** in any step after Claim, up to opening the PR: set `amf:failed`, comment the error on
 the issue, and keep the worktree and logs for inspection. This also happens if
-the run is interrupted. If Claim itself fails, the issue can be left on
+the run is interrupted — except that a run that hit `--agent-timeout` leaves
+the worktree (removed, with its branch unpushed) and keeps only the logs and
+partial output. If Claim itself fails, the issue can be left on
 `amf:in-progress`, which `watch` skips; `amf run N` recovers it.
 
 ## Updating (`amf update`)
@@ -380,6 +404,7 @@ Any failure leaves the installed binary unchanged.
 | `.env`, `.env.NNNN` | Configuration and its backups (permissions 0600, git-excluded) |
 | `.amf/worktrees/issue-N/` | Working copy for an issue in progress or failed |
 | `.amf/logs/issue-N.log` | The agent's output for the latest run of issue N, without a pipeline (stream-json for Claude) |
+| `.amf/logs/issue-N[-<stage>].partial.md` | An agent's final-message file, kept after a timeout cut the run short |
 | `.amf/logs/issue-N-<stage>.log` | Each pipeline stage's output: `plan`, `code-K`, `eval-K` |
 | `.amf/runs/issue-N/` | The latest pipeline run's `plan.md` and `eval-K.md` |
 | `.amf/opencode.json` | The config amf runs opencode with |

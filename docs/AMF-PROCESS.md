@@ -8,12 +8,14 @@ the authoritative description of amf's behavior.
 
 ## Before any issue: starting `amf run` or `amf watch` (`newRunner`, main.go)
 
-1. **Settings are checked.** `--timeout` must be positive and
+1. **Settings are checked.** `--agent-timeout` (or its deprecated alias
+   `--timeout`) must be a duration of at least 1m and at most 24h, and
    `--eval-rounds` can't be negative. For `watch`, `--interval` must also be
    positive.
 2. **Config is loaded.** amf reads `./.env`, then `.env` at the top of the
    checkout; environment variables win. That gives the token, the repo, the
-   binary paths, `CLAUDE_CODE_OAUTH_TOKEN` and `AMF_TRUSTED`.
+   binary paths, `CLAUDE_CODE_OAUTH_TOKEN`, `AMF_AGENT_TIMEOUT` and
+   `AMF_TRUSTED`.
 3. **The repo is checked on GitHub.** A wrong repo name gets a clear "not
    found" message, and a rejected token gets "GitHub rejected GITHUB_TOKEN".
 4. **The checkout is found.** amf uses the git checkout you're in. Anywhere
@@ -82,8 +84,9 @@ each, one at a time.
     - the repo's `CLAUDE.md`, as Claude Code always does.
 15. **Logging and time limit.** Every JSON message streams to
     `.amf/logs/issue-N.log` as it arrives, so `tail -f` follows along. After
-    `--timeout` (30 minutes by default) Claude is killed, with 10 seconds for
-    its output to drain.
+    `--agent-timeout` (60 minutes by default, `AMF_AGENT_TIMEOUT` without a
+    flag) Claude's whole process group is signalled: SIGTERM first, and if
+    the group is still there after a 15s grace period, SIGKILL.
 16. **The result.** amf reads the final `result` message.
     - An error result fails the issue ("claude reported an error…"), and so
       does output with no result message.
@@ -124,7 +127,10 @@ each, one at a time.
 
 The issue has `amf:failed` and a comment with the error, and the worktree and
 log are kept so you can look at them. To retry, add `amf:ready` again; amf
-starts over from a fresh worktree.
+starts over from a fresh worktree. A run that hit `--agent-timeout` is the
+exception: its comment says how to retry with more time, only its log and
+partial output are kept, and its worktree, branch and (never made) PR are
+gone.
 
 ## With a pipeline
 
