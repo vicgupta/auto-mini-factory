@@ -65,12 +65,15 @@ ANTHROPIC_API_KEY=sk-ant-api03-...   # optional: Claude API key, used if there's
 OPENAI_API_KEY=sk-proj-...   # optional: OpenAI API key for codex
 # OPENCODE_MODEL=opencode/big-pickle   # Use 'opencode models' to list all the models
 AMF_TRUSTED=login1,login2...   # optional: only work on issues opened by these GitHub users
+# AMF_POSTGRES_URL=postgres://user:password@localhost:5432/postgres   # optional: also save the logs to database amflogs on this PostgreSQL server
 ```
 
 Edit it and replace the placeholders. Placeholders ending in `...` count as
 unset, so you can leave the optional ones as they are. The agent keys decide
 which agent amf runs (see below). To run opencode with another model,
 uncomment `OPENCODE_MODEL` and set it to one that `opencode models` lists.
+To keep the logs in PostgreSQL too, uncomment `AMF_POSTGRES_URL` (see
+[Logs in PostgreSQL](#logs-in-postgresql)).
 
 - **Backups:** if `.env` already exists, `amf init` first copies it to the next
   free `.env.0001`, `.env.0002`, and so on, then keeps its real values in the
@@ -122,6 +125,7 @@ ok    opencode        /Users/vic/.opencode/bin/opencode, opencode v2.1.3
 ok    claude login    CLAUDE_CODE_OAUTH_TOKEN is set, from /tmp/amf/.env; claude runs with it
 ok    codex login     OPENAI_API_KEY is not set; codex uses its own login, and amf runs it only for a pipeline or --agent codex
 ok    opencode model  opencode/deepseek-v4.1-flash-free; opencode lists it
+ok    postgres        logging to database amflogs at amf@db.example.com:5432, from /tmp/amf/.env
 ```
 
 Each line is `ok`, `warn` (works, but worth knowing), `FAIL`, or `skip` (an
@@ -206,6 +210,35 @@ Without a pipeline (see below), amf runs one agent once. With Claude Code:
 On any failure the issue gets `amf:failed` plus a comment with the reason,
 and the worktree is kept for inspection. Re-running `amf run N` starts again
 from a fresh worktree.
+
+### Logs in PostgreSQL
+
+Set `AMF_POSTGRES_URL` in `.env` and `amf run` and `amf watch` also write
+every log line to PostgreSQL, while still printing it and writing
+`.amf/logs/` as usual:
+
+```sh
+AMF_POSTGRES_URL=postgres://amf:secret@db.example.com:5432/postgres?sslmode=require
+```
+
+amf logs to a database named `amflogs` on that server. If it doesn't exist,
+amf creates it (the user needs `CREATEDB` that first time), along with two
+tables:
+
+- `amf_log`: amf's own lines, such as `#12: running claude`, with the issue
+  number when the line is about one.
+- `agent_log`: every line the agents print, with the issue, the agent and
+  the log file it also went to.
+
+```sql
+SELECT logged_at, message FROM amf_log WHERE issue = 12 ORDER BY id;
+```
+
+Logging never holds up an issue. If the server is down, amf warns, keeps
+the lines in memory and retries. amf has no dependencies, so it speaks the
+PostgreSQL protocol itself: TLS (`sslmode`), and password, MD5 or
+SCRAM-SHA-256 logins. `amf doctor` checks the connection. Agents' output can
+include your code, so restrict who can read `amflogs`.
 
 ### Pipelines: plan → code → eval
 

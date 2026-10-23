@@ -39,6 +39,11 @@ type Config struct {
 	// defaulting to defaultOpencodeModel.
 	OpencodeModel string
 
+	// PostgresURL is AMF_POSTGRES_URL, a PostgreSQL server amf also writes
+	// the logs of amf run and amf watch to, in the amflogs database.
+	// Optional.
+	PostgresURL string
+
 	// Trusted is AMF_TRUSTED, the lower-case GitHub logins whose issues amf
 	// works on. Nil means anyone's.
 	Trusted []string
@@ -86,6 +91,7 @@ func loadConfig(paths ...string) (Config, error) {
 		AnthropicKey:  get("ANTHROPIC_API_KEY", ""),
 		OpenAIKey:     get("OPENAI_API_KEY", ""),
 		OpencodeModel: get("OPENCODE_MODEL", defaultOpencodeModel),
+		PostgresURL:   get("AMF_POSTGRES_URL", ""),
 		Trusted:       parseTrusted(get("AMF_TRUSTED", "")),
 	}
 	if cfg.Token == "" {

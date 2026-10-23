@@ -65,6 +65,14 @@ type Runner struct {
 	EvalRounds int
 	HTTP       *http.Client // for downloading skills; nil means a default client
 	Log        io.Writer    // progress output
+	// DB, when set, also gets every agent's output; Log already sends it
+	// amf's own lines.
+	DB *dbLog
+}
+
+// Close sends the logs still queued for PostgreSQL.
+func (r *Runner) Close() {
+	r.DB.Close(15 * time.Second)
 }
 
 func (r *Runner) logf(format string, a ...any) {

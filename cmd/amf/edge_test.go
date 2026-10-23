@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -18,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -1575,6 +1577,9 @@ func TestInitOpencodeModelLine(t *testing.T) {
 	if !strings.Contains(env, "\n# OPENCODE_MODEL=opencode/big-pickle   # Use 'opencode models' to list all the models\n") {
 		t.Fatalf(".env:\n%s", env)
 	}
+	if !strings.Contains(env, "\n# AMF_POSTGRES_URL=postgres://user:password@localhost:5432/postgres   # optional: also save the logs to database amflogs on this PostgreSQL server\n") {
+		t.Fatalf(".env should have AMF_POSTGRES_URL commented out:\n%s", env)
+	}
 	if strings.Contains(out.String(), "fill in") && strings.Contains(out.String(), "OPENCODE_MODEL") {
 		t.Errorf("OPENCODE_MODEL is optional, not something to fill in:\n%s", out.String())
 	}
@@ -1637,6 +1642,88 @@ func TestPipelineCommandShowsOpencodeModel(t *testing.T) {
 	for _, want := range []string{"code   opencode  opencode/env-model (OPENCODE_MODEL)", "eval   opencode  opencode/named "} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output missing %q:\n%s", want, out.String())
+		}
+	}
+}
+
+// A PostgreSQL server that can't be reached never stops an issue: amf warns
+// and keeps logging locally.
+func TestPostgresDownKeepsLocalLogs(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := l.Addr().String()
+	l.Close() // nothing listens there now
+	pg, err := parsePostgresURL("postgres://amf:pw@" + addr + "/?connect_timeout=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	root, _ := setupRepo(t)
+	gh, srv := newFakeGitHub(t)
+	gh.issues[1] = readyIssue(1, "Add feature file")
+	r, log := newTestRunner(t, srv, root, fakeClaude(t, `
+cat >/dev/null; echo hello > feature.txt
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"Added it."}'
+`))
+	r.DB = startDBLog(context.Background(), pg, r.Repo, log)
+	r.Log = io.MultiWriter(log, r.DB.amfWriter())
+	if err := r.Run(context.Background(), 1); err != nil {
+		t.Fatalf("Run: %v\nlog:\n%s", err, log)
+	}
+	r.Close()
+	if len(gh.prs) != 1 {
+		t.Fatalf("PRs = %v\nlog:\n%s", gh.prs, log)
+	}
+	if !strings.Contains(log.String(), "amf: warning: can't log to PostgreSQL at amf@"+addr+": ") ||
+		!strings.Contains(log.String(), "logging locally only, and retrying") ||
+		!strings.Contains(log.String(), "amf: #1: opened") {
+		t.Errorf("log:\n%s", log)
+	}
+	if !strings.Contains(log.String(), "couldn't send") {
+		t.Errorf("Close should say the queued lines weren't sent:\n%s", log)
+	}
+	if strings.Contains(log.String(), "pw") {
+		t.Errorf("the password leaked into the log:\n%s", log)
+	}
+	if b, err := os.ReadFile(filepath.Join(root, ".amf", "logs", "issue-1.log")); err != nil || !strings.Contains(string(b), "Added it.") {
+		t.Errorf("local agent log = %q, %v", b, err)
+	}
+}
+
+func TestPostgresURLInvalid(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	t.Setenv("GITHUB_REPO", "vic/demo")
+	t.Setenv("AMF_POSTGRES_URL", "mysql://u:p@h/db")
+	for _, args := range [][]string{{"run", "1"}, {"watch"}} {
+		if err := run(context.Background(), args, nil, io.Discard, io.Discard); err == nil || !strings.Contains(err.Error(), "AMF_POSTGRES_URL: must start with postgres://") {
+			t.Errorf("amf %v: %v", args, err)
+		}
+	}
+}
+
+func TestDoctorPostgres(t *testing.T) {
+	withGitUser(t)
+	t.Chdir(t.TempDir())
+	t.Setenv("AMF_RELEASES_URL", "http://127.0.0.1:1")
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := l.Addr().String()
+	l.Close()
+	for url, want := range map[string]string{
+		"":                                    `ok +postgres +AMF_POSTGRES_URL is not set; logs are only local$`,
+		"mysql://u@h/db":                      `FAIL +postgres +AMF_POSTGRES_URL: must start with postgres://`,
+		"postgres://amf:secret@" + addr + "/": `warn +postgres +can't log to amf@` + regexp.QuoteMeta(addr) + `: .*; amf run and watch log locally only`,
+	} {
+		t.Setenv("AMF_POSTGRES_URL", url)
+		out, _ := doctorOutput(t)
+		wantLines(t, out, want)
+		if strings.Contains(out, "secret") {
+			t.Errorf("doctor printed the password:\n%s", out)
 		}
 	}
 }

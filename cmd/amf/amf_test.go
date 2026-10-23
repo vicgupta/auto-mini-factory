@@ -639,7 +639,7 @@ func TestExcludeAMFDir(t *testing.T) {
 }
 
 func TestMain(m *testing.M) {
-	for _, k := range []string{"GITHUB_TOKEN", "GITHUB_REPO", "CLAUDE_CODE_OAUTH_TOKEN", "AMF_API_URL", "AMF_CLONE_URL", "AMF_CLAUDE", "AMF_CODEX", "AMF_OPENCODE", "AMF_RELEASES_URL", "AMF_TRUSTED"} {
+	for _, k := range []string{"GITHUB_TOKEN", "GITHUB_REPO", "CLAUDE_CODE_OAUTH_TOKEN", "AMF_API_URL", "AMF_CLONE_URL", "AMF_CLAUDE", "AMF_CODEX", "AMF_OPENCODE", "AMF_RELEASES_URL", "AMF_TRUSTED", "AMF_POSTGRES_URL"} {
 		os.Unsetenv(k)
 	}
 	os.Setenv("AMF_API_URL", "http://127.0.0.1:1") // unreachable unless a test sets a fake

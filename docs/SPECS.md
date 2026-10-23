@@ -74,11 +74,13 @@ SIGTERM cancel the current step; the issue is still marked failed.
 
 1. Builds `.env` from a template of `GITHUB_TOKEN`, `GITHUB_REPO`,
    `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
-   `OPENCODE_MODEL` and `AMF_TRUSTED`.
-   - `OPENCODE_MODEL` is written commented out, as
-     `# OPENCODE_MODEL=opencode/big-pickle   # Use 'opencode models' to list all the models`,
-     until it has a real value. It isn't one of the values `init` asks you to
-     fill in.
+   `OPENCODE_MODEL`, `AMF_TRUSTED` and `AMF_POSTGRES_URL`.
+   - `OPENCODE_MODEL` and `AMF_POSTGRES_URL` are written commented out, as
+     `# OPENCODE_MODEL=opencode/big-pickle   # Use 'opencode models' to list all the models`
+     and
+     `# AMF_POSTGRES_URL=postgres://user:password@localhost:5432/postgres   # optional: also save the logs to database amflogs on this PostgreSQL server`,
+     until they have a real value. Neither is one of the values `init` asks
+     you to fill in.
    - Real values from an existing `.env` are kept, and so are any extra
      variables.
    - A missing `GITHUB_REPO` is filled in from the checkout's GitHub `origin`.
@@ -140,6 +142,7 @@ never prints a secret. The checks, in order:
 | `claude login` | Always; says whether `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` is set (and from where), or that Claude uses its own login | |
 | `codex login` | Always; says whether `OPENAI_API_KEY` is set (and from where), or that Codex uses its own login | |
 | `opencode model` | `OPENCODE_MODEL` (or the default) is a line of `opencode models` | `warn` if it isn't, since every opencode run would fail, or if `opencode models` fails; `skip` without opencode |
+| `postgres` | `AMF_POSTGRES_URL` is unset (logs are only local), or amf can log in to `amflogs` on it; says whether its tables exist yet. A server without `amflogs` is `ok`: `run` and `watch` create it | `FAIL` if the URL doesn't parse; `warn` if amf can't connect or log in, with the server's message. Doctor creates nothing |
 
 Checks that need GitHub, the repo or a checkout are `skip` without them.
 Agents' own logins aren't checked: their CLIs can't report them reliably.
@@ -161,6 +164,7 @@ space, a trailing comment. A leading byte order mark is ignored.
 | `OPENAI_API_KEY` | unset | OpenAI API key, passed to Codex. Makes `codex` usable without `--agent` |
 | `OPENCODE_MODEL` | `opencode/big-pickle` | The model opencode runs with: always without a pipeline, and for pipeline stages that name no model. `opencode models` lists the choices |
 | `AMF_TRUSTED` | unset | GitHub logins, separated by commas or spaces (a leading `@` is allowed, case is ignored). When set, amf only works on issues they opened. Unset means anyone's |
+| `AMF_POSTGRES_URL` | unset | A PostgreSQL server that `run` and `watch` also write their logs to. See [Logging to PostgreSQL](#logging-to-postgresql) |
 | `AMF_CLAUDE` | `claude` | Path to the Claude CLI |
 | `AMF_CODEX` | `codex` | Path to the Codex CLI |
 | `AMF_OPENCODE` | `opencode` | Path to the opencode CLI |
@@ -382,6 +386,51 @@ Any failure leaves the installed binary unchanged.
 
 amf only ever adds to `.git/info/exclude`. It never edits a tracked `.gitignore`.
 
+## Logging to PostgreSQL
+
+With `AMF_POSTGRES_URL` set, `amf run` and `amf watch` write every log line
+to PostgreSQL as well. The terminal and `.amf/logs/` get exactly what they
+get without it. Other commands don't log there.
+
+- **URL:** `postgres://` or `postgresql://user:password@host:port/database`,
+  with libpq's defaults: `localhost`, port 5432, and the OS user. Query
+  parameters: `sslmode` (`disable`, `allow`, `prefer` (the default),
+  `require`, `verify-ca`, `verify-full`; like libpq, only `verify-*` check
+  the server's certificate, against the system's roots), `connect_timeout`
+  in seconds (default 10), and `application_name` (ignored: amf is always
+  `amf`). Any other parameter, or another scheme, makes `run` and `watch`
+  fail at startup with `AMF_POSTGRES_URL: <problem>`. Authentication can be
+  trust, password, MD5 or SCRAM-SHA-256 (without channel binding).
+- **Database:** amf always logs to the database `amflogs`. If it doesn't
+  exist, amf connects to the URL's database (or `postgres` when the URL names
+  none, or names `amflogs`) and runs `CREATE DATABASE amflogs`, so the user
+  needs `CREATEDB` the first time. Then it runs `CREATE TABLE IF NOT EXISTS`
+  and `CREATE INDEX IF NOT EXISTS` for:
+
+  | Table | One row per | Columns |
+  |---|---|---|
+  | `amf_log` | line amf prints, without its `amf: ` prefix, plus the error `run` or `watch` exits with | `id`, `logged_at`, `host`, `repo`, `issue` (from a leading `#N`, else NULL), `message` |
+  | `agent_log` | line an agent prints (stdout and stderr) | `id`, `logged_at`, `host`, `repo`, `issue`, `agent` (`claude`, `codex` or `opencode`), `log_file` (the file in `.amf/logs/`, such as `issue-12-code-1.log`), `line` |
+
+  Both have an index on `(repo, issue, logged_at)`. `logged_at` is when amf
+  read the line, `host` this machine's hostname, `repo` `GITHUB_REPO`. NUL
+  bytes are dropped and invalid UTF-8 replaced, since `text` can't hold
+  them; lines are otherwise as printed, with a trailing `\r` removed.
+- **At startup** amf connects and creates what's missing, then prints one
+  of `amf: created database amflogs at user@host:port; logging there too`,
+  `amf: logging to database amflogs at user@host:port too`, or
+  `amf: warning: can't log to PostgreSQL at user@host:port: <error>; logging locally only, and retrying`.
+  amf never prints the password.
+- **In the background:** lines are queued in memory and sent at least every
+  second, up to 500 per insert, each insert in one transaction. Logging
+  never slows down or fails an issue. If the server can't be reached, amf
+  warns once, keeps the lines queued (up to 10,000; beyond that the oldest
+  are dropped) and retries after 1 s, doubling to at most 1 minute. It
+  prints `amf: logging to PostgreSQL at user@host:port again` when it
+  recovers, and how many lines it dropped. When `run` or `watch` ends, amf
+  waits up to 15 seconds to send what's queued, then warns how many lines
+  only made it to the local logs.
+
 ## Security model
 
 - Agents run with every permission check off. An issue's body is effectively
@@ -395,7 +444,10 @@ amf only ever adds to `.git/info/exclude`. It never edits a tracked `.gitignore`
   control or have reviewed, at a tag or commit, ideally with a `sha256` pin.
   The pipeline itself changes only through a merge to the default branch.
 - No agent gets `GITHUB_TOKEN`, but agents can read local files, including
-  `.env`. For real isolation, run amf in a container or VM.
+  `.env` (and so `AMF_POSTGRES_URL`'s password).
+- With `AMF_POSTGRES_URL` set, everything the agents print, which can
+  include code and the contents of files they read, is stored in
+  `amflogs`. Anyone who can read that database can read it. For real isolation, run amf in a container or VM.
 - Plan and eval can't change the branch: amf resets the worktree after them,
   so only the code stage's changes reach the PR.
 - amf does all git and GitHub writes itself, through the user's credentials

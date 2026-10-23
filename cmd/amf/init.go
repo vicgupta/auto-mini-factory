@@ -14,8 +14,8 @@ import (
 )
 
 // envVar is one line of the .env `amf init` writes. A commented one is
-// written as "# KEY=placeholder" until it has a real value, since its
-// placeholder is the default amf uses anyway.
+// written as "# KEY=placeholder" until it has a real value: its placeholder
+// is the default amf uses anyway, or an example of an optional setting.
 type envVar struct {
 	key, placeholder, comment string
 	commented                 bool
@@ -30,6 +30,7 @@ var envTemplate = []envVar{
 	{"OPENAI_API_KEY", "sk-proj-...", "optional: OpenAI API key for codex", false},
 	{"OPENCODE_MODEL", defaultOpencodeModel, "Use 'opencode models' to list all the models", true},
 	{"AMF_TRUSTED", "login1,login2...", "optional: only work on issues opened by these GitHub users", false},
+	{"AMF_POSTGRES_URL", "postgres://user:password@localhost:5432/postgres", "optional: also save the logs to database amflogs on this PostgreSQL server", true},
 }
 
 // isPlaceholder reports whether v is an unfilled value from the template.

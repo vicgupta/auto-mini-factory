@@ -53,6 +53,7 @@ Configuration is read from .env (or the environment):
   ANTHROPIC_API_KEY        optional Claude API key; with it or the token above, amf picks claude
   OPENAI_API_KEY           optional OpenAI API key; with it, amf picks codex when claude can't run
   OPENCODE_MODEL           model for opencode (default opencode/big-pickle); see opencode models
+  AMF_POSTGRES_URL         optional postgres:// URL; run and watch also log to its amflogs database
   AMF_CLAUDE     path to the claude binary (default "claude")
   AMF_CODEX      path to the codex binary (default "codex")
   AMF_OPENCODE   path to the opencode binary (default "opencode")
@@ -194,7 +195,10 @@ func cmdRun(ctx context.Context, args []string, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	return r.Run(ctx, n)
+	defer r.Close()
+	err = r.Run(ctx, n)
+	r.DB.logError(err)
+	return err
 }
 
 func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
@@ -220,7 +224,10 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	return r.Watch(ctx, *label, *interval)
+	defer r.Close()
+	err = r.Watch(ctx, *label, *interval)
+	r.DB.logError(err)
+	return err
 }
 
 // agentFlagHelp describes --agent for run and watch.
@@ -241,6 +248,26 @@ func newRunner(ctx context.Context, timeout time.Duration, evalRounds int, agent
 	if err != nil {
 		return nil, err
 	}
+	var db *dbLog
+	if cfg.PostgresURL != "" {
+		pg, err := parsePostgresURL(cfg.PostgresURL)
+		if err != nil {
+			return nil, fmt.Errorf("AMF_POSTGRES_URL: %v", err)
+		}
+		db = startDBLog(ctx, pg, cfg.Repo, log)
+		log = io.MultiWriter(log, db.amfWriter())
+	}
+	r, err := newRunnerFrom(ctx, cfg, timeout, evalRounds, agent, log)
+	if err != nil {
+		db.logError(err)
+		db.Close(15 * time.Second)
+		return nil, err
+	}
+	r.DB = db
+	return r, nil
+}
+
+func newRunnerFrom(ctx context.Context, cfg Config, timeout time.Duration, evalRounds int, agent string, log io.Writer) (*Runner, error) {
 	// A named agent must be there; the fallback order only applies without --agent.
 	agents := &Runner{Claude: cfg.Claude, Codex: cfg.Codex, Opencode: cfg.Opencode, Agent: agent} // --agent needs no key
 	if agent != "" {

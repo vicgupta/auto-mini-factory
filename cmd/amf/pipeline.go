@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -485,6 +486,18 @@ func (r *Runner) runStage(ctx context.Context, s *Stage, n int, name, wt, prompt
 	return r.runAgent(ctx, s.Agent, model, wt, prompt, log, filepath.Join(wt, ".amf", name+".md"))
 }
 
+// logIssue is the issue number in a log file's name, issue-N.log or
+// issue-N-stage.log.
+func logIssue(logPath string) int {
+	name := strings.TrimPrefix(filepath.Base(logPath), "issue-")
+	end := strings.IndexFunc(name, func(r rune) bool { return r < '0' || r > '9' })
+	if end < 0 {
+		end = len(name)
+	}
+	n, _ := strconv.Atoi(name[:end])
+	return n
+}
+
 // commitRound commits a code round and fails if the branch still doesn't
 // change anything relative to base.
 func commitRound(ctx context.Context, wt string, k int, base string, s *Stage) error {
@@ -570,8 +583,14 @@ func (r *Runner) runAgent(ctx context.Context, agent, model, wt, prompt, logPath
 	}
 	cmd.Dir = wt
 	var stdout bytes.Buffer
-	cmd.Stdout = io.MultiWriter(&stdout, logFile)
-	cmd.Stderr = logFile
+	var logOut io.Writer = logFile
+	if r.DB != nil {
+		dbOut := r.DB.agentWriter(logIssue(logPath), agentName(agent), filepath.Base(logPath))
+		defer dbOut.Flush()
+		logOut = io.MultiWriter(logFile, dbOut)
+	}
+	cmd.Stdout = io.MultiWriter(&stdout, logOut)
+	cmd.Stderr = logOut
 	cmd.WaitDelay = 10 * time.Second
 
 	name := agentCommand[agent]

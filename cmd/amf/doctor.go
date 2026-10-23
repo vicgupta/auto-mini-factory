@@ -250,6 +250,44 @@ func (d *doctor) check(ctx context.Context) {
 		d.line("ok", "codex login", "OPENAI_API_KEY is not set; codex uses its own login, and amf runs it only for a pipeline or --agent codex")
 	}
 	d.checkOpencodeModel(ctx, cfg)
+	if parsed {
+		d.checkPostgres(ctx, cfg, envFile)
+	} else {
+		d.line("skip", "postgres", ".env didn't parse")
+	}
+}
+
+// checkPostgres checks that amf can log to AMF_POSTGRES_URL. It creates
+// nothing: amf run and amf watch create the database and tables.
+func (d *doctor) checkPostgres(ctx context.Context, cfg Config, envFile string) {
+	if cfg.PostgresURL == "" {
+		d.line("ok", "postgres", "AMF_POSTGRES_URL is not set; logs are only local")
+		return
+	}
+	c, err := parsePostgresURL(cfg.PostgresURL)
+	if err != nil {
+		d.line("FAIL", "postgres", "AMF_POSTGRES_URL: %v", err)
+		return
+	}
+	conn, _, err := openLogDatabase(ctx, c, false)
+	switch {
+	case isPgCode(err, "3D000"):
+		d.line("ok", "postgres", "%s, from %s; amf run and watch will create database %s and its tables", c, source("AMF_POSTGRES_URL", envFile), logDatabase)
+		return
+	case err != nil:
+		d.line("warn", "postgres", "can't log to %s: %v; amf run and watch log locally only, and keep retrying", c, err)
+		return
+	}
+	defer conn.Close()
+	tables, err := conn.Query(ctx, "SELECT tablename FROM pg_tables WHERE schemaname = current_schema() AND tablename IN ('amf_log', 'agent_log')")
+	switch {
+	case err != nil:
+		d.line("warn", "postgres", "connected to %s at %s, but couldn't list its tables: %v", logDatabase, c, err)
+	case len(tables) == 2:
+		d.line("ok", "postgres", "logging to database %s at %s, from %s", logDatabase, c, source("AMF_POSTGRES_URL", envFile))
+	default:
+		d.line("ok", "postgres", "database %s at %s, from %s; amf run and watch will create its tables", logDatabase, c, source("AMF_POSTGRES_URL", envFile))
+	}
 }
 
 // checkOpencodeModel checks that OPENCODE_MODEL is one opencode lists, since
