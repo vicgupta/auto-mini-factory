@@ -60,6 +60,9 @@ type Runner struct {
 	// logins: agents run an issue's text with every permission check off.
 	Trusted []string
 	Timeout time.Duration // per agent run
+	// KillGrace is how long an agent gets to exit after SIGTERM before amf
+	// SIGKILLs its process group, in tests small. 0 means agentKillGrace.
+	KillGrace time.Duration
 	// EvalRounds is how many times a pipeline's eval stage may send a change
 	// back to the code stage.
 	EvalRounds int
@@ -80,7 +83,9 @@ func (r *Runner) logf(format string, a ...any) {
 }
 
 // Run processes one issue end to end. On failure the issue is labeled
-// amf:failed, the reason is commented, and the worktree is kept for inspection.
+// amf:failed and the reason is commented. A run that timed out leaves no PR,
+// no push and no branch: it removes the worktree, keeping the logs and the
+// partial output; any other failure keeps the worktree for inspection.
 func (r *Runner) Run(ctx context.Context, n int) (err error) {
 	issue, err := r.GH.GetIssue(ctx, n)
 	if err != nil {
@@ -137,6 +142,14 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 		var se *stageError
 		if errors.As(err, &se) {
 			msg = se.comment
+		}
+		var ate *agentTimeoutError
+		if errors.As(err, &ate) {
+			msg = ate.comment(r.Root)
+			r.logf("issue.failed: issue=%d reason=agent_timeout", n)
+			// The agent's process group is dead, so nothing still writes
+			// into the worktree, and it has no branch holding partial work.
+			r.removeWorktree(cctx, n)
 		}
 		if cerr := r.GH.Comment(cctx, n, msg); cerr != nil {
 			r.logf("#%d: could not comment: %v", n, cerr)
@@ -209,7 +222,7 @@ func (r *Runner) process(ctx context.Context, issue Issue, base string, p *Pipel
 		}
 		log := filepath.Join(r.Root, ".amf", "logs", fmt.Sprintf("issue-%d.log", n))
 		out := filepath.Join(wt, ".amf", "code.md") // for agents that write their final message to a file
-		if summary, err = r.runAgent(ctx, agent, model, wt, buildPrompt(r.Repo, branch, issue), log, out); err != nil {
+		if summary, err = r.runAgent(ctx, agent, "", model, wt, buildPrompt(r.Repo, branch, issue), log, out); err != nil {
 			return PullRequest{}, false, err
 		}
 		if err := commitAll(ctx, wt, title, n, base); err != nil {
@@ -254,6 +267,23 @@ func (r *Runner) process(ctx context.Context, issue Issue, base string, p *Pipel
 		r.logf("#%d: could not remove worktree: %v", n, err)
 	}
 	return pr, updated, nil
+}
+
+// removeWorktree force-removes an issue's worktree, even one git has already
+// forgotten about, and prunes the record. Used after a timeout, once the
+// agent's process group is confirmed dead.
+func (r *Runner) removeWorktree(ctx context.Context, n int) {
+	wt := filepath.Join(r.Root, ".amf", "worktrees", fmt.Sprintf("issue-%d", n))
+	if _, err := git(ctx, r.Root, "worktree", "remove", "--force", wt); err != nil {
+		// Not a worktree git knows about, such as a leftover folder.
+		if err := os.RemoveAll(wt); err != nil {
+			r.logf("#%d: could not remove the worktree: %v", n, err)
+			return
+		}
+	}
+	if _, err := git(ctx, r.Root, "worktree", "prune"); err != nil {
+		r.logf("#%d: could not prune the worktrees: %v", n, err)
+	}
 }
 
 // prepareWorktree creates a fresh worktree on branch, starting at origin/base.

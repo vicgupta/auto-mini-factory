@@ -121,6 +121,20 @@ func (d *doctor) check(ctx context.Context) {
 		}
 	}
 
+	// How long each agent run may take.
+	env, terr := parseAgentTimeout(cfg.AgentTimeout)
+	timeout, src := agentTimeout(env)
+	switch {
+	case !parsed:
+		d.line("skip", "agent timeout", ".env didn't parse")
+	case terr != nil:
+		d.line("FAIL", "agent timeout", "%v", terr)
+	case src == "default":
+		d.line("ok", "agent timeout", "%s, the default (AMF_AGENT_TIMEOUT or --agent-timeout changes it)", timeout)
+	default:
+		d.line("ok", "agent timeout", "%s, from %s", timeout, source("AMF_AGENT_TIMEOUT", envFile))
+	}
+
 	// The checkout, and pushing from it.
 	root := d.checkCheckout(ctx, cfg, repoOK)
 	if root == "" {

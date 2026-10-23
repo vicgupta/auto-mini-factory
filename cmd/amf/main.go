@@ -33,14 +33,19 @@ func buildVersion() string {
 	return version
 }
 
+// defaultAgentTimeout is how long an agent run may take, without a flag or
+// AMF_AGENT_TIMEOUT saying otherwise. amf runs agents unattended with every
+// permission, so a run without a limit could watch forever.
+const defaultAgentTimeout = 60 * time.Minute
+
 const usage = `amf turns GitHub issues into pull requests with coding agents: Claude Code, Codex or opencode.
 
 Usage:
   amf init                                                    write .env (backing up an existing one) and create amf's labels
   amf issue "Title" [-b body | -f file.md] [--no-label]       create an issue (body may also come from stdin)
   amf list [--state open|closed|all] [--label L]              list issues, newest first, with their amf labels
-  amf run <issue-number> [--agent A] [--timeout 30m]          process one issue into a PR (also takes --eval-rounds)
-  amf watch [--agent A] [--interval 60s] [--label amf:ready]  process amf:ready issues as they arrive (also takes --timeout, --eval-rounds)
+  amf run <issue-number> [--agent A] [--agent-timeout 60m]    process one issue into a PR (also takes --eval-rounds)
+  amf watch [--agent A] [--interval 60s] [--label amf:ready]  process amf:ready issues as they arrive (also takes --agent-timeout, --eval-rounds)
   amf pipeline [--fetch]                                      check the plan/code/eval pipeline in this checkout's AGENTS.md
   amf doctor                                                  check the setup here, one line per check, changing nothing
   amf update [--version vX.Y.Z] [--check]                     replace this amf binary with the latest (or given) release
@@ -53,6 +58,8 @@ Configuration is read from .env (or the environment):
   ANTHROPIC_API_KEY        optional Claude API key; with it or the token above, amf picks claude
   OPENAI_API_KEY           optional OpenAI API key; with it, amf picks codex when claude can't run
   OPENCODE_MODEL           model for opencode (default opencode/big-pickle); see opencode models
+  AMF_AGENT_TIMEOUT        how long each agent run may take, a Go duration (default 60m);
+                           --agent-timeout, or its deprecated alias --timeout, overrides it
   AMF_POSTGRES_URL         optional postgres:// URL; run and watch also log to its amflogs database
   AMF_CLAUDE     path to the claude binary (default "claude")
   AMF_CODEX      path to the codex binary (default "codex")
@@ -176,7 +183,7 @@ func cmdIssue(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 func cmdRun(ctx context.Context, args []string, stderr io.Writer) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	timeout := fs.Duration("timeout", 30*time.Minute, "maximum time each agent run may take")
+	at, alias := addTimeoutFlags(fs)
 	evalRounds := fs.Int("eval-rounds", 2, "how many times a pipeline's eval stage may send the change back to code")
 	agent := fs.String("agent", "", agentFlagHelp)
 	pos, err := parseArgs(fs, args)
@@ -184,14 +191,18 @@ func cmdRun(ctx context.Context, args []string, stderr io.Writer) error {
 		return errUsage
 	}
 	if len(pos) != 1 {
-		fmt.Fprintln(stderr, "usage: amf run <issue-number> [--agent claudecode|codex|opencode] [--timeout 30m] [--eval-rounds 2]")
+		fmt.Fprintln(stderr, "usage: amf run <issue-number> [--agent claudecode|codex|opencode] [--agent-timeout 60m] [--eval-rounds 2]")
 		return errUsage
+	}
+	timeout, err := timeoutFlag(fs, at, alias)
+	if err != nil {
+		return err
 	}
 	n, err := strconv.Atoi(strings.TrimPrefix(pos[0], "#"))
 	if err != nil || n <= 0 {
 		return fmt.Errorf("invalid issue number %q", pos[0])
 	}
-	r, err := newRunner(ctx, *timeout, *evalRounds, *agent, stderr)
+	r, err := newRunner(ctx, timeout, *evalRounds, *agent, stderr)
 	if err != nil {
 		return err
 	}
@@ -206,7 +217,7 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 	fs.SetOutput(stderr)
 	interval := fs.Duration("interval", 60*time.Second, "how often to poll GitHub")
 	label := fs.String("label", labelReady, "process open issues with this label")
-	timeout := fs.Duration("timeout", 30*time.Minute, "maximum time each agent run may take")
+	at, alias := addTimeoutFlags(fs)
 	evalRounds := fs.Int("eval-rounds", 2, "how many times a pipeline's eval stage may send the change back to code")
 	agent := fs.String("agent", "", agentFlagHelp)
 	pos, err := parseArgs(fs, args)
@@ -214,13 +225,17 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 		return errUsage
 	}
 	if len(pos) != 0 {
-		fmt.Fprintln(stderr, "usage: amf watch [--agent claudecode|codex|opencode] [--interval 60s] [--label amf:ready] [--timeout 30m] [--eval-rounds 2]")
+		fmt.Fprintln(stderr, "usage: amf watch [--agent claudecode|codex|opencode] [--interval 60s] [--label amf:ready] [--agent-timeout 60m] [--eval-rounds 2]")
 		return errUsage
 	}
 	if *interval <= 0 {
 		return errors.New("--interval must be positive")
 	}
-	r, err := newRunner(ctx, *timeout, *evalRounds, *agent, stderr)
+	timeout, err := timeoutFlag(fs, at, alias)
+	if err != nil {
+		return err
+	}
+	r, err := newRunner(ctx, timeout, *evalRounds, *agent, stderr)
 	if err != nil {
 		return err
 	}
@@ -233,18 +248,88 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 // agentFlagHelp describes --agent for run and watch.
 const agentFlagHelp = "agent for issues without a pipeline: claudecode, codex or opencode (default: claude if installed with ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN, else codex if installed with OPENAI_API_KEY, else opencode)"
 
-func newRunner(ctx context.Context, timeout time.Duration, evalRounds int, agentFlag string, log io.Writer) (*Runner, error) {
-	if timeout <= 0 {
-		return nil, errors.New("--timeout must be positive")
+// addTimeoutFlags registers the agent timeout flags for run and watch:
+// --agent-timeout, and the deprecated --timeout alias next to it.
+func addTimeoutFlags(fs *flag.FlagSet) (at, alias *time.Duration) {
+	at = fs.Duration("agent-timeout", defaultAgentTimeout, "maximum time each agent run may take")
+	alias = fs.Duration("timeout", defaultAgentTimeout, "deprecated alias of --agent-timeout")
+	return at, alias
+}
+
+// timeoutFlag reports the timeout a run's flags gave: --agent-timeout wins
+// over its deprecated --timeout alias. When neither was set it reports
+// (0, ""), and newRunner resolves AMF_AGENT_TIMEOUT or the default.
+func timeoutFlag(fs *flag.FlagSet, at, alias *time.Duration) (time.Duration, error) {
+	var atSet, aliasSet bool
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "agent-timeout":
+			atSet = true
+		case "timeout":
+			aliasSet = true
+		}
+	})
+	switch {
+	case atSet:
+		return *at, validateAgentTimeout(*at, "--agent-timeout")
+	case aliasSet:
+		return *alias, validateAgentTimeout(*alias, "--timeout")
 	}
+	return 0, nil
+}
+
+// agentTimeout resolves the timeout for a run whose flags named none: the
+// value from AMF_AGENT_TIMEOUT (.env or the environment), else the default.
+func agentTimeout(env time.Duration) (time.Duration, string) {
+	if env != 0 {
+		return env, "AMF_AGENT_TIMEOUT"
+	}
+	return defaultAgentTimeout, "default"
+}
+
+// agentKillGrace is how long an agent gets to exit after SIGTERM before amf
+// SIGKILLs its whole process group.
+const agentKillGrace = 15 * time.Second
+
+// The timeouts amf accepts for an agent run: 0 and negatives run agents
+// unbounded (amf has none, and unbounded runs hold the amf:in-progress
+// label), less than a minute rarely covers a real run, and above a day is a
+// mistake. Tests go around the flags and set Runner.Timeout directly.
+const (
+	minAgentTimeout = time.Minute
+	maxAgentTimeout = 24 * time.Hour
+)
+
+// validateAgentTimeout rejects agent timeouts amf won't honor, naming src
+// (the flag or variable they came from) in the message.
+func validateAgentTimeout(d time.Duration, src string) error {
+	switch {
+	case d <= 0:
+		return fmt.Errorf("%s: agent timeout must be positive, got %s", src, d)
+	case d < minAgentTimeout:
+		return fmt.Errorf("%s: agent timeout must be at least %s, got %s", src, minAgentTimeout, d)
+	case d > maxAgentTimeout:
+		return fmt.Errorf("%s: agent timeout must be at most %s, got %s", src, maxAgentTimeout, d)
+	}
+	return nil
+}
+
+func newRunner(ctx context.Context, timeout time.Duration, evalRounds int, agentFlag string, log io.Writer) (*Runner, error) {
 	if evalRounds < 0 {
 		return nil, errors.New("--eval-rounds can't be negative")
 	}
-	agent, err := parseAgent(agentFlag)
+	cfg, err := loadConfig(envPaths(ctx)...)
 	if err != nil {
 		return nil, err
 	}
-	cfg, err := loadConfig(envPaths(ctx)...)
+	if timeout == 0 { // no flag gave one, or run and watch would have failed on it already
+		env, err := parseAgentTimeout(cfg.AgentTimeout)
+		if err != nil {
+			return nil, err
+		}
+		timeout, _ = agentTimeout(env)
+	}
+	agent, err := parseAgent(agentFlag)
 	if err != nil {
 		return nil, err
 	}
@@ -320,7 +405,7 @@ func envPaths(ctx context.Context) []string {
 }
 
 // parseArgs parses flags that may come before or after positional arguments,
-// so `amf issue "Title" -b body` and `amf run 42 --timeout 1h` both work.
+// so `amf issue "Title" -b body` and `amf run 42 --agent-timeout 1h` both work.
 func parseArgs(fs *flag.FlagSet, args []string) ([]string, error) {
 	var pos []string
 	for {

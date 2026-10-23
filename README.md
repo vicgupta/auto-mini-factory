@@ -64,6 +64,7 @@ CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...   # optional: Claude subscription token
 ANTHROPIC_API_KEY=sk-ant-api03-...   # optional: Claude API key, used if there's no token above
 OPENAI_API_KEY=sk-proj-...   # optional: OpenAI API key for codex
 # OPENCODE_MODEL=opencode/big-pickle   # Use 'opencode models' to list all the models
+# AMF_AGENT_TIMEOUT=60m   # optional: how long each agent run may take (default 60m)
 AMF_TRUSTED=login1,login2...   # optional: only work on issues opened by these GitHub users
 # AMF_POSTGRES_URL=postgres://user:password@localhost:5432/postgres   # optional: also save the logs to database amflogs on this PostgreSQL server
 ```
@@ -198,7 +199,9 @@ Without a pipeline (see below), amf runs one agent once. With Claude Code:
    worktree with the issue as the prompt. Claude is told to make the change,
    run the project's tests/build, and not touch git. Output streams to
    `.amf/logs/issue-N.log` as it works, one JSON message per line
-   (`tail -f` it to follow along). Default timeout is 30 minutes (`--timeout`).
+   (`tail -f` it to follow along). Each agent run may take at most 60 minutes
+   (`--agent-timeout`; amf then kills the agent and everything it spawned, or
+   `AMF_AGENT_TIMEOUT` in `.env` sets it without a flag).
    Codex and opencode run the same way, with the commands in
    [docs/SPECS.md](docs/SPECS.md#agents).
 4. Commits the changes (`Fix #N: <title>`), fails if there are none, and runs
@@ -211,8 +214,10 @@ Without a pipeline (see below), amf runs one agent once. With Claude Code:
 6. Comments the PR link on the issue, labels it `amf:done`, removes the worktree.
 
 On any failure the issue gets `amf:failed` plus a comment with the reason,
-and the worktree is kept for inspection. Re-running `amf run N` starts again
-from a fresh worktree.
+and the worktree is kept for inspection. A run that hit the agent timeout
+loses only the worktree: amf comments with how to retry with more time and
+keeps the logs and partial output. Re-running `amf run N` starts again from a
+fresh worktree.
 
 ### Logs in PostgreSQL
 

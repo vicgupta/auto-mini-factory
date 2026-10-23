@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 	"unicode/utf8"
 )
@@ -483,7 +484,7 @@ func (r *Runner) runStage(ctx context.Context, s *Stage, n int, name, wt, prompt
 	}
 	r.logf("#%d: %s: running %s (%s, timeout %s)", n, name, s.Agent, shown, r.Timeout)
 	log := filepath.Join(r.Root, ".amf", "logs", fmt.Sprintf("issue-%d-%s.log", n, name))
-	return r.runAgent(ctx, s.Agent, model, wt, prompt, log, filepath.Join(wt, ".amf", name+".md"))
+	return r.runAgent(ctx, s.Agent, s.Name, model, wt, prompt, log, filepath.Join(wt, ".amf", name+".md"))
 }
 
 // logIssue is the issue number in a log file's name, issue-N.log or
@@ -525,8 +526,10 @@ func commitRound(ctx context.Context, wt string, k int, base string, s *Stage) e
 
 // runAgent runs a coding agent headless in wt and returns its final message.
 // Its output streams to logPath. Agents that can't print just their final
-// message write it to outPath instead. Claude doesn't need outPath.
-func (r *Runner) runAgent(ctx context.Context, agent, model, wt, prompt, logPath, outPath string) (string, error) {
+// message write it to outPath instead. Claude doesn't need outPath. stage
+// names the run for timeout errors: plan, code or eval, or "" without a
+// pipeline.
+func (r *Runner) runAgent(ctx context.Context, agent, stage, model, wt, prompt, logPath, outPath string) (string, error) {
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
 		return "", err
 	}
@@ -542,6 +545,11 @@ func (r *Runner) runAgent(ctx context.Context, agent, model, wt, prompt, logPath
 		os.Remove(outPath)
 	}
 
+	grace := r.KillGrace
+	if grace <= 0 {
+		grace = agentKillGrace
+	}
+	begin := time.Now()
 	ctx, cancel := context.WithTimeout(ctx, r.Timeout)
 	defer cancel()
 	var cmd *exec.Cmd
@@ -591,17 +599,72 @@ func (r *Runner) runAgent(ctx context.Context, agent, model, wt, prompt, logPath
 	}
 	cmd.Stdout = io.MultiWriter(&stdout, logOut)
 	cmd.Stderr = logOut
-	cmd.WaitDelay = 10 * time.Second
+
+	// The agent runs in its own process group, so a deadline or Ctrl-C can
+	// stop it and everything it spawned, not just the direct child. The kill
+	// first SIGTERMs the group so the agent can flush its output; after the
+	// grace period a second kill escalates to SIGKILL, which an agent that
+	// ignores SIGTERM can't trap.
+	procGroup(cmd)
+	cmd.Cancel = func() error {
+		if cmd.Process != nil {
+			_ = killGroup(cmd.Process, syscall.SIGTERM)
+			if !groupOutlivesLeader {
+				return nil // that kill was already the hard one
+			}
+			go func() {
+				timer := time.NewTimer(grace)
+				defer timer.Stop()
+				<-timer.C
+				_ = killGroup(cmd.Process, syscall.SIGKILL)
+			}()
+		}
+		return nil
+	}
+	// Just above the grace period: after it, Wait closes the pipes even if
+	// something the agent spawned still holds them open.
+	cmd.WaitDelay = grace + 5*time.Second
 
 	name := agentCommand[agent]
 	if name == "" {
 		name = "claude"
 	}
-	if err := cmd.Run(); err != nil {
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return "", fmt.Errorf("%s timed out after %s (log: %s)", name, r.Timeout, logPath)
+	runErr := cmd.Run()
+	// However the run ended, nothing the agent spawned outlives it: the
+	// group-wide SIGKILL costs nothing when the group is already gone.
+	if cmd.Process != nil && groupOutlivesLeader {
+		_ = killGroup(cmd.Process, syscall.SIGKILL)
+	}
+	if runErr != nil || ctx.Err() != nil {
+		// An untrappable SIGKILL can't fail to end the process group, so
+		// Wait has returned by now; record why the agent was stopped.
+		// Whatever the reason, record how long the run got before it was
+		// stopped (rounded to 10ms, as the timeout comment shows it too).
+		elapsed := time.Since(begin).Round(10 * time.Millisecond)
+		if ctx.Err() != nil {
+			why := "interrupt"
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				why = "timeout"
+			}
+			fmt.Fprintf(logOut, "amf: killed after %s %s (SIGTERM, then SIGKILL after %s)\n", elapsed, why, grace)
 		}
-		return "", fmt.Errorf("%s: %v (log: %s)", name, err, logPath)
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			r.logf("agent.timeout: agent=%s stage=%s issue=%d limit=%s elapsed=%s grace=%s pgid=%d bytes=%d log=%s",
+				agentName(agent), stageName(stage), logIssue(logPath), r.Timeout, elapsed, grace, cmd.Process.Pid, stdout.Len(), logPath)
+			partial := keepPartial(logPath, outPath)
+			return "", &agentTimeoutError{
+				Agent:   agentName(agent),
+				Stage:   stage,
+				Limit:   r.Timeout,
+				Elapsed: elapsed,
+				LogPath: logPath,
+				Partial: partial,
+			}
+		}
+		if runErr == nil { // ctx was cancelled and the agent still exited cleanly
+			runErr = ctx.Err()
+		}
+		return "", fmt.Errorf("%s: %v (log: %s)", name, runErr, logPath)
 	}
 	switch agent {
 	case agentCodex, agentOpencode:
@@ -617,6 +680,69 @@ func (r *Runner) runAgent(ctx context.Context, agent, model, wt, prompt, logPath
 	default:
 		return parseClaudeResult(stdout.Bytes())
 	}
+}
+
+// stageName is a stage for messages, or "agent run" without a pipeline.
+func stageName(stage string) string {
+	if stage == "" {
+		return "agent run"
+	}
+	return stage
+}
+
+// keepPartial copies whatever an agent's final-message file holds to
+// <log>.partial.md next to the log, so a timeout keeps the message it was
+// cut off in. It returns the file's path, or "" when there was nothing.
+func keepPartial(logPath, outPath string) string {
+	if outPath == "" {
+		return ""
+	}
+	b, err := os.ReadFile(outPath)
+	if err != nil || len(bytes.TrimSpace(b)) == 0 {
+		return ""
+	}
+	partial := strings.TrimSuffix(logPath, ".log") + ".partial.md"
+	if err := os.WriteFile(partial, b, 0o644); err != nil {
+		return ""
+	}
+	return partial
+}
+
+// agentTimeoutError is a run that hit the agent timeout: amf killed the
+// agent's whole process group. Such a run has no branch worth pushing, so no
+// push is made and no PR is opened or updated, and the worktree is removed.
+type agentTimeoutError struct {
+	Agent, Stage   string
+	Limit, Elapsed time.Duration
+	LogPath        string
+	Partial        string // where the agent's final message so far is kept, or ""
+}
+
+func (e *agentTimeoutError) Error() string {
+	return fmt.Sprintf("%s timed out after %s (log: %s)", e.Agent, e.Limit, e.LogPath)
+}
+
+// comment is what Run posts on the issue.
+func (e *agentTimeoutError) comment(root string) string {
+	when := fmt.Sprintf("during the **%s** stage after **%s** (limit %s)", stageName(e.Stage), e.Elapsed, e.Limit)
+	if e.Stage == "" { // without a pipeline there is one agent run, not a plan/code/eval one
+		when = fmt.Sprintf("after **%s** (limit %s)", e.Elapsed, e.Limit)
+	}
+	kept := fmt.Sprintf("Partial output: `%s`", relLog(root, e.LogPath))
+	if e.Partial != "" {
+		kept += fmt.Sprintf(" (its final message so far: `%s`)", relLog(root, e.Partial))
+	}
+	return fmt.Sprintf("amf stopped **%s** %s and opened no pull request. %s. "+
+		"To retry with more time, set `AMF_AGENT_TIMEOUT` or `--agent-timeout` and re-add the `%s` label.",
+		e.Agent, when, kept, labelReady)
+}
+
+// relLog is a log path relative to the checkout, as one would type it.
+func relLog(root, path string) string {
+	if rel, err := filepath.Rel(root, path); err == nil {
+		return rel
+	}
+	return path
 }
 
 // agentEnv is the environment for an agent running in wt. No agent gets

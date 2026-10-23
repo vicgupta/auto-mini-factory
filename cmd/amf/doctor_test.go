@@ -90,6 +90,25 @@ func TestDoctorAllGood(t *testing.T) {
 	}
 }
 
+func TestDoctorAgentTimeout(t *testing.T) {
+	withGitUser(t)
+	_, srv := newFakeGitHub(t)
+	dir := t.TempDir()
+	t.Chdir(dir)
+	t.Setenv("AMF_API_URL", srv.URL)
+	t.Setenv("AMF_RELEASES_URL", "http://127.0.0.1:1")
+	for _, tc := range []struct{ env, want string }{
+		{"", `ok +agent timeout +1h0m0s, the default`},
+		{"AMF_AGENT_TIMEOUT=90m\n", `ok +agent timeout +1h30m0s, from .*/\.env$`},
+		// A bad value fails only this check: the rest of .env still counts.
+		{"AMF_AGENT_TIMEOUT=5x\n", `FAIL +agent timeout +AMF_AGENT_TIMEOUT="5x": not a duration`},
+	} {
+		os.WriteFile(filepath.Join(dir, ".env"), []byte("GITHUB_TOKEN=test-token\nGITHUB_REPO=vic/demo\n"+tc.env), 0o600)
+		out, _ := doctorOutput(t)
+		wantLines(t, out, `ok +\.env +`, `ok +GITHUB_REPO +vic/demo`, tc.want)
+	}
+}
+
 func TestDoctorBrokenSetup(t *testing.T) {
 	withGitUser(t)
 	_, srv := newFakeGitHub(t)
