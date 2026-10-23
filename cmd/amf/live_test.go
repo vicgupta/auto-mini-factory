@@ -377,10 +377,15 @@ func TestLive(t *testing.T) {
 		if code != 0 {
 			t.Errorf("amf doctor: exit %d", code)
 		}
-		for _, want := range []string{"github", "repo", "labels", "checkout", "git push", "pipeline", "claudecode"} {
+		for _, want := range []string{"github", "repo", "labels", "checkout", "git push", "pipeline"} {
 			if !regexp.MustCompile(`(?m)^ok +` + want + ` `).MatchString(out) {
 				t.Errorf("doctor: %s isn't ok:\n%s", want, out)
 			}
+		}
+		// claude must be installed. Without a key in .env, amf won't pick it
+		// on its own, which doctor reports as a warning, not a failure.
+		if !regexp.MustCompile(`(?m)^(ok +claudecode +\S+, |warn +claudecode +\S+, .*; amf picks it only with ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN)`).MatchString(out) {
+			t.Errorf("doctor: claudecode isn't installed:\n%s", out)
 		}
 	})
 
