@@ -10,6 +10,10 @@ import (
 	"strings"
 )
 
+// defaultOpencodeModel is the model amf runs opencode with when
+// OPENCODE_MODEL is unset.
+const defaultOpencodeModel = "opencode/big-pickle"
+
 // Config is everything amf needs to talk to GitHub and Claude Code.
 type Config struct {
 	Token    string // GITHUB_TOKEN
@@ -25,6 +29,15 @@ type Config struct {
 	// ClaudeToken is CLAUDE_CODE_OAUTH_TOKEN, a subscription token from
 	// `claude setup-token`. Optional: without it Claude uses its own login.
 	ClaudeToken string
+	// AnthropicKey is ANTHROPIC_API_KEY. With it or ClaudeToken, amf picks
+	// claude for issues without a pipeline, and passes it to Claude.
+	AnthropicKey string
+	// OpenAIKey is OPENAI_API_KEY. With it, amf picks codex for issues
+	// without a pipeline (when claude can't run), and passes it to Codex.
+	OpenAIKey string
+	// OpencodeModel is OPENCODE_MODEL, the model amf runs opencode with,
+	// defaulting to defaultOpencodeModel.
+	OpencodeModel string
 
 	// Trusted is AMF_TRUSTED, the lower-case GitHub logins whose issues amf
 	// works on. Nil means anyone's.
@@ -69,8 +82,11 @@ func loadConfig(paths ...string) (Config, error) {
 		Codex:    get("AMF_CODEX", "codex"),
 		Opencode: get("AMF_OPENCODE", "opencode"),
 
-		ClaudeToken: get("CLAUDE_CODE_OAUTH_TOKEN", ""),
-		Trusted:     parseTrusted(get("AMF_TRUSTED", "")),
+		ClaudeToken:   get("CLAUDE_CODE_OAUTH_TOKEN", ""),
+		AnthropicKey:  get("ANTHROPIC_API_KEY", ""),
+		OpenAIKey:     get("OPENAI_API_KEY", ""),
+		OpencodeModel: get("OPENCODE_MODEL", defaultOpencodeModel),
+		Trusted:       parseTrusted(get("AMF_TRUSTED", "")),
 	}
 	if cfg.Token == "" {
 		return cfg, errors.New("GITHUB_TOKEN is not set (run amf init, then edit .env)")

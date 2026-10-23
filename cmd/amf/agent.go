@@ -11,7 +11,7 @@ import (
 var agentOrder = []string{agentClaude, agentCodex, agentOpencode}
 
 // parseAgent reads an --agent value: claudecode (or claude), codex or
-// opencode. "" means pick the first installed one.
+// opencode. "" means let amf pick (see defaultAgent).
 func parseAgent(s string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "":
@@ -35,30 +35,136 @@ func agentName(agent string) string {
 	return "claude"
 }
 
+// agentKeys are the environment variables that give an agent a credential
+// amf can see. Without --agent, amf only picks claude or codex when one of
+// its keys is set; opencode needs none.
+var agentKeys = map[string][]string{
+	agentClaude: {"ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"},
+	agentCodex:  {"OPENAI_API_KEY"},
+}
+
+// agentKey says which of agent's keys is set, if any. ok is true for an
+// agent that needs none.
+func (r *Runner) agentKey(agent string) (name string, ok bool) {
+	switch agent {
+	case agentClaude:
+		if r.ClaudeToken != "" {
+			return "CLAUDE_CODE_OAUTH_TOKEN", true
+		}
+		if r.AnthropicKey != "" {
+			return "ANTHROPIC_API_KEY", true
+		}
+		return "", false
+	case agentCodex:
+		if r.OpenAIKey != "" {
+			return "OPENAI_API_KEY", true
+		}
+		return "", false
+	}
+	return "", true
+}
+
+// agentStatus is what amf found for one agent: whether it's installed, and
+// whether it has a key when it needs one.
+type agentStatus struct {
+	Agent, Bin string
+	Path       string // where it's installed, or ""
+	Key        string // the key variable that's set, or ""
+	Keyed      bool   // has a key, or needs none
+	Model      string // the model amf runs it with without a pipeline, or "" for its default
+}
+
+func (s agentStatus) usable() bool { return s.Path != "" && s.Keyed }
+
+// reason says why amf passed over an agent that isn't usable.
+func (s agentStatus) reason() string {
+	if s.Path == "" {
+		return s.Bin + " is not installed"
+	}
+	return agentName(s.Agent) + " has no " + strings.Join(agentKeys[s.Agent], " or ")
+}
+
+// describe is one line for watch: the agent, where it's installed and its key.
+func (s agentStatus) describe() string {
+	where := "not installed"
+	if s.Path != "" {
+		where = "installed at " + s.Path
+	}
+	key := "needs no key"
+	if s.Model != "" {
+		key += ", model " + s.Model
+	}
+	switch {
+	case len(agentKeys[s.Agent]) == 0:
+	case s.Key != "":
+		key = s.Key + " is set"
+	default:
+		key = strings.Join(agentKeys[s.Agent], " and ") + " not set"
+	}
+	verdict := "usable"
+	if !s.usable() {
+		verdict = "skipped"
+	}
+	return fmt.Sprintf("%-8s %s; %s: %s", agentName(s.Agent), where, key, verdict)
+}
+
+// agentStatuses checks each agent, in agentOrder. Agents with no binary
+// configured (as in tests) are left out.
+func (r *Runner) agentStatuses() []agentStatus {
+	var out []agentStatus
+	for _, a := range agentOrder {
+		bin := r.agentBin(a)
+		if bin == "" {
+			continue
+		}
+		st := agentStatus{Agent: a, Bin: bin}
+		if path, err := exec.LookPath(bin); err == nil {
+			st.Path = path
+		}
+		st.Key, st.Keyed = r.agentKey(a)
+		st.Model = r.agentModel(a, "")
+		out = append(out, st)
+	}
+	return out
+}
+
 // defaultAgent picks the agent for an issue without a pipeline: the one
-// --agent named, which must be installed, or else the first installed of
-// claude, codex and opencode.
+// --agent named, which must be installed, or else the first of claude,
+// codex and opencode that is installed and has a key (see agentKeys).
 func (r *Runner) defaultAgent() (string, error) {
+	agent, _, err := r.pickAgent()
+	return agent, err
+}
+
+// pickAgent is defaultAgent, also saying why each agent before the chosen
+// one was passed over, such as "codex has no OPENAI_API_KEY".
+func (r *Runner) pickAgent() (agent string, passed []string, err error) {
 	if r.Agent != "" {
 		if _, err := exec.LookPath(r.agentBin(r.Agent)); err != nil {
-			return "", fmt.Errorf("--agent %s: %s is not installed (%v)", r.Agent, r.agentBin(r.Agent), err)
+			return "", nil, fmt.Errorf("--agent %s: %s is not installed (%v)", r.Agent, r.agentBin(r.Agent), err)
 		}
-		return r.Agent, nil
+		return r.Agent, nil, nil
 	}
-	var tried []string
-	for _, agent := range agentOrder {
-		bin := r.agentBin(agent)
-		if bin == "" {
-			continue // not configured, as in tests
+	statuses := r.agentStatuses()
+	if len(statuses) == 0 {
+		return "", nil, fmt.Errorf("no coding agent is configured; set AMF_CLAUDE, AMF_CODEX or AMF_OPENCODE")
+	}
+	for _, st := range statuses {
+		if st.usable() {
+			return st.Agent, passed, nil
 		}
-		if _, err := exec.LookPath(bin); err == nil {
-			return agent, nil
-		}
-		tried = append(tried, bin)
+		passed = append(passed, st.reason())
 	}
-	if len(tried) == 0 {
-		return "", fmt.Errorf("no coding agent is configured; set AMF_CLAUDE, AMF_CODEX or AMF_OPENCODE")
+	return "", passed, fmt.Errorf("no coding agent is available (%s); set ANTHROPIC_API_KEY or "+
+		"CLAUDE_CODE_OAUTH_TOKEN for claude or OPENAI_API_KEY for codex, install opencode, or name one with --agent", strings.Join(passed, "; "))
+}
+
+// agentModel is the model to run agent with: model, if a pipeline stage
+// names one, else OPENCODE_MODEL for opencode, else the agent's own default
+// ("").
+func (r *Runner) agentModel(agent, model string) string {
+	if model == "" && agent == agentOpencode {
+		return r.OpencodeModel
 	}
-	return "", fmt.Errorf("no coding agent is installed (tried %s); install claude, codex or opencode, "+
-		"or point AMF_CLAUDE, AMF_CODEX or AMF_OPENCODE at one", strings.Join(tried, ", "))
+	return model
 }

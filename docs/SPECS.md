@@ -2,15 +2,16 @@
 
 amf (autonomous mini factory) turns labeled GitHub issues into pull requests by
 running coding agents headless in a git worktree. By default that's one run of
-a single agent: the one `--agent` names, or else the first installed of Claude
-Code, Codex and opencode. A repo can instead declare a plan → code → eval pipeline in its
+a single agent: the one `--agent` names, or else Claude Code or Codex if it's
+installed and has an API key or token, then opencode. A repo can instead declare a plan → code → eval pipeline in its
 `AGENTS.md`, with a skill, agent and model for each stage. amf is a single Go
 binary that uses only the standard library, for one developer or a small team
 that doesn't want to run a platform.
 
-**Needs:** `git` and at least one of the `claude`, `codex` and `opencode`
-CLIs on `PATH`, and a GitHub token for one repository. A pipeline needs
-whichever agents it names.
+**Needs:** `git`, a GitHub token for one repository, and an agent amf can
+run: `claude` with `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`, `codex`
+with `OPENAI_API_KEY`, or `opencode`, or any of them named with `--agent`. A
+pipeline needs whichever agents it names.
 
 ## Issue lifecycle
 
@@ -44,15 +45,27 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened)
 - `--eval-rounds` is how many times a pipeline's eval stage may send the
   change back to the code stage. A negative value is an error.
 - `--agent` picks the agent for issues without a pipeline: `claudecode`
-  (or `claude`), `codex` or `opencode`, ignoring case. Without it, amf uses
-  the first installed of `claude`, `codex` and `opencode`, in that order,
-  checked for each issue. A named agent must be installed: `run` and `watch`
-  fail at startup with `--agent <agent>: <path> is not installed`, and never
-  fall back to another. Any other value is an error. A repo with a pipeline
-  ignores `--agent`, since the pipeline names each stage's agent; amf logs
-  `ignoring --agent <agent>` for each such issue.
-- `watch` logs at startup which agent issues without a pipeline run, or a
-  warning if none is installed.
+  (or `claude`), `codex` or `opencode`, ignoring case. A named agent must be
+  installed, but needs no key, since it can use its own login. `run` and
+  `watch` fail at startup with `--agent <agent>: <path> is not installed`,
+  and never fall back to another. Any other value is an error. A repo with a
+  pipeline ignores `--agent`, since the pipeline names each stage's agent;
+  amf logs `ignoring --agent <agent>` for each such issue.
+- **Without `--agent`,** amf picks for each issue the first usable agent of:
+
+  | Agent | Usable when |
+  |---|---|
+  | `claude` | installed, and `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` is set |
+  | `codex` | installed, and `OPENAI_API_KEY` is set |
+  | `opencode` | installed (it needs no key) |
+
+  Keys come from the environment or `.env`; placeholders don't count. An
+  installed agent without its key is skipped, even if it has a login of its
+  own. With none usable, the issue isn't touched (see step 3 below).
+- `watch` logs at startup one line per agent: where it's installed (or `not
+  installed`), whether its key is set (naming the one that is), for opencode
+  the model it runs with, and `usable` or `skipped`. Then it logs which agent issues without a pipeline run, or a
+  warning that none is available.
 
 **Exit codes:** 0 on success, 1 on error, 2 on a usage error. SIGINT and
 SIGTERM cancel the current step; the issue is still marked failed.
@@ -60,7 +73,12 @@ SIGTERM cancel the current step; the issue is still marked failed.
 ### `amf init`
 
 1. Builds `.env` from a template of `GITHUB_TOKEN`, `GITHUB_REPO`,
-   `CLAUDE_CODE_OAUTH_TOKEN` and `AMF_TRUSTED`.
+   `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+   `OPENCODE_MODEL` and `AMF_TRUSTED`.
+   - `OPENCODE_MODEL` is written commented out, as
+     `# OPENCODE_MODEL=opencode/big-pickle   # Use 'opencode models' to list all the models`,
+     until it has a real value. It isn't one of the values `init` asks you to
+     fill in.
    - Real values from an existing `.env` are kept, and so are any extra
      variables.
    - A missing `GITHUB_REPO` is filled in from the checkout's GitHub `origin`.
@@ -81,10 +99,11 @@ SIGTERM cancel the current step; the issue is still marked failed.
 1. Must run inside a git checkout. Reads `AGENTS.md` at its top level from
    disk, so a change can be checked before it's merged.
 2. Without `AGENTS.md`, or without an `## amf` table in it, prints which
-   agent amf runs with its built-in prompt (the first installed of `claude`,
-   `codex` and `opencode`, unless `--agent` names one) and exits 0. If none
-   is installed it says so and exits 1.
-3. Otherwise prints the stages (`STAGE`, `AGENT`, `MODEL`, `SKILL`), then one
+   agent amf runs with its built-in prompt (picked as for `--agent` above,
+   with the reason each earlier agent was skipped) and exits 0. If none is
+   usable it says so and exits 1.
+3. Otherwise prints the stages (`STAGE`, `AGENT`, `MODEL`, `SKILL`; an
+   opencode stage with no model shows `<OPENCODE_MODEL> (OPENCODE_MODEL)`), then one
    line per agent: `ok` with its path, or `missing`. Agent paths come from
    the environment and `.env`; no token is needed.
 4. With `--fetch`, also downloads each skill as `run` does, and prints `ok`
@@ -117,8 +136,10 @@ never prints a secret. The checks, in order:
 | `git identity` | git has a name and email to commit with, in the checkout (or here); shows them | `FAIL`, with the `git config` commands to set them |
 | `pipeline` | Fetches the default branch; shows the pipeline from `AGENTS.md` on it, or that there is none | `FAIL` if the table doesn't parse |
 | `skill <stage>` | Each stage's skill downloads as in `run`; shows its size and SHA-256 | `FAIL` |
-| `claudecode`, `codex`, `opencode` | Installed; shows the path and `--version`. With no pipeline, the first installed adds `runs issues without a pipeline`, and the `pipeline` line names it | `FAIL` if a stage needs it. With no pipeline, one `FAIL` on `claudecode` if no agent is installed at all; otherwise `warn` naming the agent amf runs instead |
-| `claude login` | Always; says whether `CLAUDE_CODE_OAUTH_TOKEN` is set or Claude uses its own login | |
+| `claudecode`, `codex`, `opencode` | Installed; shows the path and `--version`. With no pipeline, the agent amf picks adds `runs issues without a pipeline`, and the `pipeline` line names it | `FAIL` if a stage needs it. With no pipeline: one `FAIL` on `claudecode` if no agent is usable; `warn` for an installed `claude` or `codex` without its key, naming the agent amf runs instead; `warn` for one that isn't installed |
+| `claude login` | Always; says whether `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` is set (and from where), or that Claude uses its own login | |
+| `codex login` | Always; says whether `OPENAI_API_KEY` is set (and from where), or that Codex uses its own login | |
+| `opencode model` | `OPENCODE_MODEL` (or the default) is a line of `opencode models` | `warn` if it isn't, since every opencode run would fail, or if `opencode models` fails; `skip` without opencode |
 
 Checks that need GitHub, the repo or a checkout are `skip` without them.
 Agents' own logins aren't checked: their CLIs can't report them reliably.
@@ -135,7 +156,10 @@ space, a trailing comment. A leading byte order mark is ignored.
 |---|---|---|
 | `GITHUB_TOKEN` | required | API access: Contents, Issues, Pull requests (read & write) |
 | `GITHUB_REPO` | required | `owner/name`; github.com URLs are accepted |
-| `CLAUDE_CODE_OAUTH_TOKEN` | unset | Claude subscription token, passed to Claude |
+| `CLAUDE_CODE_OAUTH_TOKEN` | unset | Claude subscription token, passed to Claude. Makes `claude` usable without `--agent` |
+| `ANTHROPIC_API_KEY` | unset | Claude API key, passed to Claude when there's no `CLAUDE_CODE_OAUTH_TOKEN`. Makes `claude` usable without `--agent` |
+| `OPENAI_API_KEY` | unset | OpenAI API key, passed to Codex. Makes `codex` usable without `--agent` |
+| `OPENCODE_MODEL` | `opencode/big-pickle` | The model opencode runs with: always without a pipeline, and for pipeline stages that name no model. `opencode models` lists the choices |
 | `AMF_TRUSTED` | unset | GitHub logins, separated by commas or spaces (a leading `@` is allowed, case is ignored). When set, amf only works on issues they opened. Unset means anyone's |
 | `AMF_CLAUDE` | `claude` | Path to the Claude CLI |
 | `AMF_CODEX` | `codex` | Path to the Codex CLI |
@@ -170,7 +194,7 @@ A repo declares a pipeline with a table under an `## amf` heading in
   and neither is a username or password in the URL.
 - **Agent:** `claudecode`, `codex` or `opencode`.
 - **Model:** passed to the agent. `default`, `-` or empty means the agent's
-  own default.
+  own default, except for `opencode`, which then gets `OPENCODE_MODEL`.
 
 `run` and `watch` read the table from `AGENTS.md` on `origin/<default>`, so a
 pipeline only changes through a merge, and `watch` uses it from the next
@@ -193,8 +217,8 @@ work. Starter skills are in this repo under `skills/`.
 - **Permissions:** every agent runs with permission checks off. opencode
   gets `OPENCODE_CONFIG` pointing at `.amf/opencode.json`, which allows
   edits, shell commands, web fetches and paths outside the worktree.
-- **Environment:** see step 6 below. Codex and opencode keep their own
-  logins and API keys.
+- **Environment:** see step 6 below. Agents keep their own logins and the
+  API keys in amf's environment.
 - **Output files:** the final-message files are `.amf/<stage>.md` inside the
   worktree (`.amf/code.md` without a pipeline), which git ignores.
 
@@ -209,8 +233,9 @@ work. Starter skills are in this repo under `skills/`.
 3. **Check.** The issue must be an open issue, not a PR. Fetch the default
    branch and read the pipeline from `AGENTS.md` on it. Without a pipeline,
    pick the agent (see `--agent` above). A table that doesn't parse, an agent
-   that isn't installed (a stage's, the one `--agent` names, or with neither,
-   all three: `no coding agent is installed (tried …)`), or git having no name and email
+   that isn't installed (a stage's or the one `--agent` names), no usable
+   agent without either (`no coding agent is available (…)`, giving each
+   agent's reason), or git having no name and email
    to commit with (`git var GIT_AUTHOR_IDENT` and `GIT_COMMITTER_IDENT`)
    stops the run here without changing the issue. `watch` then logs the
    error and tries again on its next poll.
@@ -224,13 +249,17 @@ work. Starter skills are in this repo under `skills/`.
    `.amf/worktrees/issue-N` on `amf/issue-N`, reset to `origin/<default>`. A
    worktree left from an earlier run is discarded first.
 6. **Agent.** Without a pipeline, run the agent picked in step 3 as in the
-   Agents table above, with no model. amf logs `#N: running <claude|codex|opencode>`.
+   Agents table above: opencode with `--model` set to `OPENCODE_MODEL`, the
+   others with no model. amf logs `#N: running <claude|codex|opencode>`
+   (with opencode's model in parentheses).
    - **Prompt:** the issue's title and body, plus instructions to make the
      smallest complete change, run the project's tests and build, not touch
      git or GitHub, and reply with only a PR description.
    - **Environment:** `PWD` is the worktree, and no agent gets
      `GITHUB_TOKEN`. When `CLAUDE_CODE_OAUTH_TOKEN` is set, it's passed to
-     Claude only, and Claude's `ANTHROPIC_API_KEY` is removed.
+     Claude only, and Claude's `ANTHROPIC_API_KEY` is removed. Otherwise an
+     `ANTHROPIC_API_KEY` from `.env` or the environment is passed to Claude.
+     `OPENAI_API_KEY` from `.env` or the environment is passed to Codex.
    - **Log:** output streams live to `.amf/logs/issue-N.log`.
    - **Timeout:** the agent is killed after `--timeout`.
    - **Summary:** the final message becomes the summary.

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"text/tabwriter"
 )
 
@@ -49,7 +50,7 @@ func cmdPipeline(ctx context.Context, args []string, stdout, stderr io.Writer) e
 
 	// Only the agent paths are needed, so a .env without a token is fine.
 	cfg, _ := loadConfig(envPaths(ctx)...)
-	r := &Runner{Claude: cfg.Claude, Codex: cfg.Codex, Opencode: cfg.Opencode}
+	r := &Runner{Claude: cfg.Claude, Codex: cfg.Codex, Opencode: cfg.Opencode, OpencodeModel: cfg.OpencodeModel}
 	fmt.Fprintf(stdout, "Pipeline in %s:\n\n", path)
 	tw := tabwriter.NewWriter(stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(tw, "STAGE\tAGENT\tMODEL\tSKILL")
@@ -58,7 +59,11 @@ func cmdPipeline(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		if skill == "" {
 			skill = "-"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", s.Name, s.Agent, s.model(), skill)
+		model := s.model()
+		if m := r.agentModel(s.Agent, s.Model); m != s.Model {
+			model = m + " (OPENCODE_MODEL)"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", s.Name, s.Agent, model, skill)
 	}
 	tw.Flush()
 	fmt.Fprintln(stdout)
@@ -101,11 +106,16 @@ func cmdPipeline(ctx context.Context, args []string, stdout, stderr io.Writer) e
 // installed of claude, codex and opencode. None installed is an error.
 func noPipeline(ctx context.Context, stdout io.Writer, why string) error {
 	cfg, _ := loadConfig(envPaths(ctx)...)
-	agent, err := (&Runner{Claude: cfg.Claude, Codex: cfg.Codex, Opencode: cfg.Opencode}).defaultAgent()
+	r := &Runner{Claude: cfg.Claude, Codex: cfg.Codex, Opencode: cfg.Opencode, ClaudeToken: cfg.ClaudeToken, AnthropicKey: cfg.AnthropicKey, OpenAIKey: cfg.OpenAIKey}
+	agent, passed, err := r.pickAgent()
 	if err != nil {
 		fmt.Fprintf(stdout, "%s, so amf runs one agent with its built-in prompt, but %v.\n", why, err)
 		return errors.New("the pipeline has 1 problem")
 	}
-	fmt.Fprintf(stdout, "%s, so amf runs %s with its built-in prompt: the first installed of claude, codex and opencode, unless --agent names one.\n", why, agentName(agent))
+	because := ""
+	if len(passed) > 0 {
+		because = " (" + strings.Join(passed, "; ") + ")"
+	}
+	fmt.Fprintf(stdout, "%s, so amf runs %s with its built-in prompt%s, unless --agent names another.\n", why, agentName(agent), because)
 	return nil
 }

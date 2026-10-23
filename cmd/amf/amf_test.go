@@ -442,12 +442,14 @@ func fakeClaude(t *testing.T, script string) string {
 func newTestRunner(t *testing.T, srv *httptest.Server, root, claude string) (*Runner, *bytes.Buffer) {
 	var log bytes.Buffer
 	return &Runner{
-		GH:      newGitHub(Config{Token: "test-token", Repo: "vic/demo", APIURL: srv.URL}),
-		Repo:    "vic/demo",
-		Root:    root,
-		Claude:  claude,
-		Timeout: time.Minute,
-		Log:     &log,
+		GH:     newGitHub(Config{Token: "test-token", Repo: "vic/demo", APIURL: srv.URL}),
+		Repo:   "vic/demo",
+		Root:   root,
+		Claude: claude,
+		// A key makes claude the agent amf picks for issues without a pipeline.
+		AnthropicKey: "sk-ant-test",
+		Timeout:      time.Minute,
+		Log:          &log,
 	}, &log
 }
 
@@ -647,6 +649,10 @@ func TestMain(m *testing.M) {
 		for _, k := range []string{"AMF_CLAUDE", "AMF_CODEX", "AMF_OPENCODE"} {
 			os.Setenv(k, "amf-test-no-such-agent")
 		}
+		// Agent keys decide which agent amf picks, so none leak in either.
+		os.Unsetenv("ANTHROPIC_API_KEY")
+		os.Unsetenv("OPENAI_API_KEY")
+		os.Unsetenv("OPENCODE_MODEL")
 	}
 	if _, err := exec.LookPath("git"); err != nil {
 		fmt.Println("skipping: git not installed")

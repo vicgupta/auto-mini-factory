@@ -44,10 +44,18 @@ type Runner struct {
 	Codex    string // codex binary
 	Opencode string // opencode binary
 	// Agent is the agent for issues without a pipeline (claudecode, codex or
-	// opencode), from --agent. "" means the first installed, in agentOrder.
+	// opencode), from --agent. "" means amf picks: see defaultAgent.
 	Agent string
 	// ClaudeToken, when set, is passed to Claude as CLAUDE_CODE_OAUTH_TOKEN.
 	ClaudeToken string
+	// AnthropicKey, when set (and ClaudeToken isn't), is passed to Claude as
+	// ANTHROPIC_API_KEY.
+	AnthropicKey string
+	// OpenAIKey, when set, is passed to Codex as OPENAI_API_KEY.
+	OpenAIKey string
+	// OpencodeModel is the model opencode runs with, from OPENCODE_MODEL:
+	// always without a pipeline, and for pipeline stages that name none.
+	OpencodeModel string
 	// Trusted, when set, limits amf to issues opened by these lower-case
 	// logins: agents run an issue's text with every permission check off.
 	Trusted []string
@@ -185,10 +193,15 @@ func (r *Runner) process(ctx context.Context, issue Issue, base string, p *Pipel
 	title := fmt.Sprintf("Fix #%d: %s", n, issue.Title)
 	var summary, extra string
 	if p == nil {
-		r.logf("#%d: running %s (timeout %s)", n, agentName(agent), r.Timeout)
+		model := r.agentModel(agent, "")
+		if model != "" {
+			r.logf("#%d: running %s (%s, timeout %s)", n, agentName(agent), model, r.Timeout)
+		} else {
+			r.logf("#%d: running %s (timeout %s)", n, agentName(agent), r.Timeout)
+		}
 		log := filepath.Join(r.Root, ".amf", "logs", fmt.Sprintf("issue-%d.log", n))
 		out := filepath.Join(wt, ".amf", "code.md") // for agents that write their final message to a file
-		if summary, err = r.runAgent(ctx, agent, "", wt, buildPrompt(r.Repo, branch, issue), log, out); err != nil {
+		if summary, err = r.runAgent(ctx, agent, model, wt, buildPrompt(r.Repo, branch, issue), log, out); err != nil {
 			return PullRequest{}, false, err
 		}
 		if err := commitAll(ctx, wt, title, n, base); err != nil {
@@ -425,13 +438,17 @@ func needsWork(is Issue) bool {
 // until ctx is cancelled.
 func (r *Runner) Watch(ctx context.Context, label string, interval time.Duration) error {
 	r.logf("watching %s for issues labeled %q every %s (Ctrl-C to stop)", r.Repo, label, interval)
-	switch agent, err := r.defaultAgent(); {
+	r.logf("agents for issues without a pipeline (claude and codex need a key):")
+	for _, st := range r.agentStatuses() {
+		r.logf("  %s", st.describe())
+	}
+	switch agent, _, err := r.pickAgent(); {
 	case r.Agent != "":
 		r.logf("issues without a pipeline run %s (--agent)", agentName(r.Agent))
 	case err != nil:
-		r.logf("warning: %v; issues without a pipeline wait until one is installed", err)
+		r.logf("warning: %v; issues without a pipeline wait until one is available", err)
 	default:
-		r.logf("issues without a pipeline run %s, the first installed of claude, codex and opencode", agentName(agent))
+		r.logf("issues without a pipeline run %s", agentName(agent))
 	}
 	for {
 		issues, err := r.GH.ListIssues(ctx, "open", label, true)
@@ -461,11 +478,16 @@ func (r *Runner) Watch(ctx context.Context, label string, interval time.Duration
 // claudeEnv is the environment for Claude: never the GitHub token, and with a
 // subscription token configured, no API key that would take precedence over it.
 func (r *Runner) claudeEnv(env []string) []string {
-	if r.ClaudeToken == "" {
-		return withoutEnv(env, "GITHUB_TOKEN")
+	switch {
+	case r.ClaudeToken != "":
+		// The subscription token wins: an API key would take precedence over it.
+		env = withoutEnv(env, "GITHUB_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN")
+		return append(env, "CLAUDE_CODE_OAUTH_TOKEN="+r.ClaudeToken)
+	case r.AnthropicKey != "":
+		env = withoutEnv(env, "GITHUB_TOKEN", "ANTHROPIC_API_KEY")
+		return append(env, "ANTHROPIC_API_KEY="+r.AnthropicKey)
 	}
-	env = withoutEnv(env, "GITHUB_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN")
-	return append(env, "CLAUDE_CODE_OAUTH_TOKEN="+r.ClaudeToken)
+	return withoutEnv(env, "GITHUB_TOKEN")
 }
 
 func withoutEnv(env []string, keys ...string) []string {

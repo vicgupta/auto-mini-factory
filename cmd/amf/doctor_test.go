@@ -81,7 +81,8 @@ func TestDoctorAllGood(t *testing.T) {
 		`ok +claudecode +.*/claude, 1\.2\.3 \(Claude Code\)$`,
 		`warn +codex +.*no-codex is not installed; only needed by pipelines that use codex$`,
 		`ok +opencode +.*/opencode, opencode v2$`,
-		`ok +claude login +CLAUDE_CODE_OAUTH_TOKEN is not set; claude uses its own login$`,
+		`ok +claude login +neither CLAUDE_CODE_OAUTH_TOKEN nor ANTHROPIC_API_KEY is set; claude uses its own login, and amf runs it only for a pipeline or --agent claudecode$`,
+		`ok +codex login +OPENAI_API_KEY is not set; codex uses its own login, and amf runs it only for a pipeline or --agent codex$`,
 	)
 	// Doctor changes nothing: no branch was pushed.
 	if refs := mustGit(t, root, "--git-dir", origin, "branch", "--list", "amf/*"); refs != "" {
@@ -115,7 +116,7 @@ func TestDoctorBrokenSetup(t *testing.T) {
 		`warn +checkout +not in a git checkout; run and watch will clone vic/demo into .*/demo$`,
 		`skip +git push `,
 		`skip +pipeline `,
-		`FAIL +claudecode +.*no-claude is not installed, and neither is any other agent; amf needs one of claude, codex or opencode$`,
+		`FAIL +claudecode +no coding agent is available \(.*no-claude is not installed; .*no-codex is not installed; .*no-opencode is not installed\)`,
 		`warn +codex +.*no-codex is not installed either$`,
 		`warn +opencode +.*no-opencode is not installed either$`,
 		`ok +claude login +CLAUDE_CODE_OAUTH_TOKEN is set, from .*/\.env; claude runs with it$`,
@@ -143,6 +144,7 @@ func TestDoctorConfigProblems(t *testing.T) {
 	t.Chdir(dir)
 	t.Setenv("AMF_RELEASES_URL", "http://127.0.0.1:1")
 	t.Setenv("AMF_CLAUDE", fakeAgent(t, "claude", "echo 1"))
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test") // so claude counts as an agent amf can pick
 
 	os.WriteFile(filepath.Join(dir, ".env"), []byte("not a pair\n"), 0o600)
 	out, _ := doctorOutput(t)
@@ -207,6 +209,7 @@ func TestDoctorFallbackAgent(t *testing.T) {
 	t.Setenv("AMF_CLAUDE", filepath.Join(t.TempDir(), "no-claude"))
 	t.Setenv("AMF_CODEX", fakeAgent(t, "codex", `echo "codex-cli 9"`))
 	t.Setenv("AMF_OPENCODE", filepath.Join(t.TempDir(), "no-opencode"))
+	t.Setenv("OPENAI_API_KEY", "sk-openai-test")
 
 	out, _ := doctorOutput(t)
 	wantLines(t, out,
@@ -224,12 +227,46 @@ func TestDoctorFallbackAgent(t *testing.T) {
 	if err := run(context.Background(), []string{"pipeline"}, nil, &stdout, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout.String(), "so amf runs codex with its built-in prompt: the first installed of claude, codex and opencode") {
+	if !strings.Contains(stdout.String(), "so amf runs codex with its built-in prompt (") || !strings.Contains(stdout.String(), "no-claude is not installed), unless --agent names another.") {
 		t.Errorf("amf pipeline = %q", stdout.String())
 	}
 	t.Setenv("AMF_CODEX", filepath.Join(t.TempDir(), "no-codex"))
 	stdout.Reset()
-	if err := run(context.Background(), []string{"pipeline"}, nil, &stdout, io.Discard); err == nil || !strings.Contains(stdout.String(), "no coding agent is installed") {
+	if err := run(context.Background(), []string{"pipeline"}, nil, &stdout, io.Discard); err == nil || !strings.Contains(stdout.String(), "no coding agent is available") {
 		t.Errorf("amf pipeline with no agent: %v, %q", err, stdout.String())
 	}
+}
+
+func TestDoctorAgentWithoutKey(t *testing.T) {
+	root, origin := setupRepo(t) // no pipeline
+	_, srv := newFakeGitHub(t)
+	t.Chdir(root)
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	t.Setenv("GITHUB_REPO", "vic/demo")
+	t.Setenv("AMF_API_URL", srv.URL)
+	t.Setenv("AMF_CLONE_URL", origin)
+	t.Setenv("AMF_RELEASES_URL", "http://127.0.0.1:1")
+	t.Setenv("AMF_CLAUDE", fakeAgent(t, "claude", `echo "1.2.3 (Claude Code)"`))
+	t.Setenv("AMF_CODEX", fakeAgent(t, "codex", `echo "codex-cli 9"`))
+	t.Setenv("AMF_OPENCODE", fakeAgent(t, "opencode", `echo "opencode v2"`))
+
+	out, err := doctorOutput(t)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	wantLines(t, out,
+		`ok +pipeline +none in AGENTS\.md on origin/main; amf runs opencode once per issue$`,
+		`warn +claudecode +.*/claude, 1\.2\.3 \(Claude Code\); amf picks it only with ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN, so it runs opencode instead \(--agent claudecode runs it with its own login\)$`,
+		`warn +codex +.*/codex, codex-cli 9; amf picks it only with OPENAI_API_KEY, so it runs opencode instead \(--agent codex runs it with its own login\)$`,
+		`ok +opencode +.*/opencode, opencode v2; runs issues without a pipeline$`,
+	)
+
+	// With codex's key, codex is picked instead.
+	t.Setenv("OPENAI_API_KEY", "sk-openai-test")
+	out, _ = doctorOutput(t)
+	wantLines(t, out,
+		`ok +pipeline +none in AGENTS\.md on origin/main; amf runs codex once per issue$`,
+		`ok +codex +.*/codex, codex-cli 9; runs issues without a pipeline$`,
+		`ok +codex login +OPENAI_API_KEY is set, from the environment; codex runs with it$`,
+	)
 }

@@ -31,6 +31,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -117,6 +118,11 @@ func (l *live) amf(dir string, extraEnv []string, args ...string) (stdout, stder
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
+	if len(args) > 0 && args[0] == "run" {
+		// The test's claude wrapper pins the model, and runs on claude's own
+		// login, which amf doesn't pick without a key; name it.
+		args = append(slices.Clone(args), "--agent", "claudecode")
+	}
 	cmd := exec.CommandContext(ctx, l.bin, args...)
 	cmd.Dir = dir
 	cmd.Env = append(append([]string{}, l.env...), extraEnv...)
@@ -502,7 +508,7 @@ func TestLive(t *testing.T) {
 		a := l.newIssue("Watch A", "Create the file `live/"+l.id+"/a.txt` containing exactly: a", "--label", label)
 		b := l.newIssue("Watch B", "Create the file `live/"+l.id+"/b.txt` containing exactly: b", "--label", label)
 
-		cmd := exec.Command(l.bin, "watch", "--interval", "5s", "--label", label, "--timeout", "15m")
+		cmd := exec.Command(l.bin, "watch", "--agent", "claudecode", "--interval", "5s", "--label", label, "--timeout", "15m")
 		cmd.Dir, cmd.Env = l.dir, l.env
 		var errOut bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &errOut, &errOut

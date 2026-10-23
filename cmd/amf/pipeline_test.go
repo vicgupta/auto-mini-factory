@@ -345,6 +345,7 @@ func TestPipelineCommand(t *testing.T) {
 	root, _ := setupRepo(t)
 	t.Chdir(root)
 	t.Setenv("AMF_CLAUDE", fakeAgent(t, "claude", "exit 0"))
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
 	var stdout bytes.Buffer
 	if err := run(context.Background(), []string{"pipeline"}, nil, &stdout, io.Discard); err != nil || !strings.Contains(stdout.String(), "No AGENTS.md") {
 		t.Fatalf("no AGENTS.md: %v, %q", err, stdout.String())

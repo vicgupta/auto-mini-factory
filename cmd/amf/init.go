@@ -13,12 +13,23 @@ import (
 	"strings"
 )
 
+// envVar is one line of the .env `amf init` writes. A commented one is
+// written as "# KEY=placeholder" until it has a real value, since its
+// placeholder is the default amf uses anyway.
+type envVar struct {
+	key, placeholder, comment string
+	commented                 bool
+}
+
 // envTemplate is what `amf init` writes to .env, in order.
-var envTemplate = []struct{ key, placeholder, comment string }{
-	{"GITHUB_TOKEN", "github_pat_...", "Contents, Issues, Pull requests: read & write"},
-	{"GITHUB_REPO", "owner/name", ""},
-	{"CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-...", "optional: Claude subscription token from `claude setup-token`"},
-	{"AMF_TRUSTED", "login1,login2...", "optional: only work on issues opened by these GitHub users"},
+var envTemplate = []envVar{
+	{"GITHUB_TOKEN", "github_pat_...", "Contents, Issues, Pull requests: read & write", false},
+	{"GITHUB_REPO", "owner/name", "", false},
+	{"CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-...", "optional: Claude subscription token from `claude setup-token`", false},
+	{"ANTHROPIC_API_KEY", "sk-ant-api03-...", "optional: Claude API key, used if there's no token above", false},
+	{"OPENAI_API_KEY", "sk-proj-...", "optional: OpenAI API key for codex", false},
+	{"OPENCODE_MODEL", defaultOpencodeModel, "Use 'opencode models' to list all the models", true},
+	{"AMF_TRUSTED", "login1,login2...", "optional: only work on issues opened by these GitHub users", false},
 }
 
 // isPlaceholder reports whether v is an unfilled value from the template.
@@ -61,11 +72,16 @@ func cmdInit(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	var todo []string
 	for _, t := range envTemplate {
 		val := old[t.key]
-		if val == "" || isPlaceholder(val) {
+		prefix := ""
+		switch {
+		case val != "" && !isPlaceholder(val):
+		case t.commented:
+			val, prefix = t.placeholder, "# "
+		default:
 			val = t.placeholder
 			todo = append(todo, t.key)
 		}
-		line := t.key + "=" + quoteEnv(val)
+		line := prefix + t.key + "=" + quoteEnv(val)
 		if t.comment != "" {
 			line += "   # " + t.comment
 		}
@@ -73,7 +89,7 @@ func cmdInit(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	}
 	var extra []string
 	for _, k := range oldKeys {
-		if !slices.ContainsFunc(envTemplate, func(t struct{ key, placeholder, comment string }) bool { return t.key == k }) {
+		if !slices.ContainsFunc(envTemplate, func(t envVar) bool { return t.key == k }) {
 			extra = append(extra, k+"="+quoteEnv(old[k]))
 		}
 	}
@@ -112,8 +128,9 @@ func cmdInit(ctx context.Context, args []string, stdout, stderr io.Writer) error
 
 	if len(todo) > 0 {
 		fmt.Fprintf(stdout, "Next: edit %s and fill in %s.\n", path, strings.Join(todo, ", "))
-		if slices.Contains(todo, "CLAUDE_CODE_OAUTH_TOKEN") {
-			fmt.Fprintln(stdout, "CLAUDE_CODE_OAUTH_TOKEN is optional; leave the placeholder to use your existing Claude login.")
+		if slices.Contains(todo, "CLAUDE_CODE_OAUTH_TOKEN") || slices.Contains(todo, "OPENAI_API_KEY") {
+			fmt.Fprintln(stdout, "The agent keys are optional, but amf only picks claude with CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY,"+
+				" and codex with OPENAI_API_KEY; otherwise it uses opencode. --agent runs any of them with its own login.")
 		}
 		if slices.Contains(todo, "AMF_TRUSTED") {
 			fmt.Fprintln(stdout, "AMF_TRUSTED is optional, but recommended: with the placeholder, amf works on issues opened by anyone.")

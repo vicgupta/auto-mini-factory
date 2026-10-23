@@ -475,9 +475,14 @@ func (r *Runner) runReadOnly(ctx context.Context, s *Stage, n int, name, wt, pro
 }
 
 func (r *Runner) runStage(ctx context.Context, s *Stage, n int, name, wt, prompt string) (string, error) {
-	r.logf("#%d: %s: running %s (%s, timeout %s)", n, name, s.Agent, s.model(), r.Timeout)
+	model := r.agentModel(s.Agent, s.Model)
+	shown := model
+	if shown == "" {
+		shown = "default model"
+	}
+	r.logf("#%d: %s: running %s (%s, timeout %s)", n, name, s.Agent, shown, r.Timeout)
 	log := filepath.Join(r.Root, ".amf", "logs", fmt.Sprintf("issue-%d-%s.log", n, name))
-	return r.runAgent(ctx, s.Agent, s.Model, wt, prompt, log, filepath.Join(wt, ".amf", name+".md"))
+	return r.runAgent(ctx, s.Agent, model, wt, prompt, log, filepath.Join(wt, ".amf", name+".md"))
 }
 
 // commitRound commits a code round and fails if the branch still doesn't
@@ -604,6 +609,9 @@ func (r *Runner) agentEnv(env []string, agent, wt string) []string {
 		env = r.claudeEnv(env)
 	} else {
 		env = withoutEnv(env, "GITHUB_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "OPENCODE_CONFIG")
+	}
+	if agent == agentCodex && r.OpenAIKey != "" {
+		env = append(withoutEnv(env, "OPENAI_API_KEY"), "OPENAI_API_KEY="+r.OpenAIKey)
 	}
 	return append(withoutEnv(env, "PWD"), "PWD="+wt)
 }

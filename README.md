@@ -32,8 +32,8 @@ go install github.com/vicgupta/auto-mini-factory/cmd/amf@latest
 
 Needs `git` and at least one coding agent on `PATH`:
 [`claude`](https://claude.com/claude-code), [`codex`](https://github.com/openai/codex)
-or [`opencode`](https://opencode.ai). amf uses the first of those it finds, in
-that order, unless you pick one with `--agent`.
+or [`opencode`](https://opencode.ai). See [Choosing the agent](#choosing-the-agent)
+for which one amf runs.
 
 To update later:
 
@@ -61,11 +61,16 @@ This writes `.env` with every variable amf uses:
 GITHUB_TOKEN=github_pat_...   # Contents, Issues, Pull requests: read & write
 GITHUB_REPO=owner/name
 CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...   # optional: Claude subscription token from `claude setup-token`
+ANTHROPIC_API_KEY=sk-ant-api03-...   # optional: Claude API key, used if there's no token above
+OPENAI_API_KEY=sk-proj-...   # optional: OpenAI API key for codex
+# OPENCODE_MODEL=opencode/big-pickle   # Use 'opencode models' to list all the models
 AMF_TRUSTED=login1,login2...   # optional: only work on issues opened by these GitHub users
 ```
 
 Edit it and replace the placeholders. Placeholders ending in `...` count as
-unset, so you can leave the optional `CLAUDE_CODE_OAUTH_TOKEN` as it is.
+unset, so you can leave the optional ones as they are. The agent keys decide
+which agent amf runs (see below). To run opencode with another model,
+uncomment `OPENCODE_MODEL` and set it to one that `opencode models` lists.
 
 - **Backups:** if `.env` already exists, `amf init` first copies it to the next
   free `.env.0001`, `.env.0002`, and so on, then keeps its real values in the
@@ -110,11 +115,13 @@ ok    trusted       only issues opened by @vicgupta
 ok    checkout      /tmp/amf/factory-demo-app, the clone run and watch use here
 ok    git push      your git credentials can push to origin (checked with --dry-run)
 ok    git identity  commits as Vic Gupta <vicgupta@gmail.com>
-ok    pipeline      none in AGENTS.md on origin/main; amf runs claude once per issue
-ok    claudecode    /Users/vic/.local/bin/claude, 2.1.302 (Claude Code); runs issues without a pipeline
-warn  codex         codex is not installed; amf runs claude instead, unless --agent or a pipeline names codex
-ok    opencode      /Users/vic/.opencode/bin/opencode, opencode v2.0.32
-ok    claude login  CLAUDE_CODE_OAUTH_TOKEN is not set; claude uses its own login
+ok    pipeline        none in AGENTS.md on origin/main; amf runs claude once per issue
+ok    claudecode      /Users/vic/.local/bin/claude, 2.1.309 (Claude Code); runs issues without a pipeline
+warn  codex           codex is not installed; amf runs claude instead, unless --agent or a pipeline names codex
+ok    opencode        /Users/vic/.opencode/bin/opencode, opencode v2.1.3
+ok    claude login    CLAUDE_CODE_OAUTH_TOKEN is set, from /tmp/amf/.env; claude runs with it
+ok    codex login     OPENAI_API_KEY is not set; codex uses its own login, and amf runs it only for a pipeline or --agent codex
+ok    opencode model  opencode/deepseek-v4.1-flash-free; opencode lists it
 ```
 
 Each line is `ok`, `warn` (works, but worth knowing), `FAIL`, or `skip` (an
@@ -146,14 +153,35 @@ amf watch --agent codex     # ...with Codex, even if Claude Code is installed
 
 ### Choosing the agent
 
-Without a pipeline, each issue gets one agent run. By default amf uses the
-first installed of `claude`, `codex` and `opencode`, so a machine with only
-Codex just works. To pick one, pass `--agent claudecode` (or `claude`),
-`--agent codex` or `--agent opencode` to `amf run` or `amf watch`. A named
-agent must be installed; amf won't quietly fall back to another. If no agent
-is installed, amf leaves the issue on `amf:ready` and `watch` tries again on
-its next poll. `amf doctor` shows which agent amf would use. A repo with a
-pipeline ignores `--agent`, because the pipeline names each stage's agent.
+Without a pipeline, each issue gets one agent run. Unless you name one, amf
+uses the first of these that's ready:
+
+| Agent | Ready when |
+|---|---|
+| `claude` | installed, and `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` is set |
+| `codex` | installed, and `OPENAI_API_KEY` is set |
+| `opencode` | installed; runs with `OPENCODE_MODEL` (default `opencode/big-pickle`) |
+
+Keys can be in `.env` or the environment. An installed agent without its key
+is skipped, even if you're logged in to it. `amf watch` prints what it found
+for each agent when it starts:
+
+```
+amf: agents for issues without a pipeline (claude and codex need a key):
+amf:   claude   installed at /Users/vic/.local/bin/claude; CLAUDE_CODE_OAUTH_TOKEN is set: usable
+amf:   codex    installed at /Users/vic/.local/bin/codex; OPENAI_API_KEY not set: skipped
+amf:   opencode installed at /Users/vic/.opencode/bin/opencode; needs no key, model opencode/big-pickle: usable
+amf: issues without a pipeline run claude
+```
+
+To pick one yourself, pass `--agent claudecode` (or `claude`), `--agent codex`
+or `--agent opencode` to `amf run` or `amf watch`. A named agent must be
+installed but needs no key, so `--agent claudecode` runs Claude on its own
+login. amf never quietly falls back from a named agent to another. If no agent
+is ready, amf leaves the issue on `amf:ready` and `watch` tries again on its
+next poll. `amf doctor` shows which agent amf would use, and warns if
+`OPENCODE_MODEL` isn't one opencode lists. A repo with a pipeline ignores
+`--agent`, because the pipeline names each stage's agent.
 
 ### What `amf run N` does
 

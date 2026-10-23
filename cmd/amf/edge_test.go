@@ -391,6 +391,7 @@ func TestPipelineCommandEdgeCases(t *testing.T) {
 
 	os.WriteFile(agents, []byte("# Agents\n\nNo pipeline.\n"), 0o644)
 	t.Setenv("AMF_CLAUDE", fakeAgent(t, "claude", "exit 0"))
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
 	if err := run(ctx, []string{"pipeline"}, nil, &out, io.Discard); err != nil || !strings.Contains(out.String(), "No ## amf table") {
 		t.Fatalf("no table: %v, %q", err, out.String())
 	}
@@ -1262,9 +1263,10 @@ func TestWatchDoesntRetryUntrustedIssues(t *testing.T) {
 const fakeDefaultCodex = `
 case "$*" in "exec --dangerously-bypass-approvals-and-sandbox -o "*"/.amf/code.md -") ;; *) echo "bad args: $*" >&2; exit 5;; esac
 if [ -n "$GITHUB_TOKEN$CLAUDE_CODE_OAUTH_TOKEN" ]; then echo "token leaked" >&2; exit 3; fi
+[ -z "$OPENAI_API_KEY" ] || [ "$OPENAI_API_KEY" = sk-openai-test ] || { echo "wrong OPENAI_API_KEY" >&2; exit 6; }
 case "$(cat)" in *"Add feature file"*) ;; *) echo "bad prompt" >&2; exit 4;; esac
 echo hello > feature.txt
-echo "Added feature.txt with codex." > "$4"
+echo "Added feature.txt with codex (key: ${OPENAI_API_KEY:-none})." > "$4"
 `
 
 // fakeDefaultOpencode is opencode run without a pipeline, writing its final
@@ -1277,40 +1279,40 @@ echo "Added feature.txt with opencode." > "$out"
 `
 
 func TestDefaultAgentFallsBack(t *testing.T) {
-	missing := func(t *testing.T, name string) string { return filepath.Join(t.TempDir(), "no-"+name) }
+	missing := func(name string) func(t *testing.T) string {
+		return func(t *testing.T) string { return filepath.Join(t.TempDir(), "no-"+name) }
+	}
+	mustNotRun := func(name string) func(t *testing.T) string {
+		return func(t *testing.T) string { return fakeAgent(t, name, "echo "+name+" must not run >&2; exit 9") }
+	}
+	claude := func(t *testing.T) string {
+		return fakeAgent(t, "claude", `cat >/dev/null; echo hello > feature.txt; echo '{"type":"result","subtype":"success","is_error":false,"result":"Added feature.txt with claude (key: '"$ANTHROPIC_API_KEY"')."}'`)
+	}
+	codex := func(t *testing.T) string { return fakeAgent(t, "codex", fakeDefaultCodex) }
+	opencode := func(t *testing.T) string { return fakeAgent(t, "opencode", fakeDefaultOpencode) }
 	for _, tc := range []struct {
 		name                    string
 		claude, codex, opencode func(t *testing.T) string
+		anthropicKey, openAIKey string
 		agent                   string // --agent
 		want                    string // in the PR body
 	}{
-		{"claude when installed",
-			func(t *testing.T) string {
-				return fakeAgent(t, "claude", `cat >/dev/null; echo hello > feature.txt; echo '{"type":"result","subtype":"success","is_error":false,"result":"Added feature.txt with claude."}'`)
-			},
-			func(t *testing.T) string { return fakeAgent(t, "codex", "echo codex must not run >&2; exit 9") },
-			func(t *testing.T) string { return fakeAgent(t, "opencode", "echo opencode must not run >&2; exit 9") },
-			"", "with claude."},
-		{"codex without claude",
-			func(t *testing.T) string { return missing(t, "claude") },
-			func(t *testing.T) string { return fakeAgent(t, "codex", fakeDefaultCodex) },
-			func(t *testing.T) string { return fakeAgent(t, "opencode", "echo opencode must not run >&2; exit 9") },
-			"", "with codex."},
-		{"opencode without claude or codex",
-			func(t *testing.T) string { return missing(t, "claude") },
-			func(t *testing.T) string { return missing(t, "codex") },
-			func(t *testing.T) string { return fakeAgent(t, "opencode", fakeDefaultOpencode) },
-			"", "with opencode."},
-		{"--agent codex over an installed claude",
-			func(t *testing.T) string { return fakeAgent(t, "claude", "echo claude must not run >&2; exit 9") },
-			func(t *testing.T) string { return fakeAgent(t, "codex", fakeDefaultCodex) },
-			func(t *testing.T) string { return missing(t, "opencode") },
-			agentCodex, "with codex."},
-		{"--agent opencode",
-			func(t *testing.T) string { return fakeAgent(t, "claude", "echo claude must not run >&2; exit 9") },
-			func(t *testing.T) string { return fakeAgent(t, "codex", "echo codex must not run >&2; exit 9") },
-			func(t *testing.T) string { return fakeAgent(t, "opencode", fakeDefaultOpencode) },
-			agentOpencode, "with opencode."},
+		{"claude, installed with a key", claude, mustNotRun("codex"), mustNotRun("opencode"),
+			"sk-ant-test", "sk-openai-test", "", "with claude (key: sk-ant-test)."},
+		{"codex when claude has no key", mustNotRun("claude"), codex, mustNotRun("opencode"),
+			"", "sk-openai-test", "", "with codex (key: sk-openai-test)."},
+		{"codex when claude isn't installed", missing("claude"), codex, mustNotRun("opencode"),
+			"sk-ant-test", "sk-openai-test", "", "with codex (key: sk-openai-test)."},
+		{"opencode when claude and codex have no key", mustNotRun("claude"), mustNotRun("codex"), opencode,
+			"", "", "", "with opencode."},
+		{"opencode when neither is installed", missing("claude"), missing("codex"), opencode,
+			"sk-ant-test", "sk-openai-test", "", "with opencode."},
+		{"--agent codex over a keyed claude, without a key of its own", mustNotRun("claude"), codex, missing("opencode"),
+			"sk-ant-test", "", agentCodex, "with codex (key: none)."},
+		{"--agent claudecode without a key", claude, mustNotRun("codex"), mustNotRun("opencode"),
+			"", "", agentClaude, "with claude (key: )."},
+		{"--agent opencode", mustNotRun("claude"), mustNotRun("codex"), opencode,
+			"sk-ant-test", "sk-openai-test", agentOpencode, "with opencode."},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root, _ := setupRepo(t)
@@ -1319,6 +1321,7 @@ func TestDefaultAgentFallsBack(t *testing.T) {
 			t.Setenv("GITHUB_TOKEN", "must-not-leak")
 			r, log := newTestRunner(t, srv, root, tc.claude(t))
 			r.Codex, r.Opencode, r.Agent = tc.codex(t), tc.opencode(t), tc.agent
+			r.AnthropicKey, r.OpenAIKey = tc.anthropicKey, tc.openAIKey
 			if err := r.Run(context.Background(), 1); err != nil {
 				t.Fatalf("Run: %v\nlog:\n%s", err, log)
 			}
@@ -1332,6 +1335,63 @@ func TestDefaultAgentFallsBack(t *testing.T) {
 	}
 }
 
+func TestWatchShowsAgents(t *testing.T) {
+	root, _ := setupRepo(t)
+	_, srv := newFakeGitHub(t)
+	r, log := newTestRunner(t, srv, root, fakeAgent(t, "claude", "exit 0"))
+	r.AnthropicKey, r.ClaudeToken = "", "sk-ant-oat-test"
+	r.Codex = fakeAgent(t, "codex", "exit 0")
+	r.Opencode = filepath.Join(t.TempDir(), "no-opencode")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // print the startup lines, then stop
+	if err := r.Watch(ctx, labelReady, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"amf: agents for issues without a pipeline (claude and codex need a key):",
+		"claude   installed at " + r.Claude + "; CLAUDE_CODE_OAUTH_TOKEN is set: usable",
+		"codex    installed at " + r.Codex + "; OPENAI_API_KEY not set: skipped",
+		"opencode not installed; needs no key: skipped",
+		"amf: issues without a pipeline run claude\n",
+	} {
+		if !strings.Contains(log.String(), want) {
+			t.Errorf("log missing %q:\n%s", want, log)
+		}
+	}
+
+	// Without claude's token it falls through codex (no key) to nothing.
+	log.Reset()
+	r.ClaudeToken = ""
+	if err := r.Watch(ctx, labelReady, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"claude   installed at " + r.Claude + "; ANTHROPIC_API_KEY and CLAUDE_CODE_OAUTH_TOKEN not set: skipped",
+		"warning: no coding agent is available (claude has no ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN; codex has no OPENAI_API_KEY; ",
+	} {
+		if !strings.Contains(log.String(), want) {
+			t.Errorf("log missing %q:\n%s", want, log)
+		}
+	}
+}
+
+func TestAgentKeysReachAgents(t *testing.T) {
+	r := &Runner{AnthropicKey: "sk-ant-file", OpenAIKey: "sk-openai-file"}
+	env := []string{"PATH=/bin", "ANTHROPIC_API_KEY=from-env", "OPENAI_API_KEY=from-env"}
+	has := func(env []string, kv string) bool { return slices.Contains(env, kv) }
+	if c := r.agentEnv(slices.Clone(env), agentClaude, "/wt"); !has(c, "ANTHROPIC_API_KEY=sk-ant-file") || has(c, "ANTHROPIC_API_KEY=from-env") {
+		t.Errorf("claude env = %v", c)
+	}
+	if c := r.agentEnv(slices.Clone(env), agentCodex, "/wt"); !has(c, "OPENAI_API_KEY=sk-openai-file") || has(c, "OPENAI_API_KEY=from-env") {
+		t.Errorf("codex env = %v", c)
+	}
+	// The subscription token wins over an API key for claude.
+	r.ClaudeToken = "sk-ant-oat"
+	if c := r.agentEnv(slices.Clone(env), agentClaude, "/wt"); !has(c, "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat") || slices.ContainsFunc(c, func(kv string) bool { return strings.HasPrefix(kv, "ANTHROPIC_API_KEY=") }) {
+		t.Errorf("claude env with a token = %v", c)
+	}
+}
+
 func TestNoAgentInstalledLeavesIssueAlone(t *testing.T) {
 	root, _ := setupRepo(t)
 	gh, srv := newFakeGitHub(t)
@@ -1341,8 +1401,8 @@ func TestNoAgentInstalledLeavesIssueAlone(t *testing.T) {
 	r.Opencode = filepath.Join(t.TempDir(), "no-opencode")
 
 	err := r.Run(context.Background(), 1)
-	if err == nil || !strings.Contains(err.Error(), "no coding agent is installed (tried ") ||
-		!strings.Contains(err.Error(), "no-claude, ") || !strings.Contains(err.Error(), "no-opencode)") {
+	if err == nil || !strings.Contains(err.Error(), "no coding agent is available (") ||
+		!strings.Contains(err.Error(), "no-claude is not installed; ") || !strings.Contains(err.Error(), "no-opencode is not installed)") {
 		t.Fatalf("error = %v", err)
 	}
 	// Found before Claim: the issue keeps amf:ready, so watch tries again later.
@@ -1438,6 +1498,145 @@ func TestListIssuesOrdersByNumber(t *testing.T) {
 		}
 		if !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("asc=%v: got %v, want %v", tc.asc, got, tc.want)
+		}
+	}
+}
+
+// --- OPENCODE_MODEL ---
+
+func TestOpencodeModel(t *testing.T) {
+	t.Setenv("OPENCODE_MODEL", "")
+	cfg, err := loadConfig(writeEnv(t, "GITHUB_TOKEN=t\nGITHUB_REPO=vic/demo\n"))
+	if err != nil || cfg.OpencodeModel != "opencode/big-pickle" {
+		t.Fatalf("default OpencodeModel = %q, %v", cfg.OpencodeModel, err)
+	}
+	cfg, _ = loadConfig(writeEnv(t, "GITHUB_TOKEN=t\nGITHUB_REPO=vic/demo\n# OPENCODE_MODEL=opencode/other\n"))
+	if cfg.OpencodeModel != "opencode/big-pickle" {
+		t.Errorf("a commented-out OPENCODE_MODEL should leave the default, got %q", cfg.OpencodeModel)
+	}
+	cfg, _ = loadConfig(writeEnv(t, "GITHUB_TOKEN=t\nGITHUB_REPO=vic/demo\nOPENCODE_MODEL=opencode/from-file\n"))
+	if cfg.OpencodeModel != "opencode/from-file" {
+		t.Errorf("OpencodeModel = %q", cfg.OpencodeModel)
+	}
+
+	// Without a pipeline, opencode always gets the model.
+	root, _ := setupRepo(t)
+	gh, srv := newFakeGitHub(t)
+	gh.issues[1] = readyIssue(1, "Add feature file")
+	r, log := newTestRunner(t, srv, root, filepath.Join(t.TempDir(), "no-claude"))
+	r.OpencodeModel = "opencode/test-model"
+	r.Opencode = fakeAgent(t, "opencode", `
+[ "$*" = "run --model opencode/test-model" ] || { echo "bad args: $*" >&2; exit 5; }
+out=$(cat | sed -n 's/.*final reply, exactly as you give it, to the file \(.*\)\.$/\1/p')
+echo hello > feature.txt
+echo "Added with the model." > "$out"
+`)
+	if err := r.Run(context.Background(), 1); err != nil {
+		t.Fatalf("Run: %v\nlog:\n%s", err, log)
+	}
+	if !strings.Contains(log.String(), "#1: running opencode (opencode/test-model, timeout ") {
+		t.Errorf("log = %s", log)
+	}
+}
+
+func TestOpencodeModelInPipeline(t *testing.T) {
+	// A stage that names no model gets OPENCODE_MODEL; one that names a model keeps it.
+	root, _ := setupPipelineRepo(t, "## amf\n\n| Stage | Agent | Model |\n|---|---|---|\n| code | opencode | default |\n| eval | opencode | opencode/eval-model |\n")
+	gh, srv := newFakeGitHub(t)
+	gh.issues[1] = readyIssue(1, "Add feature file")
+	r, log := newTestRunner(t, srv, root, filepath.Join(t.TempDir(), "no-claude"))
+	r.OpencodeModel = "opencode/env-model"
+	r.Opencode = fakeAgent(t, "opencode", `
+prompt=$(cat)
+out=$(printf '%s\n' "$prompt" | sed -n 's/.*final reply, exactly as you give it, to the file \(.*\)\.$/\1/p')
+case "$prompt" in
+*"VERDICT: PASS"*) [ "$*" = "run --model opencode/eval-model" ] || { echo "eval args: $*" >&2; exit 5; }; printf 'ok\n\nVERDICT: PASS\n' > "$out" ;;
+*) [ "$*" = "run --model opencode/env-model" ] || { echo "code args: $*" >&2; exit 5; }; echo hello > feature.txt; echo "Coded." > "$out" ;;
+esac
+`)
+	if err := r.Run(context.Background(), 1); err != nil {
+		t.Fatalf("Run: %v\nlog:\n%s", err, log)
+	}
+	for _, want := range []string{"code-1: running opencode (opencode/env-model,", "eval-1: running opencode (opencode/eval-model,"} {
+		if !strings.Contains(log.String(), want) {
+			t.Errorf("log missing %q:\n%s", want, log)
+		}
+	}
+}
+
+func TestInitOpencodeModelLine(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("OPENCODE_MODEL", "")
+	var out bytes.Buffer
+	if err := run(context.Background(), []string{"init"}, nil, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	env := mustRead(t, ".env")
+	if !strings.Contains(env, "\n# OPENCODE_MODEL=opencode/big-pickle   # Use 'opencode models' to list all the models\n") {
+		t.Fatalf(".env:\n%s", env)
+	}
+	if strings.Contains(out.String(), "fill in") && strings.Contains(out.String(), "OPENCODE_MODEL") {
+		t.Errorf("OPENCODE_MODEL is optional, not something to fill in:\n%s", out.String())
+	}
+	// Re-running changes nothing, and a real value is kept, uncommented.
+	out.Reset()
+	run(context.Background(), []string{"init"}, nil, &out, io.Discard)
+	if !strings.Contains(out.String(), ".env is up to date") {
+		t.Errorf("second init:\n%s", out.String())
+	}
+	os.WriteFile(".env", []byte(strings.Replace(env, "# OPENCODE_MODEL=opencode/big-pickle", "OPENCODE_MODEL=opencode/mine", 1)), 0o600)
+	run(context.Background(), []string{"init"}, nil, io.Discard, io.Discard)
+	if env := mustRead(t, ".env"); !strings.Contains(env, "\nOPENCODE_MODEL=opencode/mine   # Use 'opencode models'") || strings.Contains(env, "Kept from the previous") {
+		t.Errorf(".env after a real value:\n%s", env)
+	}
+}
+
+func TestDoctorOpencodeModel(t *testing.T) {
+	withGitUser(t)
+	t.Chdir(t.TempDir())
+	t.Setenv("AMF_RELEASES_URL", "http://127.0.0.1:1")
+	t.Setenv("AMF_OPENCODE", fakeAgent(t, "opencode", `case "$1" in models) printf 'opencode/a\nopencode/listed\n' ;; *) echo "opencode v2" ;; esac`))
+	for model, want := range map[string]string{
+		"opencode/listed": `ok +opencode model +opencode/listed; opencode lists it$`,
+		"":                `warn +opencode model +opencode/big-pickle \(the default\) isn't in .opencode models., so opencode runs would fail`,
+	} {
+		t.Setenv("OPENCODE_MODEL", model)
+		out, _ := doctorOutput(t)
+		wantLines(t, out, want)
+	}
+}
+
+func TestWatchShowsOpencodeModel(t *testing.T) {
+	r := &Runner{Opencode: fakeAgent(t, "opencode", "exit 0"), OpencodeModel: "opencode/m"}
+	sts := r.agentStatuses()
+	if len(sts) != 1 || !strings.HasSuffix(sts[0].describe(), "; needs no key, model opencode/m: usable") {
+		t.Fatalf("statuses = %+v", sts)
+	}
+}
+
+// writeEnv writes a .env with body in a temp dir and returns its path.
+func writeEnv(t *testing.T, body string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), ".env")
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestPipelineCommandShowsOpencodeModel(t *testing.T) {
+	root, _ := setupRepo(t)
+	t.Chdir(root)
+	os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte("## amf\n\n| Stage | Agent | Model |\n|---|---|---|\n| code | opencode | |\n| eval | opencode | opencode/named |\n"), 0o644)
+	t.Setenv("AMF_OPENCODE", fakeAgent(t, "opencode", "exit 0"))
+	t.Setenv("OPENCODE_MODEL", "opencode/env-model")
+	var out bytes.Buffer
+	if err := run(context.Background(), []string{"pipeline"}, nil, &out, io.Discard); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	for _, want := range []string{"code   opencode  opencode/env-model (OPENCODE_MODEL)", "eval   opencode  opencode/named "} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output missing %q:\n%s", want, out.String())
 		}
 	}
 }

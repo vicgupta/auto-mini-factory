@@ -159,9 +159,11 @@ func (d *doctor) check(ctx context.Context) {
 	}
 
 	// The pipeline, its skills, and the agents. Without a pipeline, amf runs
-	// the first installed agent (unless run or watch get --agent).
-	fallback, fallbackErr := (&Runner{Claude: cfg.Claude, Codex: cfg.Codex, Opencode: cfg.Opencode}).defaultAgent()
-	runs := "no agent (none is installed)"
+	// the first usable agent, as defaultAgent picks it (unless run or watch
+	// get --agent).
+	agents := &Runner{Claude: cfg.Claude, Codex: cfg.Codex, Opencode: cfg.Opencode, ClaudeToken: cfg.ClaudeToken, AnthropicKey: cfg.AnthropicKey, OpenAIKey: cfg.OpenAIKey}
+	fallback, fallbackErr := agents.defaultAgent()
+	runs := "no agent (none is available)"
 	if fallbackErr == nil {
 		runs = agentName(fallback)
 	}
@@ -211,6 +213,12 @@ func (d *doctor) check(ctx context.Context) {
 		}
 		path, err := exec.LookPath(bin)
 		switch {
+		case p == nil && fallbackErr != nil && agent == agentClaude:
+			// One problem, reported once: amf has no agent it can pick.
+			d.line("FAIL", agent, "%v", fallbackErr)
+		case err == nil && p == nil && !keyed(agents, agent):
+			d.line("warn", agent, "%s, %s; amf picks it only with %s, so it runs %s instead (--agent %s runs it with its own login)",
+				path, agentVersion(ctx, path), strings.Join(agentKeys[agent], " or "), runs, agent)
 		case err == nil && p == nil && agent == fallback:
 			d.line("ok", agent, "%s, %s; runs issues without a pipeline", path, agentVersion(ctx, path))
 		case err == nil:
@@ -218,9 +226,6 @@ func (d *doctor) check(ctx context.Context) {
 		case len(users) > 0:
 			n := len(users)
 			d.line("FAIL", agent, "%s is not installed, and the pipeline's %s %s %s it", bin, strings.Join(users, " and "), plural(n, "stage", "stages"), plural(n, "uses", "use"))
-		case p == nil && fallbackErr != nil && agent == agentOrder[0]:
-			// One problem, reported once: there is no agent at all.
-			d.line("FAIL", agent, "%s is not installed, and neither is any other agent; amf needs one of claude, codex or opencode", bin)
 		case p == nil && fallbackErr != nil:
 			d.line("warn", agent, "%s is not installed either", bin)
 		case p == nil && !pipelineKnown:
@@ -231,11 +236,50 @@ func (d *doctor) check(ctx context.Context) {
 			d.line("warn", agent, "%s is not installed; only needed by pipelines that use %s", bin, agent)
 		}
 	}
-	if cfg.ClaudeToken != "" {
+	switch {
+	case cfg.ClaudeToken != "":
 		d.line("ok", "claude login", "CLAUDE_CODE_OAUTH_TOKEN is set, from %s; claude runs with it", source("CLAUDE_CODE_OAUTH_TOKEN", envFile))
-	} else {
-		d.line("ok", "claude login", "CLAUDE_CODE_OAUTH_TOKEN is not set; claude uses its own login")
+	case cfg.AnthropicKey != "":
+		d.line("ok", "claude login", "ANTHROPIC_API_KEY is set, from %s; claude runs with it", source("ANTHROPIC_API_KEY", envFile))
+	default:
+		d.line("ok", "claude login", "neither CLAUDE_CODE_OAUTH_TOKEN nor ANTHROPIC_API_KEY is set; claude uses its own login, and amf runs it only for a pipeline or --agent claudecode")
 	}
+	if cfg.OpenAIKey != "" {
+		d.line("ok", "codex login", "OPENAI_API_KEY is set, from %s; codex runs with it", source("OPENAI_API_KEY", envFile))
+	} else {
+		d.line("ok", "codex login", "OPENAI_API_KEY is not set; codex uses its own login, and amf runs it only for a pipeline or --agent codex")
+	}
+	d.checkOpencodeModel(ctx, cfg)
+}
+
+// checkOpencodeModel checks that OPENCODE_MODEL is one opencode lists, since
+// a model opencode doesn't know fails every opencode run.
+func (d *doctor) checkOpencodeModel(ctx context.Context, cfg Config) {
+	which := ""
+	if cfg.OpencodeModel == defaultOpencodeModel {
+		which = " (the default)"
+	}
+	path, err := exec.LookPath(cfg.Opencode)
+	if err != nil {
+		d.line("skip", "opencode model", "%s%s; opencode is not installed", cfg.OpencodeModel, which)
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, path, "models")
+	cmd.WaitDelay = time.Second
+	out, err := cmd.Output()
+	if err != nil {
+		d.line("warn", "opencode model", "%s%s; couldn't check it: opencode models failed (%v)", cfg.OpencodeModel, which, err)
+		return
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.TrimSpace(line) == cfg.OpencodeModel {
+			d.line("ok", "opencode model", "%s%s; opencode lists it", cfg.OpencodeModel, which)
+			return
+		}
+	}
+	d.line("warn", "opencode model", "%s%s isn't in `opencode models`, so opencode runs would fail; set OPENCODE_MODEL to one it lists", cfg.OpencodeModel, which)
 }
 
 func (d *doctor) checkVersion(ctx context.Context) {
@@ -382,4 +426,10 @@ func source(key, envFile string) string {
 		return "the environment"
 	}
 	return envFile
+}
+
+// keyed reports whether agent has a key amf can see, or needs none.
+func keyed(r *Runner, agent string) bool {
+	_, ok := r.agentKey(agent)
+	return ok
 }

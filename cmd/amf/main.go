@@ -50,6 +50,9 @@ Configuration is read from .env (or the environment):
   GITHUB_TOKEN   token with contents, issues and pull-requests write access
   GITHUB_REPO    owner/name
   CLAUDE_CODE_OAUTH_TOKEN  optional subscription token for Claude Code (claude setup-token)
+  ANTHROPIC_API_KEY        optional Claude API key; with it or the token above, amf picks claude
+  OPENAI_API_KEY           optional OpenAI API key; with it, amf picks codex when claude can't run
+  OPENCODE_MODEL           model for opencode (default opencode/big-pickle); see opencode models
   AMF_CLAUDE     path to the claude binary (default "claude")
   AMF_CODEX      path to the codex binary (default "codex")
   AMF_OPENCODE   path to the opencode binary (default "opencode")
@@ -61,8 +64,9 @@ run and watch work in the enclosing git checkout. Started anywhere else, they
 clone GITHUB_REPO into ./<name> (or reuse that clone) and work there.
 
 Without a pipeline, each issue gets one agent run: the agent --agent names
-(claudecode, codex or opencode), or else the first installed of claude, codex
-and opencode, in that order.
+(claudecode, codex or opencode), or else claude if it's installed and has
+ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN, else codex if it's installed and
+has OPENAI_API_KEY, else opencode. amf watch shows what it found for each.
 
 A repo can declare a pipeline in its AGENTS.md: a table under "## amf" with a
 plan, code and eval stage, each naming a skill URL, an agent (claudecode,
@@ -220,7 +224,7 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 }
 
 // agentFlagHelp describes --agent for run and watch.
-const agentFlagHelp = "agent for issues without a pipeline: claudecode, codex or opencode (default: the first installed, in that order)"
+const agentFlagHelp = "agent for issues without a pipeline: claudecode, codex or opencode (default: claude if installed with ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN, else codex if installed with OPENAI_API_KEY, else opencode)"
 
 func newRunner(ctx context.Context, timeout time.Duration, evalRounds int, agentFlag string, log io.Writer) (*Runner, error) {
 	if timeout <= 0 {
@@ -238,7 +242,7 @@ func newRunner(ctx context.Context, timeout time.Duration, evalRounds int, agent
 		return nil, err
 	}
 	// A named agent must be there; the fallback order only applies without --agent.
-	agents := &Runner{Claude: cfg.Claude, Codex: cfg.Codex, Opencode: cfg.Opencode, Agent: agent}
+	agents := &Runner{Claude: cfg.Claude, Codex: cfg.Codex, Opencode: cfg.Opencode, Agent: agent} // --agent needs no key
 	if agent != "" {
 		if _, err := agents.defaultAgent(); err != nil {
 			return nil, err
@@ -261,18 +265,21 @@ func newRunner(ctx context.Context, timeout time.Duration, evalRounds int, agent
 		return nil, err
 	}
 	return &Runner{
-		GH:          gh,
-		Repo:        cfg.Repo,
-		Root:        root,
-		Claude:      cfg.Claude,
-		Codex:       cfg.Codex,
-		Opencode:    cfg.Opencode,
-		Agent:       agent,
-		ClaudeToken: cfg.ClaudeToken,
-		Trusted:     cfg.Trusted,
-		Timeout:     timeout,
-		EvalRounds:  evalRounds,
-		Log:         log,
+		GH:            gh,
+		Repo:          cfg.Repo,
+		Root:          root,
+		Claude:        cfg.Claude,
+		Codex:         cfg.Codex,
+		Opencode:      cfg.Opencode,
+		Agent:         agent,
+		ClaudeToken:   cfg.ClaudeToken,
+		AnthropicKey:  cfg.AnthropicKey,
+		OpenAIKey:     cfg.OpenAIKey,
+		OpencodeModel: cfg.OpencodeModel,
+		Trusted:       cfg.Trusted,
+		Timeout:       timeout,
+		EvalRounds:    evalRounds,
+		Log:           log,
 	}, nil
 }
 
