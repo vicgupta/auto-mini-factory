@@ -520,7 +520,7 @@ func commitRound(ctx context.Context, wt string, k int, base string, s *Stage) e
 	if changed == "" {
 		return fmt.Errorf("the code stage (%s) finished without making any changes", s.Agent)
 	}
-	return nil
+	return pathRefusal(changed)
 }
 
 // runAgent runs a coding agent headless in wt and returns its final message.
@@ -732,6 +732,7 @@ func codePrompt(repo, branch string, issue Issue, s *Stage, plan, review string)
 Instructions:
 - Make the smallest complete change that resolves the issue, following the existing code style.
 - Find and run the project's tests, build and linters. Fix any failures before you finish.
+- Do not create, edit or delete anything under .github/: amf refuses to push such changes.
 - Do not commit, push, create branches or open pull requests. amf handles git and GitHub.
 - When you are done, reply with only a pull request description in Markdown:
   a short summary of what changed and why, and how you verified it.

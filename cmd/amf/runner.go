@@ -305,7 +305,32 @@ func commitAll(ctx context.Context, wt, title string, n int, base string) error 
 	if changed == "" {
 		return errors.New("claude finished without making any changes")
 	}
+	return pathRefusal(changed)
+}
+
+// pathRefusal returns an error when any of changed (one path per line) is
+// under .github/: a pushed workflow change could run whatever the agent put
+// there with the repo's Actions secrets the moment the PR opens. amf runs
+// the check before any push, so no branch or PR is created.
+// protectedPaths decides which paths count.
+func pathRefusal(changed string) error {
+	if bad := protectedPaths(changed); bad != nil {
+		return fmt.Errorf("the agent changed files under .github/ (%s), "+
+			"which amf refuses to push", strings.Join(bad, ", "))
+	}
 	return nil
+}
+
+// protectedPaths returns the paths in changed (one per line) that start with
+// .github/, where workflows, CODEOWNERS and the like live.
+func protectedPaths(changed string) []string {
+	var bad []string
+	for _, p := range strings.Split(changed, "\n") {
+		if strings.HasPrefix(p, ".github/") {
+			bad = append(bad, p)
+		}
+	}
+	return bad
 }
 
 func buildPrompt(repo, branch string, issue Issue) string {
@@ -323,6 +348,7 @@ Resolve this GitHub issue:
 Instructions:
 - Make the smallest complete change that resolves the issue, following the existing code style.
 - Find and run the project's tests, build and linters. Fix any failures before you finish.
+- Do not create, edit or delete anything under .github/: amf refuses to push such changes.
 - Do not commit, push, create branches or open pull requests. amf handles git and GitHub.
 - When you are done, reply with only a pull request description in Markdown:
   a short summary of what changed and why, and how you verified it.

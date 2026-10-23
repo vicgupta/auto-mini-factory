@@ -605,6 +605,46 @@ result 'Done.'
 	}
 }
 
+func TestProtectedPaths(t *testing.T) {
+	changed := ".github/workflows/ci.yml\n.github/CODEOWNERS\ngithub/x.go\ndocs/.github.md\n.github"
+	got := protectedPaths(changed)
+	want := []string{".github/workflows/ci.yml", ".github/CODEOWNERS"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("protectedPaths = %q, want %q", got, want)
+	}
+	if bad := protectedPaths(""); bad != nil {
+		t.Errorf("protectedPaths(\"\") = %q, want none", bad)
+	}
+}
+
+func TestRunRefusesGitHubChanges(t *testing.T) {
+	root, origin := setupRepo(t)
+	gh, srv := newFakeGitHub(t)
+	gh.issues[1] = readyIssue(1, "Tamper with workflows")
+	r, log := newTestRunner(t, srv, root, fakeAgent(t, "claude", shResult+`cat >/dev/null
+mkdir -p .github/workflows
+echo evil > .github/workflows/evil.yml
+echo x > x.txt
+result 'Done.'
+`))
+	err := r.Run(context.Background(), 1)
+	if err == nil || !strings.Contains(err.Error(), "refuses to push") || !strings.Contains(err.Error(), ".github/workflows/evil.yml") {
+		t.Fatalf("expected the refusal, got %v\nlog:\n%s", err, log)
+	}
+	if len(gh.prs) != 0 {
+		t.Errorf("PRs = %v", gh.prs)
+	}
+	if _, gerr := git(context.Background(), root, "--git-dir", origin, "rev-parse", "--verify", "amf/issue-1"); gerr == nil {
+		t.Error("the branch was pushed to origin")
+	}
+	if got, want := gh.labels(1), []string{"amf:failed"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("labels = %v, want %v", got, want)
+	}
+	if c := gh.comments[1]; len(c) != 1 || !strings.Contains(c[0], ".github/workflows/evil.yml") {
+		t.Errorf("comments = %q", c)
+	}
+}
+
 func TestRunNetZeroChangeFails(t *testing.T) {
 	root, _ := setupRepo(t)
 	gh, srv := newFakeGitHub(t)

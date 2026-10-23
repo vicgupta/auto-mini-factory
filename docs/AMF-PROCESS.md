@@ -95,7 +95,13 @@ each, one at a time.
     `Fix #N: <title>`, with `Closes #N` in the message body. Then it compares
     the branch with `origin/<default>`. If no file changed, the issue fails
     with "claude finished without making any changes". That includes the case
-    where Claude made commits of its own that cancel out.
+    where Claude made commits of its own that cancel out. If any changed path
+    is under `.github/`, the run fails with `the agent changed files under
+    .github/ (<paths>), which amf refuses to push`: a pushed workflow change
+    could run whatever the agent put there with the repo's Actions secrets
+    the moment the pull request opens. This comes before the push, so no
+    branch or PR is created; the issue prompt also tells the agent not to
+    touch `.github/`.
 18. **Push.** `git push --force -u origin amf/issue-N`, using your own git
     credentials, not `GITHUB_TOKEN`. amf owns `amf/issue-*` branches, so a
     retry replaces the earlier push.
@@ -137,7 +143,8 @@ replaced:
 - **Code, then eval:** code runs, and its changes are committed for that
   round. Eval reviews the change and must end with `VERDICT: PASS` or
   `VERDICT: FAIL`. On FAIL, the review goes back to code, up to
-  `--eval-rounds` times.
+  `--eval-rounds` times. A round that changes a path under `.github/` fails
+  the issue before any push, as step 17 does.
 - **Squash:** on PASS, the rounds become one `Fix #N` commit, and the PR
   description gets an Evaluation section and the plan.
 
