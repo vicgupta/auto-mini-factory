@@ -298,22 +298,39 @@ func commitAll(ctx context.Context, wt, title string, n int, base string) error 
 	}
 	// Claude may have committed on its own despite the prompt, so compare
 	// trees rather than look for amf's commit.
-	changed, err := git(ctx, wt, "diff", "--name-only", "origin/"+base, "HEAD")
+	changed, err := changedPaths(ctx, wt, base)
 	if err != nil {
 		return err
 	}
-	if changed == "" {
+	if len(changed) == 0 {
 		return errors.New("claude finished without making any changes")
 	}
 	return pathRefusal(changed)
 }
 
-// pathRefusal returns an error when any of changed (one path per line) is
-// under .github/: a pushed workflow change could run whatever the agent put
-// there with the repo's Actions secrets the moment the PR opens. amf runs
-// the check before any push, so no branch or PR is created.
+// changedPaths lists the paths HEAD changes relative to origin/base. -z
+// keeps git from quoting unusual names, and --no-renames lists both sides
+// of a move, so neither can hide a path from pathRefusal.
+func changedPaths(ctx context.Context, wt, base string) ([]string, error) {
+	out, err := git(ctx, wt, "diff", "--name-only", "--no-renames", "-z", "origin/"+base, "HEAD")
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, p := range strings.Split(out, "\x00") {
+		if p != "" {
+			paths = append(paths, p)
+		}
+	}
+	return paths, nil
+}
+
+// pathRefusal returns an error when any of changed is under .github/: a
+// pushed workflow change could run whatever the agent put there with the
+// repo's Actions secrets the moment the PR opens. amf runs the check before
+// any push, so no branch or PR is created.
 // protectedPaths decides which paths count.
-func pathRefusal(changed string) error {
+func pathRefusal(changed []string) error {
 	if bad := protectedPaths(changed); bad != nil {
 		return fmt.Errorf("the agent changed files under .github/ (%s), "+
 			"which amf refuses to push", strings.Join(bad, ", "))
@@ -321,11 +338,11 @@ func pathRefusal(changed string) error {
 	return nil
 }
 
-// protectedPaths returns the paths in changed (one per line) that start with
-// .github/, where workflows, CODEOWNERS and the like live.
-func protectedPaths(changed string) []string {
+// protectedPaths returns the paths in changed that start with .github/,
+// where workflows, CODEOWNERS and the like live.
+func protectedPaths(changed []string) []string {
 	var bad []string
-	for _, p := range strings.Split(changed, "\n") {
+	for _, p := range changed {
 		if strings.HasPrefix(p, ".github/") {
 			bad = append(bad, p)
 		}

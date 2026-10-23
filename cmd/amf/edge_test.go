@@ -606,14 +606,14 @@ result 'Done.'
 }
 
 func TestProtectedPaths(t *testing.T) {
-	changed := ".github/workflows/ci.yml\n.github/CODEOWNERS\ngithub/x.go\ndocs/.github.md\n.github"
+	changed := []string{".github/workflows/ci.yml", ".github/CODEOWNERS", "github/x.go", "docs/.github.md", ".github"}
 	got := protectedPaths(changed)
 	want := []string{".github/workflows/ci.yml", ".github/CODEOWNERS"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("protectedPaths = %q, want %q", got, want)
 	}
-	if bad := protectedPaths(""); bad != nil {
-		t.Errorf("protectedPaths(\"\") = %q, want none", bad)
+	if bad := protectedPaths(nil); bad != nil {
+		t.Errorf("protectedPaths(nil) = %q, want none", bad)
 	}
 }
 
@@ -642,6 +642,35 @@ result 'Done.'
 	}
 	if c := gh.comments[1]; len(c) != 1 || !strings.Contains(c[0], ".github/workflows/evil.yml") {
 		t.Errorf("comments = %q", c)
+	}
+}
+
+// git diff quotes paths with unusual characters and lists only the new side
+// of a rename, so either would hide a .github/ change from a check that
+// reads its plain output.
+func TestRunRefusesHiddenGitHubChanges(t *testing.T) {
+	for _, tc := range []struct{ name, script, path string }{
+		{"non-ASCII name", `echo evil > .github/workflows/é.yml`, ".github/workflows/é.yml"},
+		{"moved out", `git mv .github/workflows/ci.yml ci.yml`, ".github/workflows/ci.yml"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, origin := setupRepo(t)
+			os.MkdirAll(filepath.Join(root, ".github", "workflows"), 0o755)
+			os.WriteFile(filepath.Join(root, ".github", "workflows", "ci.yml"), []byte("name: ci\n"), 0o644)
+			mustGit(t, root, "add", ".")
+			mustGit(t, root, "commit", "-m", "add ci")
+			mustGit(t, root, "push", "origin", "main")
+			gh, srv := newFakeGitHub(t)
+			gh.issues[1] = readyIssue(1, "Tamper with workflows")
+			r, log := newTestRunner(t, srv, root, fakeAgent(t, "claude", shResult+"cat >/dev/null\n"+tc.script+"\nresult 'Done.'\n"))
+			err := r.Run(context.Background(), 1)
+			if err == nil || !strings.Contains(err.Error(), "refuses to push") || !strings.Contains(err.Error(), tc.path) {
+				t.Fatalf("expected the refusal naming %s, got %v\nlog:\n%s", tc.path, err, log)
+			}
+			if _, gerr := git(context.Background(), root, "--git-dir", origin, "rev-parse", "--verify", "amf/issue-1"); gerr == nil {
+				t.Error("the branch was pushed to origin")
+			}
+		})
 	}
 }
 

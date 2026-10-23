@@ -513,11 +513,11 @@ func commitRound(ctx context.Context, wt string, k int, base string, s *Stage) e
 			return err
 		}
 	}
-	changed, err := git(ctx, wt, "diff", "--name-only", "origin/"+base, "HEAD")
+	changed, err := changedPaths(ctx, wt, base)
 	if err != nil {
 		return err
 	}
-	if changed == "" {
+	if len(changed) == 0 {
 		return fmt.Errorf("the code stage (%s) finished without making any changes", s.Agent)
 	}
 	return pathRefusal(changed)
