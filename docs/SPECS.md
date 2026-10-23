@@ -43,14 +43,18 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened)
 - `--agent-timeout` limits each agent run, not the whole issue; the old
   `--timeout` is accepted as a deprecated alias of it. Both must be at least
   1m and at most 24h, and 0 and negatives are errors; every out-of-range or
-  unparsable value is a startup error naming where it came from, such as
-  `AMF_AGENT_TIMEOUT="5x": not a duration`. `AMF_AGENT_TIMEOUT` (.env or the
+  unparsable value fails `run` and `watch` at startup, naming where it came
+  from, such as `AMF_AGENT_TIMEOUT="5x": not a duration`. Other commands
+  ignore `AMF_AGENT_TIMEOUT` (`doctor` checks it), and a flag replaces it, so
+  a bad value in `.env` is then never read. `AMF_AGENT_TIMEOUT` (.env or the
   environment) sets the limit without a flag, and a flag overrides it;
   without either, each agent run gets 60 minutes. The limit is per run, not
   per issue: a plan plus eval rounds run under pipelines can take several
   times it. A run's process group gets SIGTERM all together on expiry and, if
   it is still there after amf's 15s grace period, SIGKILL; Ctrl-C kills it the
-  same way. `--interval` also must be positive.
+  same way. On Windows, amf instead ends the run's whole process tree at once
+  with `taskkill /T /F`, with no grace period. `--interval` also must be
+  positive.
 - `--eval-rounds` is how many times a pipeline's eval stage may send the
   change back to the code stage. A negative value is an error.
 - `--agent` picks the agent for issues without a pipeline: `claudecode`
@@ -142,6 +146,7 @@ never prints a secret. The checks, in order:
 | `repo` | The repo is readable; shows its default branch | `FAIL` on 404; `warn` if the account can't push |
 | `labels` | All four amf labels exist | `warn`, naming the missing ones |
 | `trusted` | `AMF_TRUSTED` is set; lists the logins | `warn` if unset (anyone's issues run), or if it leaves out the token's account, which `amf issue` opens issues as |
+| `agent timeout` | Shows the limit each agent run gets: `AMF_AGENT_TIMEOUT` (and from where) or the 60m default | `FAIL` if `AMF_AGENT_TIMEOUT` isn't a duration or is out of range |
 | `checkout` | The checkout `run` would use: the enclosing one, or `./<name>` | `warn` if `run` would clone first or origin isn't `GITHUB_REPO`; `FAIL` if `./<name>` isn't a clone or there's no origin |
 | `git push` | `git push --dry-run` to `origin` works with the user's git credentials, without prompting | `FAIL`, with git's message |
 | `git identity` | git has a name and email to commit with, in the checkout (or here); shows them | `FAIL`, with the `git config` commands to set them |
@@ -279,7 +284,8 @@ work. Starter skills are in this repo under `skills/`.
      `AMF_AGENT_TIMEOUT`; the default is 60m). On expiry amf signals the
      run's whole process group with SIGTERM, then, if it is still there
      after a 15s grace period, SIGKILL: the agent, the shells it spawns and
-     their MCP servers are all stopped, as on Ctrl-C. The run fails;
+     their MCP servers are all stopped, as on Ctrl-C (on Windows,
+     `taskkill /T /F` ends the tree at once). The run fails;
      whatever the agent printed stays in its log, ending with a
      `amf: killed after <elapsed> timeout (SIGTERM, then SIGKILL after 15s)`
      line, and an agent with a final-message file has what was written kept

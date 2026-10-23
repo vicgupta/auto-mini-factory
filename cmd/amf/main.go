@@ -323,7 +323,11 @@ func newRunner(ctx context.Context, timeout time.Duration, evalRounds int, agent
 		return nil, err
 	}
 	if timeout == 0 { // no flag gave one, or run and watch would have failed on it already
-		timeout, _ = agentTimeout(cfg.AgentTimeout)
+		env, err := parseAgentTimeout(cfg.AgentTimeout)
+		if err != nil {
+			return nil, err
+		}
+		timeout, _ = agentTimeout(env)
 	}
 	agent, err := parseAgent(agentFlag)
 	if err != nil {

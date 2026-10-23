@@ -21,7 +21,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -82,7 +81,9 @@ func TestAgentTimeoutKillsTheGroup(t *testing.T) {
 	gh.issues[1] = readyIssue(1, "Hangs")
 	pids := filepath.Join(t.TempDir(), "pids")
 	r, log := newTestRunner(t, srv, root, fakeAgent(t, "claude", sleepAgentScript(pids)))
-	r.Timeout = 300 * time.Millisecond
+	// Long enough for the child and grandchild to start and record their
+	// PIDs before the kill, even on a loaded machine.
+	r.Timeout = 2 * time.Second
 	r.KillGrace = 100 * time.Millisecond
 
 	begin := time.Now()
@@ -159,21 +160,6 @@ func TestAgentTimeoutKillsTheGroup(t *testing.T) {
 	}
 	for _, n := range ps {
 		waitESRCH(t, n)
-	}
-}
-
-// waitESRCH polls pid until it is gone, at most a few seconds.
-func waitESRCH(t *testing.T, pid int) {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("process %d outlived the timeout", pid)
-		}
-		time.Sleep(10 * time.Millisecond)
 	}
 }
 
@@ -367,8 +353,8 @@ func TestAgentTimeoutPrecedence(t *testing.T) {
 		}
 	}
 
-	// .env and the environment for loadConfig: env beats .env, which is
-	// parsed and validated.
+	// .env and the environment for loadConfig: env beats .env. loadConfig
+	// keeps the value as written; newRunner parses it.
 	dir := t.TempDir()
 	t.Setenv("GITHUB_TOKEN", "test-token")
 	t.Setenv("GITHUB_REPO", "vic/demo")
@@ -378,11 +364,11 @@ func TestAgentTimeoutPrecedence(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "")
 	t.Setenv("GITHUB_REPO", "")
 	cfg, err := loadConfig(filepath.Join(dir, ".env"))
-	if err != nil || cfg.AgentTimeout != 90*time.Minute {
+	if err != nil || cfg.AgentTimeout != "90m" {
 		t.Errorf(".env: %v, %v", cfg.AgentTimeout, err)
 	}
 	t.Setenv("AMF_AGENT_TIMEOUT", "2h")
-	if cfg, err := loadConfig(filepath.Join(dir, ".env")); err != nil || cfg.AgentTimeout != 2*time.Hour {
+	if cfg, err := loadConfig(filepath.Join(dir, ".env")); err != nil || cfg.AgentTimeout != "2h" {
 		t.Errorf("env beats .env: %v, %v", cfg.AgentTimeout, err)
 	}
 }
@@ -412,13 +398,24 @@ func TestAgentTimeoutValidation(t *testing.T) {
 		}
 	}
 
-	// A value that can't be used is reported before any other configuration
-	// error, so it is the one the user sees.
-	t.Setenv("GITHUB_TOKEN", "")
-	t.Setenv("GITHUB_REPO", "")
+	// A value that can't be used fails run and watch, but not the commands
+	// that read .env for anything else: loadConfig still returns the rest.
+	t.Chdir(t.TempDir())
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	t.Setenv("GITHUB_REPO", "vic/demo")
 	t.Setenv("AMF_AGENT_TIMEOUT", "5x")
-	_, err := loadConfig(filepath.Join(t.TempDir(), ".env"))
-	if err == nil || !strings.Contains(err.Error(), `AMF_AGENT_TIMEOUT="5x": not a duration`) {
-		t.Errorf("loadConfig AMF_AGENT_TIMEOUT error = %v", err)
+	cfg, err := loadConfig(".env")
+	if err != nil || cfg.Repo != "vic/demo" || cfg.Claude == "" {
+		t.Errorf("loadConfig with a bad AMF_AGENT_TIMEOUT = %+v, %v", cfg, err)
+	}
+	for _, args := range [][]string{{"run", "1"}, {"watch"}} {
+		err := run(context.Background(), args, strings.NewReader(""), io.Discard, io.Discard)
+		if err == nil || !strings.Contains(err.Error(), `AMF_AGENT_TIMEOUT="5x": not a duration`) {
+			t.Errorf("amf %q: error = %v", args, err)
+		}
+	}
+	// A flag overrides it, so the bad value isn't in the way.
+	if _, err := newRunner(context.Background(), time.Hour, 0, "", io.Discard); err != nil && strings.Contains(err.Error(), "AMF_AGENT_TIMEOUT") {
+		t.Errorf("newRunner with a flag: %v", err)
 	}
 }

@@ -11,6 +11,12 @@ import (
 	"syscall"
 )
 
+// groupOutlivesLeader reports that the agent's process group can still be
+// signalled after the agent itself has exited, as on unix: the group id
+// stays the agent's pid while anything is left in it, so amf can escalate
+// to SIGKILL after the grace period and sweep the group once Wait returns.
+const groupOutlivesLeader = true
+
 // procGroup puts the agent in its own process group.
 func procGroup(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}

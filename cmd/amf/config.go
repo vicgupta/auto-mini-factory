@@ -45,9 +45,11 @@ type Config struct {
 	// Optional.
 	PostgresURL string
 
-	// AgentTimeout is AMF_AGENT_TIMEOUT, how long each agent run may take.
-	// 0 means unset: the flags or defaultAgentTimeout decide.
-	AgentTimeout time.Duration
+	// AgentTimeout is AMF_AGENT_TIMEOUT as written, how long each agent run
+	// may take. "" means unset: the flags or defaultAgentTimeout decide.
+	// newRunner and doctor parse it, so a bad value fails only run and
+	// watch, and doctor names it, instead of every command reading .env.
+	AgentTimeout string
 
 	// Trusted is AMF_TRUSTED, the lower-case GitHub logins whose issues amf
 	// works on. Nil means anyone's.
@@ -98,14 +100,8 @@ func loadConfig(paths ...string) (Config, error) {
 		OpencodeModel: get("OPENCODE_MODEL", defaultOpencodeModel),
 		PostgresURL:   get("AMF_POSTGRES_URL", ""),
 		Trusted:       parseTrusted(get("AMF_TRUSTED", "")),
+		AgentTimeout:  get("AMF_AGENT_TIMEOUT", ""),
 	}
-	// Nothing else in .env can fail to parse; check it before the missing
-	// GITHUB_TOKEN so the real problem is the one reported.
-	agentTimeout, err := parseAgentTimeout(get("AMF_AGENT_TIMEOUT", ""))
-	if err != nil {
-		return Config{}, err
-	}
-	cfg.AgentTimeout = agentTimeout
 	if cfg.Token == "" {
 		return cfg, errors.New("GITHUB_TOKEN is not set (run amf init, then edit .env)")
 	}

@@ -609,6 +609,9 @@ func (r *Runner) runAgent(ctx context.Context, agent, stage, model, wt, prompt, 
 	cmd.Cancel = func() error {
 		if cmd.Process != nil {
 			_ = killGroup(cmd.Process, syscall.SIGTERM)
+			if !groupOutlivesLeader {
+				return nil // that kill was already the hard one
+			}
 			go func() {
 				timer := time.NewTimer(grace)
 				defer timer.Stop()
@@ -629,7 +632,7 @@ func (r *Runner) runAgent(ctx context.Context, agent, stage, model, wt, prompt, 
 	runErr := cmd.Run()
 	// However the run ended, nothing the agent spawned outlives it: the
 	// group-wide SIGKILL costs nothing when the group is already gone.
-	if cmd.Process != nil {
+	if cmd.Process != nil && groupOutlivesLeader {
 		_ = killGroup(cmd.Process, syscall.SIGKILL)
 	}
 	if runErr != nil || ctx.Err() != nil {
