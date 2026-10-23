@@ -258,7 +258,7 @@ work. Starter skills are in this repo under `skills/`.
    (with opencode's model in parentheses).
    - **Prompt:** the issue's title and body, plus instructions to make the
      smallest complete change, run the project's tests and build, not touch
-     git or GitHub, and reply with only a PR description.
+     `.github/`, git or GitHub, and reply with only a PR description.
    - **Environment:** `PWD` is the worktree, and no agent gets
      `GITHUB_TOKEN`. When `CLAUDE_CODE_OAUTH_TOKEN` is set, it's passed to
      Claude only, and Claude's `ANTHROPIC_API_KEY` is removed. Otherwise an
@@ -272,7 +272,11 @@ work. Starter skills are in this repo under `skills/`.
    "With a pipeline" below.
 7. **Commit.** Stage everything and commit as `Fix #N: <title>` with the body
    `Closes #N`. Fail if the branch doesn't change any file compared with
-   `origin/<default>`, even if the agent made commits of its own.
+   `origin/<default>`, even if the agent made commits of its own. The run
+   also fails — before the push, so no branch or PR is created — when any
+   changed path is under `.github/`, where workflows and `CODEOWNERS` live;
+   the error names the offending paths. Changes elsewhere, even under a
+   directory whose name contains `.github`, are fine.
 8. **Push.** `git push --force -u origin amf/issue-N`, with the user's git
    credentials.
 9. **PR.** Open `amf/issue-N` → `<default>`, titled `Fix #N: <title>`. If
@@ -310,10 +314,11 @@ work. Starter skills are in this repo under `skills/`.
    the plan and the skill. From round 2 on, it also says the previous
    attempt is in the working tree, and gives eval's review to fix.
    - The log is `.amf/logs/issue-N-code-K.log`.
-   - amf commits any changes as `amf: code round K`.
-   - The run fails with `the code stage (<agent>) finished without making
-     any changes` if the branch doesn't change any file compared with
-     `origin/<default>`, such as when a round undoes the one before.
+   - amf commits any changes as `amf: code round K`. The run fails with
+     `the code stage (<agent>) finished without making any changes` if the
+     branch doesn't change any file compared with `origin/<default>`, such
+     as when a round undoes the one before. amf refuses `.github/` changes
+     as in step 7, before any push.
    - The final message becomes the summary.
 4. **Eval, round K** (if declared). The prompt has the issue, the plan, the
    code stage's summary, the skill, and `git diff origin/<default> HEAD`

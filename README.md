@@ -203,6 +203,9 @@ Without a pipeline (see below), amf runs one agent once. With Claude Code:
    [docs/SPECS.md](docs/SPECS.md#agents).
 4. Commits the changes (`Fix #N: <title>`), fails if there are none, and runs
    `git push --force -u origin amf/issue-N` with your own git credentials.
+   If the change touches anything under `.github/`, amf refuses to push it
+   and the issue fails, since a pushed workflow change runs with your
+   Actions secrets before anyone reviews it.
 5. Opens a PR with the agent's final message as the body plus `Closes #N`. On a
    retry whose PR is still open, it updates that PR instead.
 6. Comments the PR link on the issue, labels it `amf:done`, removes the worktree.
@@ -260,7 +263,9 @@ pipeline in the target repo's `AGENTS.md`:
 - **plan** writes a plan with acceptance criteria. It can stop with
   `BLOCKED:` and questions when the issue is too unclear, and amf comments
   them on the issue.
-- **code** follows the plan, then amf commits the round.
+- **code** follows the plan, then amf commits the round. A round that
+  changes anything under `.github/` fails the issue: amf refuses to push
+  such changes, as it does without a pipeline.
 - **eval** runs the tests, reviews the diff against the plan, and ends with
   `VERDICT: PASS` or `VERDICT: FAIL`. On a fail, its review goes back to
   code, up to `--eval-rounds` times (default 2). If it still fails, amf

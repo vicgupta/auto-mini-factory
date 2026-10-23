@@ -341,6 +341,34 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"A
 	}
 }
 
+func TestPipelineRefusesGitHubChanges(t *testing.T) {
+	root, origin := setupPipelineRepo(t, "## amf\n\n| Stage | Agent |\n|---|---|\n| code | claudecode |\n")
+	gh, srv := newFakeGitHub(t)
+	gh.issues[1] = &Issue{Number: 1, Title: "Tamper with workflows", State: "open", Labels: []Label{{Name: "amf:ready"}}}
+	r, log := newTestRunner(t, srv, root, fakeAgent(t, "claude", shResult+`cat >/dev/null
+mkdir -p .github/workflows
+echo evil > .github/workflows/evil.yml && git add .github/workflows/evil.yml
+git commit -qm "agent's own commit"
+result 'Tampered.'
+`))
+	err := r.Run(context.Background(), 1)
+	if err == nil || !strings.Contains(err.Error(), "refuses to push") || !strings.Contains(err.Error(), ".github/workflows/evil.yml") {
+		t.Fatalf("expected the refusal, got %v\nlog:\n%s", err, log)
+	}
+	if len(gh.prs) != 0 {
+		t.Errorf("PRs = %v", gh.prs)
+	}
+	if _, gerr := git(context.Background(), root, "--git-dir", origin, "rev-parse", "--verify", "amf/issue-1"); gerr == nil {
+		t.Error("the branch was pushed to origin")
+	}
+	if got, want := gh.labels(1), []string{"amf:failed"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("labels = %v, want %v", got, want)
+	}
+	if c := gh.comments[1]; len(c) != 1 || !strings.Contains(c[0], ".github/workflows/evil.yml") {
+		t.Errorf("comments = %q", c)
+	}
+}
+
 func TestPipelineCommand(t *testing.T) {
 	root, _ := setupRepo(t)
 	t.Chdir(root)
