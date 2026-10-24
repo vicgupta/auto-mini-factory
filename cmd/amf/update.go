@@ -23,7 +23,8 @@ import (
 	"time"
 )
 
-// releasesURL is where amf's own releases live. AMF_RELEASES_URL overrides it (for tests).
+// releasesURL is where amf's own releases live. AMF_RELEASES_URL, from the
+// environment only, overrides it, for a mirror or tests.
 const releasesURL = "https://github.com/vicgupta/auto-mini-factory"
 
 // cmdUpdate replaces the running amf binary with a release from GitHub.
