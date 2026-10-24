@@ -450,7 +450,10 @@ Each record in `events.jsonl` is one event. Every record has `time`,
 and `issue` when it is about one. `msg` is the line the terminal shows for
 it (`amf: <msg>`); `DEBUG` events add detail the terminal doesn't show by
 default, and their `msg` is a short description. Durations are Go
-durations (`1m0s`). The fields of each event, besides those:
+durations (`1m0s`). `github.call`, `git.exec`, `git.push` and `http.fetch`
+are logged for the calls `watch` and each issue's run make, with the issue
+they are for; the checks `run` and `watch` make at startup, before the
+event log opens, are not. The fields of each event, besides those:
 
 | Event | Level | Fields |
 |---|---|---|
@@ -483,6 +486,10 @@ durations (`1m0s`). The fields of each event, besides those:
 | `issue.cleanup` | warn | `error`: a worktree that couldn't be removed or pruned |
 | `issue.done` | debug | `pr`: its number |
 | `issue.failed` | debug, info | `reason` (`agent_timeout` at info, with `stage`; `stage` for a stage's own failure such as a blocked plan or an untrusted author; else `error`), `error` |
+| `github.call` | debug | One per GitHub API request: `method`, `path` with `{repo}`, `{n}` and `{label}` in place of the repo, numbers and label names, `status` (0 when there was no response), `duration_ms`, `bytes_out` (request body), `bytes_in` (response body read), `ratelimit_remaining`, `ratelimit_reset`, `request_id` (GitHub's headers, `""` when absent), `page` for a later page of a list, and `error_body` (the first 512 bytes of an error response) or `error`. The token is never logged |
+| `git.exec` | debug | One per git command: `subcommand`, `args` (a commit message cut to 80 characters), `dir`, `exit_code` (-1 when git didn't start), `duration_ms`, `stdout_bytes`, `stderr_bytes`, and on failure `stderr` (its first 512 bytes) |
+| `git.push` | debug | After `git.exec` for a push: `branch`, `forced`, `exit_code` |
+| `http.fetch` | debug | One per skill download: `url` (without any credentials), `status`, `redirects`, `duration_ms`, and `bytes` and `sha256` of the skill, or `error` |
 
 ## Logging to PostgreSQL
 

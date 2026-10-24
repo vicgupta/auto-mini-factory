@@ -229,16 +229,34 @@ func skillURL(raw string) (fetch, pin string, err error) {
 
 // fetchSkill downloads a skill. It sends no credentials, follows only https
 // redirects, and checks the size, encoding and any sha256 pin.
-func fetchSkill(ctx context.Context, client *http.Client, raw string) (string, error) {
+func fetchSkill(ctx context.Context, client *http.Client, raw string) (text string, err error) {
 	target, pin, err := skillURL(raw)
 	if err != nil {
 		return "", err
 	}
+	begin := time.Now()
+	redirects, status := 0, 0
+	defer func() {
+		shown := target
+		if u, perr := url.Parse(target); perr == nil {
+			u.User = nil
+			shown = u.String()
+		}
+		attrs := []any{"url", shown, "status", status, "redirects", redirects, "duration_ms", ms(time.Since(begin))}
+		if err == nil {
+			sum := sha256.Sum256([]byte(text))
+			attrs = append(attrs, "bytes", len(text), "sha256", hex.EncodeToString(sum[:]))
+		} else {
+			attrs = append(attrs, "error", err)
+		}
+		callEvent(ctx, "http.fetch", fmt.Sprintf("GET %s: %d", shown, status), attrs...)
+	}()
 	c := http.Client{Timeout: 30 * time.Second}
 	if client != nil {
 		c = *client
 	}
 	c.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		redirects = len(via)
 		if req.URL.Scheme != "https" {
 			return fmt.Errorf("refusing to follow a redirect to %s", req.URL)
 		}
@@ -256,6 +274,7 @@ func fetchSkill(ctx context.Context, client *http.Client, raw string) (string, e
 		return "", fmt.Errorf("downloading skill %s: %w", target, err)
 	}
 	defer resp.Body.Close()
+	status = resp.StatusCode
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("downloading skill %s: %s", target, resp.Status)
 	}

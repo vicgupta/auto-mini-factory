@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -83,14 +84,42 @@ func (g *GitHub) do(ctx context.Context, method, path string, in, out any) error
 	return err
 }
 
-// send is do, also returning the response headers (for pagination).
-func (g *GitHub) send(ctx context.Context, method, path string, in, out any) (http.Header, error) {
+// send is do, also returning the response headers (for pagination). It
+// logs a github.call event to the logger ctx carries.
+func (g *GitHub) send(ctx context.Context, method, path string, in, out any) (h http.Header, err error) {
+	begin := time.Now()
+	var sent int
+	var resp *http.Response
+	counted := &countingReader{}
+	errBody := ""
+	defer func() {
+		tmpl, query := templatePath(path, g.repo)
+		attrs := []any{"method", method, "path", tmpl, "duration_ms", ms(time.Since(begin)), "bytes_out", sent}
+		status := 0
+		if resp != nil {
+			status = resp.StatusCode
+			attrs = append(attrs, "status", status, "bytes_in", counted.n,
+				"ratelimit_remaining", resp.Header.Get("X-RateLimit-Remaining"),
+				"ratelimit_reset", resp.Header.Get("X-RateLimit-Reset"),
+				"request_id", resp.Header.Get("X-GitHub-Request-Id"))
+		}
+		if p := query.Get("page"); p != "" {
+			attrs = append(attrs, "page", p)
+		}
+		if errBody != "" {
+			attrs = append(attrs, "error_body", excerpt(errBody))
+		} else if err != nil {
+			attrs = append(attrs, "error", err)
+		}
+		callEvent(ctx, "github.call", fmt.Sprintf("github %s %s: %d", method, tmpl, status), attrs...)
+	}()
 	var body io.Reader
 	if in != nil {
 		b, err := json.Marshal(in)
 		if err != nil {
 			return nil, err
 		}
+		sent = len(b)
 		body = bytes.NewReader(b)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, g.base+path, body)
@@ -103,14 +132,16 @@ func (g *GitHub) send(ctx context.Context, method, path string, in, out any) (ht
 	if in != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := g.http.Do(req)
+	resp, err = g.http.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
+	counted.r = resp.Body
 
 	if resp.StatusCode >= 300 {
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+		raw, _ := io.ReadAll(io.LimitReader(counted, 8<<10))
+		errBody = string(raw)
 		msg := string(raw)
 		var parsed struct {
 			Message string `json:"message"`
@@ -123,7 +154,44 @@ func (g *GitHub) send(ctx context.Context, method, path string, in, out any) (ht
 	if out == nil {
 		return resp.Header, nil
 	}
-	return resp.Header, json.NewDecoder(resp.Body).Decode(out)
+	return resp.Header, json.NewDecoder(counted).Decode(out)
+}
+
+// countingReader counts the bytes read through it.
+type countingReader struct {
+	r io.Reader
+	n int
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += n
+	return n, err
+}
+
+// numberSegment is a path segment that is an issue, PR or comment number.
+var numberSegment = regexp.MustCompile(`^\d+$`)
+
+// templatePath is an API path with the repo, numbers and label names as
+// {repo}, {n} and {label}, so calls group by endpoint, and its query.
+func templatePath(path, repo string) (string, url.Values) {
+	p, rawQuery, _ := strings.Cut(path, "?")
+	query, _ := url.ParseQuery(rawQuery)
+	if repo != "" {
+		if rest, ok := strings.CutPrefix(p, "/repos/"+repo); ok && (rest == "" || strings.HasPrefix(rest, "/")) {
+			p = "/repos/{repo}" + rest
+		}
+	}
+	segs := strings.Split(p, "/")
+	for i, s := range segs {
+		switch {
+		case numberSegment.MatchString(s):
+			segs[i] = "{n}"
+		case i > 0 && segs[i-1] == "labels" && i == len(segs)-1 && i >= 2 && segs[i-2] == "{n}":
+			segs[i] = "{label}"
+		}
+	}
+	return strings.Join(segs, "/"), query
 }
 
 func (g *GitHub) repoPath(format string, a ...any) string {

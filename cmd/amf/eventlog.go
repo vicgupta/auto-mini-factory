@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // logOptions are run's and watch's --log-level and --log-file.
@@ -294,3 +295,51 @@ func labelNames(is Issue) []string {
 	}
 	return out
 }
+
+// eventsKey is where a context carries the logger and issue for the calls
+// made under it: git, GitHub and skill downloads log there.
+type eventsKey struct{}
+
+type ctxEvents struct {
+	log   *slog.Logger
+	issue int
+}
+
+// withEvents returns ctx carrying log (nil for none) and the issue the
+// calls under it are for (0 for none).
+func withEvents(ctx context.Context, log *slog.Logger, issue int) context.Context {
+	return context.WithValue(ctx, eventsKey{}, ctxEvents{log, issue})
+}
+
+// callEvent logs a call's event to the logger ctx carries, at debug, with
+// the issue it is for. Without one it does nothing.
+func callEvent(ctx context.Context, name, text string, attrs ...any) {
+	ce, _ := ctx.Value(eventsKey{}).(ctxEvents)
+	if ce.log == nil || !ce.log.Enabled(ctx, slog.LevelDebug) {
+		return
+	}
+	a := []any{"event", name}
+	if ce.issue > 0 {
+		a = append(a, "issue", ce.issue)
+	}
+	ce.log.Log(ctx, slog.LevelDebug, text, append(a, attrs...)...)
+}
+
+// excerptSize is how much of a payload an event keeps.
+const excerptSize = 512
+
+// excerpt is s trimmed to excerptSize bytes, on a rune boundary.
+func excerpt(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= excerptSize {
+		return s
+	}
+	cut := excerptSize
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "…"
+}
+
+// ms is d in whole milliseconds, for duration_ms.
+func ms(d time.Duration) int64 { return d.Milliseconds() }

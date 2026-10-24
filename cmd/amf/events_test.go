@@ -3,9 +3,17 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -134,4 +142,137 @@ result 'Wrote feature.txt.'`,
 		t.Fatal(err)
 	}
 	wantEvent(t, eventsByName(eventLines(t, file.String())), "issue.code.done", map[string]any{"rounds": float64(1)})
+}
+
+// callLogger returns a context whose calls log, at debug, to the returned
+// buffer, for issue 7, redacting with red.
+func callLogger(red *redactor) (context.Context, *bytes.Buffer) {
+	var buf bytes.Buffer
+	log := newEventLogger(io.Discard, slog.LevelInfo, &buf, slog.LevelDebug, red, "run")
+	return withEvents(context.Background(), log, 7), &buf
+}
+
+func TestTemplatePath(t *testing.T) {
+	for in, want := range map[string]string{
+		"/repos/vic/demo": "/repos/{repo}",
+		"/repos/vic/demo/issues/12/labels/amf%3Aready": "/repos/{repo}/issues/{n}/labels/{label}",
+		"/repos/vic/demo/issues/12/labels":             "/repos/{repo}/issues/{n}/labels",
+		"/repos/vic/demo/issues?state=open&page=2":     "/repos/{repo}/issues",
+		"/repos/vic/demo/pulls/101":                    "/repos/{repo}/pulls/{n}",
+		"/repos/vic/demo-two/issues/1":                 "/repos/vic/demo-two/issues/{n}",
+		"/user":                                        "/user",
+		"/repos/vic/demo/labels/amf%3Aready":           "/repos/{repo}/labels/amf%3Aready",
+	} {
+		if got, _ := templatePath(in, "vic/demo"); got != want {
+			t.Errorf("templatePath(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if _, q := templatePath("/repos/vic/demo/issues?state=open&page=2", "vic/demo"); q.Get("page") != "2" {
+		t.Errorf("query = %v", q)
+	}
+}
+
+func TestGitHubCallEvents(t *testing.T) {
+	gh, srv := newFakeGitHub(t)
+	gh.issues[1] = readyIssue(1, "One")
+	g := newGitHub(Config{Token: "test-token", Repo: "vic/demo", APIURL: srv.URL})
+	ctx, buf := callLogger(nil)
+	if _, err := g.GetIssue(ctx, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.AddLabels(ctx, 1, "amf:done"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.GetIssue(ctx, 99); err == nil {
+		t.Fatal("GetIssue(99) should fail")
+	}
+	ev := eventsByName(eventLines(t, buf.String()))
+	wantEvent(t, ev, "github.call", map[string]any{"issue": float64(7), "method": "GET", "path": "/repos/{repo}/issues/{n}",
+		"status": float64(200), "duration_ms": nil, "bytes_out": float64(0), "bytes_in": nil,
+		"ratelimit_remaining": nil, "ratelimit_reset": nil, "request_id": nil})
+	add := wantEvent(t, ev, "github.call", map[string]any{"method": "POST", "path": "/repos/{repo}/issues/{n}/labels"})
+	if add != nil && add["bytes_out"].(float64) == 0 {
+		t.Errorf("a POST with a body sent no bytes: %v", add)
+	}
+	wantEvent(t, ev, "github.call", map[string]any{"path": "/repos/{repo}/issues/{n}", "status": float64(404), "error_body": nil})
+	if strings.Contains(buf.String(), "test-token") || strings.Contains(buf.String(), "Bearer") {
+		t.Errorf("an event holds the token:\n%s", buf)
+	}
+
+	// An error body with a secret is redacted.
+	srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 422, map[string]string{"message": "bad ghp_abcdefghijklmnopqrstuvwxyz0123456789"})
+	}))
+	t.Cleanup(srv2.Close)
+	ctx, buf = callLogger(newRedactor())
+	newGitHub(Config{Token: "test-token", Repo: "vic/demo", APIURL: srv2.URL}).GetIssue(ctx, 1)
+	e := wantEvent(t, eventsByName(eventLines(t, buf.String())), "github.call", map[string]any{"status": float64(422)})
+	if e != nil && !strings.Contains(e["error_body"].(string), "[REDACTED:github_token]") {
+		t.Errorf("error_body = %v", e["error_body"])
+	}
+}
+
+func TestGitCallEvents(t *testing.T) {
+	root, _ := setupRepo(t)
+	ctx, buf := callLogger(nil)
+	long := strings.Repeat("a long commit message ", 10)
+	os.WriteFile(filepath.Join(root, "f.txt"), []byte("x\n"), 0o644)
+	mustGit(t, root, "add", ".")
+	if _, err := git(ctx, root, "commit", "-m", long); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git(ctx, root, "rev-parse", "--verify", "no-such-ref"); err == nil {
+		t.Fatal("rev-parse should fail")
+	}
+	if _, err := git(ctx, root, "push", "--force", "-u", "origin", "main"); err != nil {
+		t.Fatal(err)
+	}
+	ev := eventsByName(eventLines(t, buf.String()))
+	c := wantEvent(t, ev, "git.exec", map[string]any{"issue": float64(7), "subcommand": "commit", "dir": root, "exit_code": float64(0),
+		"duration_ms": nil, "stdout_bytes": nil, "stderr_bytes": nil})
+	if c != nil {
+		if msg := c["args"].([]any)[2].(string); len(msg) > 84 || !strings.HasPrefix(msg, "a long commit message") {
+			t.Errorf("commit message in args = %q", msg)
+		}
+		if _, ok := c["stderr"]; ok {
+			t.Errorf("a successful command has stderr: %v", c)
+		}
+	}
+	f := wantEvent(t, ev, "git.exec", map[string]any{"subcommand": "rev-parse", "exit_code": float64(128)})
+	if f != nil && !strings.Contains(f["stderr"].(string), "Needed a single revision") {
+		t.Errorf("failed git.exec = %v", f)
+	}
+	wantEvent(t, ev, "git.push", map[string]any{"branch": "main", "forced": true, "exit_code": float64(0)})
+
+	// Without a logger in the context, nothing is logged and nothing breaks.
+	if _, err := git(context.Background(), root, "status"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFetchSkillEvent(t *testing.T) {
+	var srv *httptest.Server
+	srv = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/SKILL.md":
+			io.WriteString(w, "# Skill\n")
+		case "/moved":
+			http.Redirect(w, r, srv.URL+"/SKILL.md", http.StatusFound)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	ctx, buf := callLogger(nil)
+	if _, err := fetchSkill(ctx, srv.Client(), srv.URL+"/moved"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fetchSkill(ctx, srv.Client(), srv.URL+"/missing"); err == nil {
+		t.Fatal("a 404 should fail")
+	}
+	sum := sha256.Sum256([]byte("# Skill\n"))
+	ev := eventsByName(eventLines(t, buf.String()))
+	wantEvent(t, ev, "http.fetch", map[string]any{"issue": float64(7), "url": srv.URL + "/moved", "status": float64(200), "redirects": float64(1),
+		"bytes": float64(8), "sha256": hex.EncodeToString(sum[:]), "duration_ms": nil})
+	wantEvent(t, ev, "http.fetch", map[string]any{"url": srv.URL + "/missing", "status": float64(404), "error": nil})
 }
