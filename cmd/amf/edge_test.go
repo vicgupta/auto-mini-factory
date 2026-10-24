@@ -1736,7 +1736,7 @@ func TestPostgresDownKeepsLocalLogs(t *testing.T) {
 cat >/dev/null; echo hello > feature.txt
 printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"Added it."}'
 `))
-	r.DB = startDBLog(context.Background(), pg, r.Repo, log)
+	r.DB = startDBLog(context.Background(), pg, r.Repo, log, nil)
 	r.Log = io.MultiWriter(log, r.DB.amfWriter())
 	if err := r.Run(context.Background(), 1); err != nil {
 		t.Fatalf("Run: %v\nlog:\n%s", err, log)

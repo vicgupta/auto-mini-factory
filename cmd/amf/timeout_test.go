@@ -204,11 +204,12 @@ func TestAgentTimeoutKeepsPartialMessage(t *testing.T) {
 	r.Agent = "codex"
 	r.Codex = fakeAgent(t, "codex", `echo pre-sleep
 shift 3
-echo "a partial final message" > "$1"
+echo "a partial final message canary-secret-value" > "$1"
 trap '' TERM
 while :; do sleep 1; done`)
 	r.Timeout = 300 * time.Millisecond
 	r.KillGrace = 100 * time.Millisecond
+	r.Redact = newRedactor("canary-secret-value")
 
 	err := r.Run(context.Background(), 1)
 	var ate *agentTimeoutError
@@ -218,7 +219,7 @@ while :; do sleep 1; done`)
 	if want := filepath.Join(root, ".amf", "logs", "issue-1.partial.md"); ate.Partial != want {
 		t.Errorf("Partial = %q, want %q", ate.Partial, want)
 	}
-	if got := mustRead(t, ate.Partial); got != "a partial final message\n" {
+	if got := mustRead(t, ate.Partial); got != "a partial final message [REDACTED:config]\n" {
 		t.Errorf("partial file = %q", got)
 	}
 	if c := gh.comments[1]; len(c) != 1 || !strings.Contains(c[0], "final message so far: `.amf/logs/issue-1.partial.md`") {

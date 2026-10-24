@@ -71,6 +71,10 @@ type Runner struct {
 	// DB, when set, also gets every agent's output; Log already sends it
 	// amf's own lines.
 	DB *dbLog
+	// Redact masks secrets and personal data in the agents' logs, the
+	// comments and the PR body. newRunner also redacts Log with it. Nil
+	// changes nothing.
+	Redact *redactor
 }
 
 // Close sends the logs still queued for PostgreSQL.
@@ -151,7 +155,7 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 			// into the worktree, and it has no branch holding partial work.
 			r.removeWorktree(cctx, n)
 		}
-		if cerr := r.GH.Comment(cctx, n, msg); cerr != nil {
+		if cerr := r.GH.Comment(cctx, n, r.Redact.Redact(msg)); cerr != nil {
 			r.logf("#%d: could not comment: %v", n, cerr)
 		}
 	}()
@@ -174,7 +178,7 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 	if err := r.setStatus(ctx, n, labelDone); err != nil {
 		r.logf("#%d: could not set %s: %v", n, labelDone, err)
 	}
-	if err := r.GH.Comment(ctx, n, fmt.Sprintf("amf %s %s for this issue.", verb, pr.HTMLURL)); err != nil {
+	if err := r.GH.Comment(ctx, n, r.Redact.Redact(fmt.Sprintf("amf %s %s for this issue.", verb, pr.HTMLURL))); err != nil {
 		r.logf("#%d: could not comment: %v", n, err)
 	}
 	return nil
@@ -248,7 +252,7 @@ func (r *Runner) process(ctx context.Context, issue Issue, base string, p *Pipel
 	if extra != "" {
 		summary += "\n\n" + extra
 	}
-	body := fmt.Sprintf("%s\n\nCloses #%d\n\n---\n_Opened by amf._", summary, n)
+	body := r.Redact.Redact(fmt.Sprintf("%s\n\nCloses #%d\n\n---\n_Opened by amf._", summary, n))
 	pr, err = r.GH.CreatePR(ctx, title, branch, base, body)
 	if isStatus(err, http.StatusUnprocessableEntity) {
 		// A retry of an issue whose PR is still open: the push updated it,

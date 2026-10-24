@@ -2,6 +2,7 @@ package main
 
 import (
 	"cmp"
+	"io"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -148,4 +149,47 @@ func maskGroup(re *regexp.Regexp, s, kind string) string {
 		}
 		return g[1] + "[REDACTED:" + kind + "]"
 	})
+}
+
+// configRedactor masks the secret values in cfg: the GitHub token, the
+// agents' keys, and the password in AMF_POSTGRES_URL.
+func configRedactor(cfg Config) *redactor {
+	lits := []string{cfg.Token, cfg.ClaudeToken, cfg.AnthropicKey, cfg.OpenAIKey}
+	if pg, err := parsePostgresURL(cfg.PostgresURL); cfg.PostgresURL != "" && err == nil {
+		lits = append(lits, pg.Password)
+	}
+	return newRedactor(lits...)
+}
+
+// redactWriter redacts each write to w. It is for amf's own output, which
+// writes whole lines; an agent's output goes through a lineWriter instead,
+// so a secret split across writes is still caught.
+type redactWriter struct {
+	r *redactor
+	w io.Writer
+}
+
+func (rw *redactWriter) Write(p []byte) (int, error) {
+	if _, err := io.WriteString(rw.w, rw.r.Redact(string(p))); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+// redactedError is an error whose message is redacted. It still unwraps to
+// the original, so errors.Is and errors.As see through it.
+type redactedError struct {
+	msg string
+	err error
+}
+
+func (e *redactedError) Error() string { return e.msg }
+func (e *redactedError) Unwrap() error { return e.err }
+
+// redactErr returns err with its message redacted, or nil.
+func redactErr(r *redactor, err error) error {
+	if err == nil || r == nil {
+		return err
+	}
+	return &redactedError{msg: r.Redact(err.Error()), err: err}
 }

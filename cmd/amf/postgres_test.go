@@ -106,7 +106,7 @@ func TestPostgresServer(t *testing.T) {
 	admin.Close()
 
 	var local bytes.Buffer
-	d := startDBLog(ctx, c, "o/r", &local)
+	d := startDBLog(ctx, c, "o/r", &local, nil)
 	if !strings.Contains(local.String(), "created database amflogs") {
 		t.Fatalf("startup: %q", local.String())
 	}
@@ -160,7 +160,7 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"A
 `))
 	r.Repo = "vic/run-" + time.Now().Format("150405.000000")
 	ctx := context.Background()
-	r.DB = startDBLog(ctx, c, r.Repo, log)
+	r.DB = startDBLog(ctx, c, r.Repo, log, nil)
 	r.Log = io.MultiWriter(log, r.DB.amfWriter())
 	if err := r.Run(ctx, 1); err != nil {
 		t.Fatalf("Run: %v\nlog:\n%s", err, log)

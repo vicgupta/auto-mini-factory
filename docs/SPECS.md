@@ -279,7 +279,8 @@ work. Starter skills are in this repo under `skills/`.
      Claude only, and Claude's `ANTHROPIC_API_KEY` is removed. Otherwise an
      `ANTHROPIC_API_KEY` from `.env` or the environment is passed to Claude.
      `OPENAI_API_KEY` from `.env` or the environment is passed to Codex.
-   - **Log:** output streams live to `.amf/logs/issue-N.log`.
+   - **Log:** output streams live to `.amf/logs/issue-N.log`, a line at a
+     time and redacted (see "Redaction" under "Security model").
    - **Timeout:** each run may take at most `--agent-timeout` (or
      `AMF_AGENT_TIMEOUT`; the default is 60m). On expiry amf signals the
      run's whole process group with SIGTERM, then, if it is still there
@@ -415,7 +416,7 @@ Any failure leaves the installed binary unchanged.
 | `.env`, `.env.NNNN` | Configuration and its backups (permissions 0600, git-excluded) |
 | `.amf/worktrees/issue-N/` | Working copy for an issue in progress or failed |
 | `.amf/logs/issue-N.log` | The agent's output for the latest run of issue N, without a pipeline (stream-json for Claude) |
-| `.amf/logs/issue-N[-<stage>].partial.md` | An agent's final-message file, kept after a timeout cut the run short |
+| `.amf/logs/issue-N[-<stage>].partial.md` | An agent's final-message file, kept (redacted) after a timeout cut the run short |
 | `.amf/logs/issue-N-<stage>.log` | Each pipeline stage's output: `plan`, `code-K`, `eval-K` |
 | `.amf/runs/issue-N/` | The latest pipeline run's `plan.md` and `eval-K.md` |
 | `.amf/opencode.json` | The config amf runs opencode with |
@@ -451,7 +452,8 @@ get without it. Other commands don't log there.
   Both have an index on `(repo, issue, logged_at)`. `logged_at` is when amf
   read the line, `host` this machine's hostname, `repo` `GITHUB_REPO`. NUL
   bytes are dropped and invalid UTF-8 replaced, since `text` can't hold
-  them; lines are otherwise as printed, with a trailing `\r` removed.
+  them; lines are otherwise as printed, redacted, with a trailing `\r`
+  removed.
 - **At startup** amf connects and creates what's missing, then prints one
   of `amf: created database amflogs at user@host:port; logging there too`,
   `amf: logging to database amflogs at user@host:port too`, or
@@ -483,7 +485,29 @@ get without it. Other commands don't log there.
   `.env` (and so `AMF_POSTGRES_URL`'s password).
 - With `AMF_POSTGRES_URL` set, everything the agents print, which can
   include code and the contents of files they read, is stored in
-  `amflogs`. Anyone who can read that database can read it. For real isolation, run amf in a container or VM.
+  `amflogs` (redacted, as below). Anyone who can read that database can
+  read it. For real isolation, run amf in a container or VM.
+- **Redaction.** `run` and `watch` mask secrets and personal data in
+  everything they write: the terminal, the agent logs and partial final
+  messages in `.amf/logs/`, the rows in `amflogs`, the comments and PR
+  bodies they post, and the error they exit with. What is masked, as
+  `[REDACTED:<kind>]`:
+  - the values of `GITHUB_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`,
+    `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and the password in
+    `AMF_POSTGRES_URL`, wherever they appear (values shorter than 8
+    characters are not matched);
+  - GitHub tokens (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`),
+    `sk-` API keys, AWS access key ids (`AKIA`, `ASIA`);
+  - the credential in `Authorization: Bearer|token|Basic`;
+  - the value of `NAME=value` or `NAME: value` (also JSON-quoted) when NAME
+    ends in `_TOKEN`, `_KEY` or `_SECRET`, or in `PASSWORD`;
+  - `user:password@` in URLs, which becomes `[REDACTED]@`;
+  - email addresses, except ssh remotes such as `git@github.com:`.
+
+  The user's home directory becomes `~`, as macOS, Linux and Windows spell
+  it. Redaction is pattern matching, not a guarantee: a secret in another
+  format can still get through. Agents still see everything unredacted, and
+  amf's own git commits and `.env` are untouched.
 - Plan and eval can't change the branch: amf resets the worktree after them,
   so only the code stage's changes reach the PR.
 - amf does all git and GitHub writes itself, through the user's credentials

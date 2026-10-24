@@ -207,7 +207,7 @@ func cmdRun(ctx context.Context, args []string, stderr io.Writer) error {
 		return err
 	}
 	defer r.Close()
-	err = r.Run(ctx, n)
+	err = redactErr(r.Redact, r.Run(ctx, n))
 	r.DB.logError(err)
 	return err
 }
@@ -240,7 +240,7 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 		return err
 	}
 	defer r.Close()
-	err = r.Watch(ctx, *label, *interval)
+	err = redactErr(r.Redact, r.Watch(ctx, *label, *interval))
 	r.DB.logError(err)
 	return err
 }
@@ -333,22 +333,29 @@ func newRunner(ctx context.Context, timeout time.Duration, evalRounds int, agent
 	if err != nil {
 		return nil, err
 	}
+	// Everything run and watch write from here on is redacted: the console
+	// here, and the database, the agents' logs, comments and PR bodies by
+	// the Runner and dbLog.
+	red := configRedactor(cfg)
+	log = &redactWriter{r: red, w: log}
 	var db *dbLog
 	if cfg.PostgresURL != "" {
 		pg, err := parsePostgresURL(cfg.PostgresURL)
 		if err != nil {
-			return nil, fmt.Errorf("AMF_POSTGRES_URL: %v", err)
+			return nil, fmt.Errorf("AMF_POSTGRES_URL: %v", red.Redact(err.Error()))
 		}
-		db = startDBLog(ctx, pg, cfg.Repo, log)
+		db = startDBLog(ctx, pg, cfg.Repo, log, red)
 		log = io.MultiWriter(log, db.amfWriter())
 	}
 	r, err := newRunnerFrom(ctx, cfg, timeout, evalRounds, agent, log)
 	if err != nil {
+		err = redactErr(red, err)
 		db.logError(err)
 		db.Close(15 * time.Second)
 		return nil, err
 	}
 	r.DB = db
+	r.Redact = red
 	return r, nil
 }
 
