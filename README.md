@@ -64,7 +64,8 @@ CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...   # optional: Claude subscription token
 ANTHROPIC_API_KEY=sk-ant-api03-...   # optional: Claude API key, used if there's no token above
 OPENAI_API_KEY=sk-proj-...   # optional: OpenAI API key for codex
 # OPENCODE_MODEL=opencode/big-pickle   # Use 'opencode models' to list all the models
-# AMF_AGENT_TIMEOUT=60m   # optional: how long each agent run may take (default 60m)
+# AMF_AGENT_TIMEOUT=60m   # optional: how long each agent run may take (--agent-timeout overrides it)
+# AMF_LOG_LEVEL=info   # optional: debug, info, warn or error, for the terminal and the event log in .amf/runs/
 AMF_TRUSTED=login1,login2...   # optional: only work on issues opened by these GitHub users
 # AMF_POSTGRES_URL=postgres://user:password@localhost:5432/postgres   # optional: also save the logs to database amflogs on this PostgreSQL server
 ```
@@ -107,18 +108,20 @@ anything:
 
 ```
 $ amf doctor
-ok    amf           v0.4.0, the latest release
-ok    git           git version 2.56.0
-ok    .env          /tmp/amf/.env
-ok    GITHUB_TOKEN  set, from /tmp/amf/.env
-ok    GITHUB_REPO   vicgupta/factory-demo-app, from /tmp/amf/.env
-ok    github        token accepted for @vicgupta at https://api.github.com
-ok    repo          vicgupta/factory-demo-app, default branch main
-ok    labels        all 4 amf labels exist
-ok    trusted       only issues opened by @vicgupta
-ok    checkout      /tmp/amf/factory-demo-app, the clone run and watch use here
-ok    git push      your git credentials can push to origin (checked with --dry-run)
-ok    git identity  commits as Vic Gupta <vicgupta@gmail.com>
+ok    amf             v0.9.0, the latest release
+ok    git             git version 2.56.0
+ok    .env            /tmp/amf/.env
+ok    GITHUB_TOKEN    set, from /tmp/amf/.env
+ok    GITHUB_REPO     vicgupta/factory-demo-app, from /tmp/amf/.env
+ok    github          token accepted for @vicgupta at https://api.github.com
+ok    repo            vicgupta/factory-demo-app, default branch main
+ok    labels          all 4 amf labels exist
+ok    trusted         only issues opened by @vicgupta
+ok    agent timeout   1h0m0s, the default (AMF_AGENT_TIMEOUT or --agent-timeout changes it)
+ok    checkout        /tmp/amf/factory-demo-app, the clone run and watch use here
+ok    git push        your git credentials can push to origin (checked with --dry-run)
+ok    git identity    commits as Vic Gupta <vicgupta@gmail.com>
+ok    log folder      /tmp/amf/factory-demo-app/.amf/runs is writable
 ok    pipeline        none in AGENTS.md on origin/main; amf runs claude once per issue
 ok    claudecode      /Users/vic/.local/bin/claude, 2.1.309 (Claude Code); runs issues without a pipeline
 warn  codex           codex is not installed; amf runs claude instead, unless --agent or a pipeline names codex
@@ -282,7 +285,7 @@ include your code, so restrict who can read `amflogs`.
 
 ### Pipelines: plan → code → eval
 
-Instead of one Claude run, a repo can have amf plan the change, code it, and
+Instead of one agent run, a repo can have amf plan the change, code it, and
 have a reviewer agent check it before any PR is opened. Each stage gets its
 own skill, agent (`claudecode`, `codex` or `opencode`) and model. Declare the
 pipeline in the target repo's `AGENTS.md`:

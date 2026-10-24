@@ -332,7 +332,8 @@ work. Starter skills are in this repo under `skills/`.
    With a pipeline, this step and the next are replaced by the steps in
    "With a pipeline" below.
 7. **Commit.** Stage everything and commit as `Fix #N: <title>` with the body
-   `Closes #N`. Fail if the branch doesn't change any file compared with
+   `Closes #N`. Fail with `<claude|codex|opencode> finished without making
+   any changes` if the branch doesn't change any file compared with
    `origin/<default>`, even if the agent made commits of its own. The run
    also fails — before the push, so nothing is pushed and no PR is created —
    when any changed path is under `.github/`, where workflows and `CODEOWNERS` live;

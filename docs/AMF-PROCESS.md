@@ -1,7 +1,7 @@
 # How amf processes an issue
 
 This is what happens, step by step, when amf works on an issue with Claude
-Code, as of v0.4.0. It covers the default case, where the repo has no
+Code, as of v0.9.0. It covers the default case, where the repo has no
 pipeline table and Claude runs once; "With a pipeline" at the end covers the
 rest. Each step names the function in `cmd/amf` that does it. [SPECS.md](SPECS.md) is
 the authoritative description of amf's behavior.
@@ -10,12 +10,17 @@ the authoritative description of amf's behavior.
 
 1. **Settings are checked.** `--agent-timeout` (or its deprecated alias
    `--timeout`) must be a duration of at least 1m and at most 24h, and
-   `--eval-rounds` can't be negative. For `watch`, `--interval` must also be
+   `--eval-rounds` can't be negative, and `--log-level` must be `debug`,
+   `info`, `warn` or `error`. For `watch`, `--interval` must also be
    positive.
 2. **Config is loaded.** amf reads `./.env`, then `.env` at the top of the
    checkout; environment variables win. That gives the token, the repo, the
-   binary paths, `CLAUDE_CODE_OAUTH_TOKEN`, `AMF_AGENT_TIMEOUT` and
-   `AMF_TRUSTED`.
+   binary paths, the agents' keys (`CLAUDE_CODE_OAUTH_TOKEN`,
+   `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`), `OPENCODE_MODEL`,
+   `AMF_AGENT_TIMEOUT`, `AMF_LOG_LEVEL`, `AMF_TRUSTED` and
+   `AMF_POSTGRES_URL`. An `AMF_AGENT_TIMEOUT`, `AMF_LOG_LEVEL` or
+   `AMF_POSTGRES_URL` that doesn't parse stops amf here, and so does an
+   `--agent` that isn't installed.
 3. **The repo is checked on GitHub.** A wrong repo name gets a clear "not
    found" message, and a rejected token gets "GitHub rejected GITHUB_TOKEN".
 4. **The checkout is found.** amf uses the git checkout you're in. Anywhere
@@ -32,8 +37,11 @@ each, one at a time.
 6. **The issue is fetched.** If it's a PR or isn't open, amf stops there.
 7. **The repo's setup is checked.** amf gets the default branch from GitHub
    and runs `git fetch origin <default>`. It reads `AGENTS.md` on
-   `origin/<default>`; with no `## amf` table there, Claude runs once. It
-   also checks that git has a name and email to commit with.
+   `origin/<default>`; with no `## amf` table there, one agent runs once:
+   the one `--agent` names, or else the first usable of claude, codex and
+   opencode (here, Claude with `ANTHROPIC_API_KEY` or
+   `CLAUDE_CODE_OAUTH_TOKEN`). It also checks that git has a name and email
+   to commit with.
 
    If any of this fails, amf stops without touching the issue, and `watch`
    tries again on its next poll.
@@ -74,8 +82,10 @@ each, one at a time.
     - It runs in the worktree, and `PWD` is set to the worktree.
     - `GITHUB_TOKEN` is removed from Claude's environment.
     - If `CLAUDE_CODE_OAUTH_TOKEN` is set, Claude gets it and
-      `ANTHROPIC_API_KEY` is removed, so your subscription is used. Otherwise
-      Claude uses its own login.
+      `ANTHROPIC_API_KEY` is removed, so your subscription is used.
+      Otherwise Claude gets `ANTHROPIC_API_KEY` from `.env` or the
+      environment, or, with neither (only with `--agent claudecode`), uses
+      its own login.
 14. **While Claude works,** it's an ordinary headless Claude Code session
     with every permission prompt off. It reads code, edits files and runs
     shell commands, including the tests. It also picks up whatever your
@@ -134,9 +144,10 @@ each, one at a time.
 The issue has `amf:failed` and a comment with the error, and the worktree and
 log are kept so you can look at them. To retry, add `amf:ready` again; amf
 starts over from a fresh worktree. A run that hit `--agent-timeout` is the
-exception: its comment says how to retry with more time, only its log and
-partial output are kept, and its worktree, branch and (never made) PR are
-gone.
+exception: its comment says how to retry with more time, its log and
+partial output are kept, and its worktree is removed. Nothing was pushed
+and no PR was opened or updated; the local `amf/issue-N` branch stays,
+and a retry resets it to `origin/<default>`.
 
 ## With a pipeline
 

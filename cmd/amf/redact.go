@@ -89,7 +89,7 @@ var (
 	urlCredsRE = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/\s:@]+:[^/\s@]+@`)
 	emailRE    = regexp.MustCompile(`([A-Za-z0-9._%+-]+)@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b`)
 	// secretRE is NAME=value or NAME: value, optionally quoted as in JSON,
-	// where NAME ends in _TOKEN, _KEY or _SECRET, or is PASSWORD.
+	// where NAME ends in _TOKEN, _KEY, _SECRET or PASSWORD.
 	secretRE = regexp.MustCompile(`(?i)(\b[A-Z0-9_]*(?:_TOKEN|_KEY|_SECRET|PASSWORD)"?\s*[=:]\s*"?)([^\s"']+)`)
 )
 
