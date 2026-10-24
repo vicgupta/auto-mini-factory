@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -170,6 +171,15 @@ func (d *doctor) check(ctx context.Context) {
 		d.line("FAIL", "git identity", "%v", err)
 	} else {
 		d.line("ok", "git identity", "commits as %s", ident)
+	}
+
+	// Where run and watch write their event logs.
+	if root == "" {
+		d.line("skip", "log folder", "no checkout yet")
+	} else if logs, err := writableFolder(filepath.Join(root, ".amf", "runs")); err != nil {
+		d.line("FAIL", "log folder", "%s: %v (run and watch write their event logs there)", logs, err)
+	} else {
+		d.line("ok", "log folder", "%s is writable", filepath.Join(root, ".amf", "runs"))
 	}
 
 	// The pipeline, its skills, and the agents. Without a pipeline, amf runs
@@ -484,4 +494,30 @@ func source(key, envFile string) string {
 func keyed(r *Runner, agent string) bool {
 	_, ok := r.agentKey(agent)
 	return ok
+}
+
+// writableFolder checks that dir could be written to, by writing and
+// removing a file in it or, while it doesn't exist yet, in the nearest
+// folder above it that does: run and watch create the rest. It returns the
+// folder it checked.
+func writableFolder(dir string) (string, error) {
+	for {
+		if fi, err := os.Stat(dir); err == nil {
+			if !fi.IsDir() {
+				return dir, errors.New("not a folder")
+			}
+			break
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return dir, errors.New("no folder above it exists")
+		}
+		dir = parent
+	}
+	f, err := os.CreateTemp(dir, ".amf-doctor-*")
+	if err != nil {
+		return dir, err
+	}
+	f.Close()
+	return dir, os.Remove(f.Name())
 }

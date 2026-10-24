@@ -219,6 +219,37 @@ loses only the worktree: amf comments with how to retry with more time and
 keeps the logs and partial output. Re-running `amf run N` starts again from a
 fresh worktree.
 
+### Logs
+
+Besides the `amf: …` lines on the terminal and the agents' logs in
+`.amf/logs/`, each `amf run` and `amf watch` writes an event log to
+`.amf/runs/<run_id>/events.jsonl`: one JSON object per line for every step,
+GitHub call, git command and agent run, with the issue it was for.
+
+```sh
+jq -c 'select(.issue == 12)' .amf/runs/*/events.jsonl   # everything about #12
+jq -c 'select(.event == "github.call") | [.method, .path, .status]' .amf/runs/*/events.jsonl
+```
+
+After each issue, and when amf exits (Ctrl-C included), it writes
+`summary.json` next to the log: issues done, failed and skipped, GitHub and
+git calls, agent time per stage and errors. It prints the same as the last
+line, `amf: summary: 3 issues (2 done, 1 failed, 0 skipped); 41 GitHub calls; log …`.
+
+- `--log-level debug|info|warn|error` (or `AMF_LOG_LEVEL`) sets what the
+  terminal and the log show. By default the terminal shows `info` and the
+  log keeps `debug`.
+- `--log-file PATH` writes the log somewhere else, and `--log-file off`
+  writes none.
+- Everything amf writes is **redacted**: tokens and keys from `.env`,
+  well-known secret formats, credentials in URLs, emails and your home
+  directory are masked as `[REDACTED:<kind>]` on the terminal, in every log,
+  in PostgreSQL and in the comments and PRs amf posts. It's pattern
+  matching, so a secret in an unusual format can still get through; see
+  [docs/SPECS.md](docs/SPECS.md#security-model).
+
+`amf doctor` checks that `.amf/runs/` is writable.
+
 ### Logs in PostgreSQL
 
 Set `AMF_POSTGRES_URL` in `.env` and `amf run` and `amf watch` also write
