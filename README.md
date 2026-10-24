@@ -63,6 +63,7 @@ GITHUB_REPO=owner/name
 CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...   # optional: Claude subscription token from `claude setup-token`
 ANTHROPIC_API_KEY=sk-ant-api03-...   # optional: Claude API key, used if there's no token above
 OPENAI_API_KEY=sk-proj-...   # optional: OpenAI API key for codex
+# OPENCODE_API_KEY=oc_sk_...   # optional: OpenCode Console API key, used when there's no saved login
 # OPENCODE_MODEL=opencode/big-pickle   # Use 'opencode models' to list all the models
 # AMF_AGENT_TIMEOUT=60m   # optional: how long each agent run may take (--agent-timeout overrides it)
 # AMF_LOG_LEVEL=info   # optional: debug, info, warn or error, for the terminal and the event log in .amf/runs/
@@ -74,6 +75,8 @@ Edit it and replace the placeholders. Placeholders ending in `...` count as
 unset, so you can leave the optional ones as they are. The agent keys decide
 which agent amf runs (see below). To run opencode with another model,
 uncomment `OPENCODE_MODEL` and set it to one that `opencode models` lists.
+To run opencode without a saved login, uncomment `OPENCODE_API_KEY` and set
+it to an OpenCode Console API key.
 To keep the logs in PostgreSQL too, uncomment `AMF_POSTGRES_URL` (see
 [Logs in PostgreSQL](#logs-in-postgresql)).
 
@@ -128,6 +131,7 @@ warn  codex           codex is not installed; amf runs claude instead, unless --
 ok    opencode        /Users/vic/.opencode/bin/opencode, opencode v2.1.3
 ok    claude login    CLAUDE_CODE_OAUTH_TOKEN is set, from /tmp/amf/.env; claude runs with it
 ok    codex login     OPENAI_API_KEY is not set; codex uses its own login, and amf runs it only for a pipeline or --agent codex
+ok    opencode login  OPENCODE_API_KEY is not set; opencode uses its own saved login
 ok    opencode model  opencode/deepseek-v4.1-flash-free; opencode lists it
 ok    postgres        logging to database amflogs at amf@db.example.com:5432, from /tmp/amf/.env
 ```
@@ -171,10 +175,13 @@ uses the first of these that's ready:
 |---|---|
 | `claude` | installed, and `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` is set |
 | `codex` | installed, and `OPENAI_API_KEY` is set |
-| `opencode` | installed; runs with `OPENCODE_MODEL` (default `opencode/big-pickle`) |
+| `opencode` | installed; runs with `OPENCODE_MODEL` (default `opencode/big-pickle`), and with `OPENCODE_API_KEY` when it's set |
 
 Keys can be in `.env` or the environment. An installed agent without its key
-is skipped, even if you're logged in to it. `amf watch` prints what it found
+is skipped, even if you're logged in to it. opencode needs no key: without
+`OPENCODE_API_KEY` it uses the login saved by `opencode`, and with it (an
+OpenCode Console API key, `oc_sk_...`) it runs where there's no saved login,
+such as CI or a container. `amf watch` prints what it found
 for each agent when it starts:
 
 ```

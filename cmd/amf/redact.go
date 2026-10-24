@@ -154,7 +154,7 @@ func maskGroup(re *regexp.Regexp, s, kind string) string {
 // configRedactor masks the secret values in cfg: the GitHub token, the
 // agents' keys, and the password in AMF_POSTGRES_URL.
 func configRedactor(cfg Config) *redactor {
-	lits := []string{cfg.Token, cfg.ClaudeToken, cfg.AnthropicKey, cfg.OpenAIKey}
+	lits := []string{cfg.Token, cfg.ClaudeToken, cfg.AnthropicKey, cfg.OpenAIKey, cfg.OpencodeKey}
 	if pg, err := parsePostgresURL(cfg.PostgresURL); cfg.PostgresURL != "" && err == nil {
 		lits = append(lits, pg.Password)
 	}

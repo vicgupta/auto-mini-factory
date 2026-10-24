@@ -59,6 +59,7 @@ Configuration is read from .env (or the environment):
   CLAUDE_CODE_OAUTH_TOKEN  optional subscription token for Claude Code (claude setup-token)
   ANTHROPIC_API_KEY        optional Claude API key; with it or the token above, amf picks claude
   OPENAI_API_KEY           optional OpenAI API key; with it, amf picks codex when claude can't run
+  OPENCODE_API_KEY         optional OpenCode Console API key, passed to opencode instead of its saved login
   OPENCODE_MODEL           model for opencode (default opencode/big-pickle); see opencode models
   AMF_AGENT_TIMEOUT        how long each agent run may take, a Go duration (default 60m);
                            --agent-timeout, or its deprecated alias --timeout, overrides it
@@ -474,6 +475,7 @@ func newRunnerFrom(ctx context.Context, cfg Config, timeout time.Duration, evalR
 		ClaudeToken:   cfg.ClaudeToken,
 		AnthropicKey:  cfg.AnthropicKey,
 		OpenAIKey:     cfg.OpenAIKey,
+		OpencodeKey:   cfg.OpencodeKey,
 		OpencodeModel: cfg.OpencodeModel,
 		Trusted:       cfg.Trusted,
 		Timeout:       timeout,

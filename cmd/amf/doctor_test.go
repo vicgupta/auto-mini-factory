@@ -84,6 +84,7 @@ func TestDoctorAllGood(t *testing.T) {
 		`ok +opencode +.*/opencode, opencode v2$`,
 		`ok +claude login +neither CLAUDE_CODE_OAUTH_TOKEN nor ANTHROPIC_API_KEY is set; claude uses its own login, and amf runs it only for a pipeline or --agent claudecode$`,
 		`ok +codex login +OPENAI_API_KEY is not set; codex uses its own login, and amf runs it only for a pipeline or --agent codex$`,
+		`ok +opencode login +OPENCODE_API_KEY is not set; opencode uses its own saved login$`,
 	)
 	// Doctor changes nothing: no branch was pushed.
 	if refs := mustGit(t, root, "--git-dir", origin, "branch", "--list", "amf/*"); refs != "" {

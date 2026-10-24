@@ -185,7 +185,7 @@ func (d *doctor) check(ctx context.Context) {
 	// The pipeline, its skills, and the agents. Without a pipeline, amf runs
 	// the first usable agent, as defaultAgent picks it (unless run or watch
 	// get --agent).
-	agents := &Runner{Claude: cfg.Claude, Codex: cfg.Codex, Opencode: cfg.Opencode, ClaudeToken: cfg.ClaudeToken, AnthropicKey: cfg.AnthropicKey, OpenAIKey: cfg.OpenAIKey}
+	agents := &Runner{Claude: cfg.Claude, Codex: cfg.Codex, Opencode: cfg.Opencode, ClaudeToken: cfg.ClaudeToken, AnthropicKey: cfg.AnthropicKey, OpenAIKey: cfg.OpenAIKey, OpencodeKey: cfg.OpencodeKey}
 	fallback, fallbackErr := agents.defaultAgent()
 	runs := "no agent (none is available)"
 	if fallbackErr == nil {
@@ -272,6 +272,11 @@ func (d *doctor) check(ctx context.Context) {
 		d.line("ok", "codex login", "OPENAI_API_KEY is set, from %s; codex runs with it", source("OPENAI_API_KEY", envFile))
 	} else {
 		d.line("ok", "codex login", "OPENAI_API_KEY is not set; codex uses its own login, and amf runs it only for a pipeline or --agent codex")
+	}
+	if cfg.OpencodeKey != "" {
+		d.line("ok", "opencode login", "OPENCODE_API_KEY is set, from %s; opencode runs with it", source("OPENCODE_API_KEY", envFile))
+	} else {
+		d.line("ok", "opencode login", "OPENCODE_API_KEY is not set; opencode uses its own saved login")
 	}
 	d.checkOpencodeModel(ctx, cfg)
 	if parsed {

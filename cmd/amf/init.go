@@ -29,6 +29,7 @@ var envTemplate = []envVar{
 	{"CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-...", "optional: Claude subscription token from `claude setup-token`", false},
 	{"ANTHROPIC_API_KEY", "sk-ant-api03-...", "optional: Claude API key, used if there's no token above", false},
 	{"OPENAI_API_KEY", "sk-proj-...", "optional: OpenAI API key for codex", false},
+	{"OPENCODE_API_KEY", "oc_sk_...", "optional: OpenCode Console API key, used when there's no saved login", true},
 	{"OPENCODE_MODEL", defaultOpencodeModel, "Use 'opencode models' to list all the models", true},
 	{"AMF_AGENT_TIMEOUT", fmt.Sprintf("%dm", defaultAgentTimeout/time.Minute), "optional: how long each agent run may take (--agent-timeout overrides it)", true},
 	{"AMF_LOG_LEVEL", "info", "optional: debug, info, warn or error, for the terminal and the event log in .amf/runs/", true},

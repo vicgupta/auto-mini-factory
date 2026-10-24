@@ -1476,6 +1476,18 @@ func TestAgentKeysReachAgents(t *testing.T) {
 	if c := r.agentEnv(slices.Clone(env), agentCodex, "/wt"); !has(c, "OPENAI_API_KEY=sk-openai-file") || has(c, "OPENAI_API_KEY=from-env") {
 		t.Errorf("codex env = %v", c)
 	}
+	// OPENCODE_API_KEY reaches opencode only, and only when set.
+	if c := r.agentEnv(slices.Clone(env), agentOpencode, "/wt"); slices.ContainsFunc(c, func(kv string) bool { return strings.HasPrefix(kv, "OPENCODE_API_KEY=") }) {
+		t.Errorf("opencode env without a key = %v", c)
+	}
+	r.OpencodeKey = "oc_sk_file"
+	ocEnv := append(slices.Clone(env), "OPENCODE_API_KEY=from-env")
+	if c := r.agentEnv(slices.Clone(ocEnv), agentOpencode, "/wt"); !has(c, "OPENCODE_API_KEY=oc_sk_file") || has(c, "OPENCODE_API_KEY=from-env") {
+		t.Errorf("opencode env = %v", c)
+	}
+	if c := r.agentEnv(slices.Clone(env), agentCodex, "/wt"); has(c, "OPENCODE_API_KEY=oc_sk_file") {
+		t.Errorf("codex got opencode's key: %v", c)
+	}
 	// The subscription token wins over an API key for claude.
 	r.ClaudeToken = "sk-ant-oat"
 	if c := r.agentEnv(slices.Clone(env), agentClaude, "/wt"); !has(c, "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat") || slices.ContainsFunc(c, func(kv string) bool { return strings.HasPrefix(kv, "ANTHROPIC_API_KEY=") }) {
@@ -1666,6 +1678,9 @@ func TestInitOpencodeModelLine(t *testing.T) {
 	if !strings.Contains(env, "\n# OPENCODE_MODEL=opencode/big-pickle   # Use 'opencode models' to list all the models\n") {
 		t.Fatalf(".env:\n%s", env)
 	}
+	if !strings.Contains(env, "\n# OPENCODE_API_KEY=oc_sk_...   # optional: OpenCode Console API key, used when there's no saved login\n") {
+		t.Fatalf(".env should have OPENCODE_API_KEY commented out:\n%s", env)
+	}
 	if !strings.Contains(env, "\n# AMF_POSTGRES_URL=postgres://user:password@localhost:5432/postgres   # optional: also save the logs to database amflogs on this PostgreSQL server\n") {
 		t.Fatalf(".env should have AMF_POSTGRES_URL commented out:\n%s", env)
 	}
@@ -1706,6 +1721,39 @@ func TestWatchShowsOpencodeModel(t *testing.T) {
 	if len(sts) != 1 || !strings.HasSuffix(sts[0].describe(), "; needs no key, model opencode/m: usable") {
 		t.Fatalf("statuses = %+v", sts)
 	}
+	// A set OPENCODE_API_KEY is named; opencode stays usable either way.
+	r.OpencodeKey = "oc_sk_test"
+	if sts := r.agentStatuses(); len(sts) != 1 || !strings.HasSuffix(sts[0].describe(), "; OPENCODE_API_KEY is set, model opencode/m: usable") {
+		t.Fatalf("statuses with a key = %+v", sts)
+	}
+}
+
+func TestOpencodeAPIKey(t *testing.T) {
+	t.Setenv("OPENCODE_API_KEY", "")
+	cfg, _ := loadConfig(writeEnv(t, "GITHUB_TOKEN=t\nGITHUB_REPO=vic/demo\n# OPENCODE_API_KEY=oc_sk_...\n"))
+	if cfg.OpencodeKey != "" {
+		t.Errorf("a commented-out OPENCODE_API_KEY should leave it unset, got %q", cfg.OpencodeKey)
+	}
+	cfg, _ = loadConfig(writeEnv(t, "GITHUB_TOKEN=t\nGITHUB_REPO=vic/demo\nOPENCODE_API_KEY=oc_sk_...\n"))
+	if cfg.OpencodeKey != "" {
+		t.Errorf("the placeholder should count as unset, got %q", cfg.OpencodeKey)
+	}
+	cfg, _ = loadConfig(writeEnv(t, "GITHUB_TOKEN=t\nGITHUB_REPO=vic/demo\nOPENCODE_API_KEY=oc_sk_from-the-file\n"))
+	if cfg.OpencodeKey != "oc_sk_from-the-file" {
+		t.Errorf("OpencodeKey = %q", cfg.OpencodeKey)
+	}
+	if got := configRedactor(cfg).Redact("key oc_sk_from-the-file here"); strings.Contains(got, "oc_sk_from-the-file") {
+		t.Errorf("OPENCODE_API_KEY not redacted: %q", got)
+	}
+}
+
+func TestDoctorOpencodeLogin(t *testing.T) {
+	withGitUser(t)
+	t.Chdir(t.TempDir())
+	t.Setenv("AMF_RELEASES_URL", "http://127.0.0.1:1")
+	t.Setenv("OPENCODE_API_KEY", "oc_sk_test-key")
+	out, _ := doctorOutput(t)
+	wantLines(t, out, `ok +opencode login +OPENCODE_API_KEY is set, from the environment; opencode runs with it$`)
 }
 
 // writeEnv writes a .env with body in a temp dir and returns its path.

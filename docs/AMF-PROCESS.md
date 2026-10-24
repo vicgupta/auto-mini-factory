@@ -16,7 +16,7 @@ the authoritative description of amf's behavior.
 2. **Config is loaded.** amf reads `./.env`, then `.env` at the top of the
    checkout; environment variables win. That gives the token, the repo, the
    binary paths, the agents' keys (`CLAUDE_CODE_OAUTH_TOKEN`,
-   `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`), `OPENCODE_MODEL`,
+   `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENCODE_API_KEY`), `OPENCODE_MODEL`,
    `AMF_AGENT_TIMEOUT`, `AMF_LOG_LEVEL`, `AMF_TRUSTED` and
    `AMF_POSTGRES_URL`. An `AMF_AGENT_TIMEOUT`, `AMF_LOG_LEVEL` or
    `AMF_POSTGRES_URL` that doesn't parse stops amf here, and so does an

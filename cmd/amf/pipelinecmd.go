@@ -107,7 +107,7 @@ func cmdPipeline(ctx context.Context, args []string, stdout, stderr io.Writer) e
 // error.
 func noPipeline(ctx context.Context, stdout io.Writer, why string) error {
 	cfg, _ := loadConfig(envPaths(ctx)...)
-	r := &Runner{Claude: cfg.Claude, Codex: cfg.Codex, Opencode: cfg.Opencode, ClaudeToken: cfg.ClaudeToken, AnthropicKey: cfg.AnthropicKey, OpenAIKey: cfg.OpenAIKey}
+	r := &Runner{Claude: cfg.Claude, Codex: cfg.Codex, Opencode: cfg.Opencode, ClaudeToken: cfg.ClaudeToken, AnthropicKey: cfg.AnthropicKey, OpenAIKey: cfg.OpenAIKey, OpencodeKey: cfg.OpencodeKey}
 	agent, passed, err := r.pickAgent()
 	if err != nil {
 		fmt.Fprintf(stdout, "%s, so amf runs one agent with its built-in prompt, but %v.\n", why, err)

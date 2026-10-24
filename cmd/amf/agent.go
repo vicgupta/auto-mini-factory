@@ -44,7 +44,8 @@ var agentKeys = map[string][]string{
 }
 
 // agentKey says which of agent's keys is set, if any. ok is true for an
-// agent that needs none.
+// agent that needs none, such as opencode, whose OPENCODE_API_KEY is
+// optional.
 func (r *Runner) agentKey(agent string) (name string, ok bool) {
 	switch agent {
 	case agentClaude:
@@ -60,6 +61,10 @@ func (r *Runner) agentKey(agent string) (name string, ok bool) {
 			return "OPENAI_API_KEY", true
 		}
 		return "", false
+	case agentOpencode:
+		if r.OpencodeKey != "" {
+			return "OPENCODE_API_KEY", true
+		}
 	}
 	return "", true
 }
@@ -91,15 +96,14 @@ func (s agentStatus) describe() string {
 		where = "installed at " + s.Path
 	}
 	key := "needs no key"
-	if s.Model != "" {
-		key += ", model " + s.Model
-	}
 	switch {
-	case len(agentKeys[s.Agent]) == 0:
 	case s.Key != "":
 		key = s.Key + " is set"
-	default:
+	case len(agentKeys[s.Agent]) > 0:
 		key = strings.Join(agentKeys[s.Agent], " and ") + " not set"
+	}
+	if s.Model != "" {
+		key += ", model " + s.Model
 	}
 	verdict := "usable"
 	if !s.usable() {

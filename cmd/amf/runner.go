@@ -54,6 +54,8 @@ type Runner struct {
 	AnthropicKey string
 	// OpenAIKey, when set, is passed to Codex as OPENAI_API_KEY.
 	OpenAIKey string
+	// OpencodeKey, when set, is passed to opencode as OPENCODE_API_KEY.
+	OpencodeKey string
 	// OpencodeModel is the model opencode runs with, from OPENCODE_MODEL:
 	// always without a pipeline, and for pipeline stages that name none.
 	OpencodeModel string
