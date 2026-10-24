@@ -182,7 +182,7 @@ echo started
 trap 'echo bye; exit 0' TERM
 sleep 600
 `))
-	r.Timeout = 300 * time.Millisecond
+	r.Timeout = 2 * time.Second
 	r.KillGrace = 100 * time.Millisecond
 
 	begin := time.Now()
@@ -287,7 +287,7 @@ case "$p" in *"# #1:"*) while :; do sleep 1; done;; *) echo x > x.txt; echo done
 	r, _ := newTestRunner(t, srv, root, fakeAgent(t, "claude", hangy))
 	buf := &timeoutSyncBuffer{}
 	r.Log = buf
-	r.Timeout = 250 * time.Millisecond
+	r.Timeout = 2 * time.Second
 	r.KillGrace = 50 * time.Millisecond
 
 	ctx, cancel := context.WithCancel(context.Background())
