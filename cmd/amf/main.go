@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -403,8 +404,9 @@ func newRunner(ctx context.Context, timeout time.Duration, evalRounds int, agent
 	}
 	r.Events = newEventLogger(r.Log, consoleLevel, file, fileLevel, red, runID)
 	if file != nil {
-		r.logf("logging to %s", shownPath(r.Root, path))
+		r.event(slog.LevelInfo, "log.file", 0, fmt.Sprintf("logging to %s", shownPath(r.Root, path)), "path", path)
 	}
+	r.event(slog.LevelDebug, "checkout.resolve", 0, fmt.Sprintf("checkout: %s (%s)", r.Root, r.checkout), "how", r.checkout, "dir", r.Root)
 	return r, nil
 }
 
@@ -429,7 +431,7 @@ func newRunnerFrom(ctx context.Context, cfg Config, timeout time.Duration, evalR
 	if err := checkRepo(ctx, gh, cfg.Repo); err != nil {
 		return nil, err
 	}
-	root, err := checkoutRoot(ctx, cfg, log)
+	root, how, err := checkoutRoot(ctx, cfg, log)
 	if err != nil {
 		return nil, err
 	}
@@ -457,6 +459,7 @@ func newRunnerFrom(ctx context.Context, cfg Config, timeout time.Duration, evalR
 		Timeout:       timeout,
 		EvalRounds:    evalRounds,
 		Log:           log,
+		checkout:      how,
 	}, nil
 }
 

@@ -11,7 +11,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -258,12 +257,40 @@ func (h *redactHandler) attr(a slog.Attr) slog.Attr {
 	return slog.Attr{Key: a.Key, Value: v}
 }
 
-// messageIssue is the issue a progress message is about, from its leading
-// "#N:", or 0.
-func messageIssue(msg string) int {
-	if m := issuePrefix.FindStringSubmatch(msg); m != nil {
-		n, _ := strconv.Atoi(m[1])
-		return n
+// event logs the named event about issue n (0 for none): text is the line
+// the terminal shows, as amf has always printed it, and attrs are the
+// event's fields, which only the event log shows. Debug events have no
+// terminal line by default. Without Events (as in tests that build a Runner
+// by hand), lines at info and above go to Log as plain text.
+func (r *Runner) event(level slog.Level, name string, n int, text string, attrs ...any) {
+	if r.Events == nil {
+		if level >= slog.LevelInfo {
+			fmt.Fprintf(r.Log, "amf: %s\n", text)
+		}
+		return
 	}
-	return 0
+	a := []any{"event", name}
+	if n > 0 {
+		a = append(a, "issue", n)
+	}
+	r.Events.Log(context.Background(), level, text, append(a, attrs...)...)
+}
+
+// statusOf is the amf status label an issue has, or "none".
+func statusOf(is Issue) string {
+	for _, l := range append([]string{labelReady}, statusLabels...) {
+		if is.HasLabel(l) {
+			return l
+		}
+	}
+	return "none"
+}
+
+// labelNames is an issue's labels.
+func labelNames(is Issue) []string {
+	var out []string
+	for _, l := range is.Labels {
+		out = append(out, l.Name)
+	}
+	return out
 }

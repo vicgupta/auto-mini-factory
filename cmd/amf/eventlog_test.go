@@ -33,8 +33,8 @@ func TestEventLogger(t *testing.T) {
 	var console, file bytes.Buffer
 	red := newRedactor("canary-secret-value")
 	r := &Runner{Log: &console, Events: newEventLogger(&console, slog.LevelInfo, &file, slog.LevelDebug, red, "run-1")}
-	r.logf("#3: hello canary-secret-value")
-	r.logf("no issue here")
+	r.event(slog.LevelInfo, "test.one", 3, "#3: hello canary-secret-value")
+	r.event(slog.LevelInfo, "test.two", 0, "no issue here")
 	r.Events.Debug("only in the file", "token", "canary-secret-value", "err", io.EOF, "list", []string{"canary-secret-value"})
 
 	if got, want := console.String(), "amf: #3: hello [REDACTED:config]\namf: no issue here\n"; got != want {
@@ -54,7 +54,7 @@ func TestEventLogger(t *testing.T) {
 			}
 		}
 	}
-	if ev[0]["issue"] != float64(3) || ev[0]["msg"] != "#3: hello [REDACTED:config]" || ev[0]["level"] != "INFO" {
+	if ev[0]["issue"] != float64(3) || ev[0]["msg"] != "#3: hello [REDACTED:config]" || ev[0]["level"] != "INFO" || ev[0]["event"] != "test.one" {
 		t.Errorf("first event = %v", ev[0])
 	}
 	if _, ok := ev[1]["issue"]; ok {
@@ -68,8 +68,8 @@ func TestEventLogger(t *testing.T) {
 	console.Reset()
 	file.Reset()
 	r.Events = newEventLogger(&console, slog.LevelWarn, &file, slog.LevelWarn, red, "run-2")
-	r.logf("#3: quiet")
-	r.Events.Warn("loud")
+	r.event(slog.LevelInfo, "test.quiet", 3, "#3: quiet")
+	r.event(slog.LevelWarn, "test.loud", 0, "loud")
 	if console.String() != "amf: loud\n" || len(eventLines(t, file.String())) != 1 {
 		t.Errorf("at warn: console %q, file %q", console.String(), file.String())
 	}
@@ -115,7 +115,7 @@ func TestNewRunnerEventLog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newRunner: %v\n%s", err, log.String())
 	}
-	r.logf("#3: hello test-token")
+	r.event(slog.LevelInfo, "test.hello", 3, "#3: hello test-token")
 	r.Close()
 	files, _ := filepath.Glob(filepath.Join(r.Root, ".amf", "runs", "*", "events.jsonl"))
 	if len(files) != 1 {
@@ -126,6 +126,13 @@ func TestNewRunnerEventLog(t *testing.T) {
 		t.Errorf("console = %q, want it to name %s", log.String(), rel)
 	}
 	ev := eventLines(t, mustRead(t, files[0]))
+	byName := eventsByName(ev)
+	if e := byName["log.file"]; len(e) != 1 || e[0]["path"] != files[0] {
+		t.Errorf("log.file = %v", e)
+	}
+	if e := byName["checkout.resolve"]; len(e) != 1 || e[0]["how"] != "checkout" || e[0]["dir"] != r.Root {
+		t.Errorf("checkout.resolve = %v", e)
+	}
 	last := ev[len(ev)-1]
 	if last["msg"] != "#3: hello [REDACTED:config]" || last["issue"] != float64(3) || !strings.Contains(files[0], last["run_id"].(string)) {
 		t.Errorf("last event = %v (file %s)", last, files[0])
@@ -138,7 +145,7 @@ func TestNewRunnerEventLog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.logf("into my own file")
+	r.event(slog.LevelInfo, "test.own", 0, "into my own file")
 	r.Close()
 	if !strings.Contains(log.String(), "amf: logging to "+own+"\n") || !strings.Contains(mustRead(t, own), "into my own file") {
 		t.Errorf("console %q, file %q", log.String(), mustRead(t, own))
@@ -151,7 +158,7 @@ func TestNewRunnerEventLog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.logf("only on the console")
+	r.event(slog.LevelInfo, "test.console", 0, "only on the console")
 	r.Close()
 	if _, err := os.Stat(filepath.Join(r.Root, ".amf", "runs")); !os.IsNotExist(err) {
 		t.Errorf("--log-file off created .amf/runs: %v", err)
@@ -167,7 +174,7 @@ func TestNewRunnerEventLog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.logf("hidden at warn")
+	r.event(slog.LevelInfo, "test.hidden", 0, "hidden at warn")
 	r.Close()
 	if strings.Contains(log.String(), "hidden at warn") || strings.Contains(mustRead(t, own), "hidden at warn") {
 		t.Errorf("an info line got through at warn: console %q", log.String())

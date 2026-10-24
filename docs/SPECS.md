@@ -67,7 +67,8 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened)
   it to P instead (its folder is created), and `--log-file off` writes
   none. Once the checkout is known, amf prints `logging to <path>`; lines
   printed before that are not in the file. Writes are buffered, flushed
-  every second and when amf exits, Ctrl-C included.
+  every second and when amf exits, Ctrl-C included. The events are listed
+  under [Event log](#event-log).
 - `--log-level` is `debug`, `info`, `warn` or `error` (case is ignored),
   and so is `AMF_LOG_LEVEL`, which the flag overrides. Either sets the
   level for both the terminal and the event log; without them the
@@ -441,6 +442,47 @@ Any failure leaves the installed binary unchanged.
 | `.amf/opencode.json` | The config amf runs opencode with |
 
 amf only ever adds to `.git/info/exclude`. It never edits a tracked `.gitignore`.
+
+## Event log
+
+Each record in `events.jsonl` is one event. Every record has `time`,
+`level` (`DEBUG`, `INFO`, `WARN` or `ERROR`), `msg`, `run_id` and `event`,
+and `issue` when it is about one. `msg` is the line the terminal shows for
+it (`amf: <msg>`); `DEBUG` events add detail the terminal doesn't show by
+default, and their `msg` is a short description. Durations are Go
+durations (`1m0s`). The fields of each event, besides those:
+
+| Event | Level | Fields |
+|---|---|---|
+| `log.file` | info | `path`: the event log |
+| `checkout.resolve` | debug | `how` (`checkout`, `clone` for a clone reused, `cloned`), `dir` |
+| `watch.start` | info | `repo`, `label`, `interval`, `timeout`, `eval_rounds`, `agent_flag`, `version` |
+| `watch.agents` | info | The heading line has none; one per agent with `agent`, `path`, `key` (the variable's name, never its value), `usable`, `model`; then `picked`, or `error` (warn) when none is usable |
+| `watch.tick` | debug | `cycle` (1 for the first poll), `issues`: how many the poll returned; warn with `error` when listing failed |
+| `watch.skip` | debug | `reason`: `pr`, `closed`, `in_progress` or `status_label` (done or failed without `amf:ready`) |
+| `watch.failed` | warn | `error`: an issue that failed (watch goes on) |
+| `watch.stop` | info | `reason` (the context's error, such as `context canceled`), `cycles` |
+| `issue.picked` | info | `title`, `author`, `labels` |
+| `issue.agent_ignored` | info | `agent`: the `--agent` a pipeline overrides |
+| `issue.author_check` | debug | `author`, `trusted`; an untrusted issue then fails |
+| `issue.status` | debug | `from`, `to`: an `amf:*` label change (`none` when there was none); warn with `to` and `error` when setting it failed |
+| `issue.pipeline` | info / debug | `declared` (true, info, for a pipeline; false, debug, for one agent run), `stages`, `agents`, `models` |
+| `issue.skill` | info | `stage`, `url` |
+| `issue.worktree` | info | `path`, and `branch` and `base`, or `stale: true` when an old one is removed |
+| `issue.agent` | info | `agent`, `model`, `timeout`: the one run without a pipeline |
+| `issue.stage` | info | `stage` (`plan`, `code-K`, `eval-K`), `agent`, `model`, `timeout` |
+| `issue.plan.done` | debug | `bytes`: the plan's length |
+| `issue.plan.blocked` | debug | `question`: the first one |
+| `issue.code.round` | debug | `round` |
+| `issue.code.done` | info | `rounds`, without an eval stage |
+| `issue.eval.verdict` | info | `round`, `pass`, `parsed` (whether eval gave a verdict), and `next_round`, or `final: true` when no rounds are left |
+| `agent.timeout` | warn | `agent`, `stage`, `limit`, `elapsed`, `grace`, `pgid`, `bytes` (stdout so far), `log` |
+| `issue.push` | info | `branch` |
+| `issue.pr` | info | `action` (`opened`, `updated`, or `updating` when the branch has an open PR), `number`, `url` |
+| `issue.comment` | debug | `bytes`; warn with `error` when posting failed |
+| `issue.cleanup` | warn | `error`: a worktree that couldn't be removed or pruned |
+| `issue.done` | debug | `pr`: its number |
+| `issue.failed` | debug, info | `reason` (`agent_timeout` at info, with `stage`; `stage` for a stage's own failure such as a blocked plan or an untrusted author; else `error`), `error` |
 
 ## Logging to PostgreSQL
 
