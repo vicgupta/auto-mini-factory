@@ -154,6 +154,7 @@ amf list                    # open issues, newest first, with their amf labels
 amf list --state all        # include closed issues
 amf list --label amf:failed # just the ones that failed
 amf list --limit 5          # just the 5 newest
+amf list --json --label amf:failed | jq -r '.[].url'  # as JSON: number, title, state, url, labels
 
 amf run 42                  # process one issue now
 amf watch --interval 60s    # process issues labeled `amf:ready`, one at a time

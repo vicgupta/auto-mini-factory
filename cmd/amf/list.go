@@ -2,12 +2,22 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"strings"
 	"text/tabwriter"
 )
+
+// listedIssue is one entry of amf list --json, a schema kept apart from Issue.
+type listedIssue struct {
+	Number int      `json:"number"`
+	Title  string   `json:"title"`
+	State  string   `json:"state"`
+	URL    string   `json:"url"`
+	Labels []string `json:"labels"`
+}
 
 // cmdList prints the repository's issues, newest first, with their amf labels.
 func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error {
@@ -16,12 +26,13 @@ func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	state := fs.String("state", "open", "open, closed or all")
 	label := fs.String("label", "", "only issues with this label, e.g. amf:ready")
 	limit := fs.Int("limit", 0, "print at most N issues, 0 means no limit")
+	asJSON := fs.Bool("json", false, "print a JSON array of number, title, state, url and labels")
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return errUsage
 	}
 	if len(pos) != 0 {
-		fmt.Fprintln(stderr, "usage: amf list [--state open|closed|all] [--label L] [--limit N]")
+		fmt.Fprintln(stderr, "usage: amf list [--state open|closed|all] [--label L] [--limit N] [--json]")
 		return errUsage
 	}
 	if *limit < 0 {
@@ -47,6 +58,18 @@ func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	}
 	if *limit > 0 && len(issues) > *limit {
 		issues = issues[:*limit]
+	}
+
+	if *asJSON {
+		out := make([]listedIssue, 0, len(issues))
+		for _, is := range issues {
+			labels := make([]string, 0, len(is.Labels))
+			for _, l := range is.Labels {
+				labels = append(labels, l.Name)
+			}
+			out = append(out, listedIssue{Number: is.Number, Title: is.Title, State: is.State, URL: is.HTMLURL, Labels: labels})
+		}
+		return json.NewEncoder(stdout).Encode(out)
 	}
 
 	if len(issues) == 0 {
