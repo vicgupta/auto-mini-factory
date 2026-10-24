@@ -2053,6 +2053,10 @@ func TestListJSONKeepsTitles(t *testing.T) {
 			t.Errorf("#%d title = %q, want %q", is.Number, is.Title, want)
 		}
 	}
+	// Titles stay readable: no HTML escaping of <, > or &.
+	if raw := out.String(); !strings.Contains(raw, "<&>") || strings.Contains(raw, `\u003c`) {
+		t.Errorf("raw output escapes HTML characters: %s", raw)
+	}
 }
 
 // A GitHub error fails amf list --json without printing an array.

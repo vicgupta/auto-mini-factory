@@ -69,7 +69,9 @@ func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error
 			}
 			out = append(out, listedIssue{Number: is.Number, Title: is.Title, State: is.State, URL: is.HTMLURL, Labels: labels})
 		}
-		return json.NewEncoder(stdout).Encode(out)
+		enc := json.NewEncoder(stdout)
+		enc.SetEscapeHTML(false)
+		return enc.Encode(out)
 	}
 
 	if len(issues) == 0 {
