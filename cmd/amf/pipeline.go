@@ -873,7 +873,8 @@ func relLog(root, path string) string {
 }
 
 // agentEnv is the environment for an agent running in wt. No agent gets
-// GITHUB_TOKEN, and only Claude gets CLAUDE_CODE_OAUTH_TOKEN. PWD is set to
+// GITHUB_TOKEN, only Claude gets CLAUDE_CODE_OAUTH_TOKEN, and only opencode
+// gets OPENCODE_API_KEY, even when it is already exported in the shell. PWD is set to
 // wt because some agents (opencode) resolve relative paths from it rather
 // than from their working directory.
 func (r *Runner) agentEnv(env []string, agent, wt string) []string {
@@ -881,6 +882,9 @@ func (r *Runner) agentEnv(env []string, agent, wt string) []string {
 		env = r.claudeEnv(env)
 	} else {
 		env = withoutEnv(env, "GITHUB_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "OPENCODE_CONFIG")
+	}
+	if agent != agentOpencode {
+		env = withoutEnv(env, "OPENCODE_API_KEY")
 	}
 	if agent == agentCodex && r.OpenAIKey != "" {
 		env = append(withoutEnv(env, "OPENAI_API_KEY"), "OPENAI_API_KEY="+r.OpenAIKey)

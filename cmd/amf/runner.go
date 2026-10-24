@@ -639,19 +639,20 @@ func (r *Runner) Watch(ctx context.Context, label string, interval time.Duration
 	}
 }
 
-// claudeEnv is the environment for Claude: never the GitHub token, and with a
+// claudeEnv is the environment for Claude: never the GitHub token or the
+// OpenCode key, and with a
 // subscription token configured, no API key that would take precedence over it.
 func (r *Runner) claudeEnv(env []string) []string {
 	switch {
 	case r.ClaudeToken != "":
 		// The subscription token wins: an API key would take precedence over it.
-		env = withoutEnv(env, "GITHUB_TOKEN", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN")
+		env = withoutEnv(env, "GITHUB_TOKEN", "OPENCODE_API_KEY", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN")
 		return append(env, "CLAUDE_CODE_OAUTH_TOKEN="+r.ClaudeToken)
 	case r.AnthropicKey != "":
-		env = withoutEnv(env, "GITHUB_TOKEN", "ANTHROPIC_API_KEY")
+		env = withoutEnv(env, "GITHUB_TOKEN", "OPENCODE_API_KEY", "ANTHROPIC_API_KEY")
 		return append(env, "ANTHROPIC_API_KEY="+r.AnthropicKey)
 	}
-	return withoutEnv(env, "GITHUB_TOKEN")
+	return withoutEnv(env, "GITHUB_TOKEN", "OPENCODE_API_KEY")
 }
 
 func withoutEnv(env []string, keys ...string) []string {
