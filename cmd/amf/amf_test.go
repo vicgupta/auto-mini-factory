@@ -987,6 +987,95 @@ func TestListCommand(t *testing.T) {
 	}
 }
 
+func TestListCommandJSON(t *testing.T) {
+	gh, srv := newFakeGitHub(t)
+	url := func(n int) string { return fmt.Sprintf("https://github.com/vic/demo/issues/%d", n) }
+	gh.issues[1] = &Issue{Number: 1, Title: "Old done", State: "closed", HTMLURL: url(1), Labels: []Label{{Name: "amf:done"}, {Name: "bug"}}}
+	gh.issues[2] = &Issue{Number: 2, Title: "Waiting", State: "open", HTMLURL: url(2), Labels: []Label{{Name: "enhancement"}, {Name: "amf:ready"}}}
+	gh.issues[3] = &Issue{Number: 3, Title: "Plain\tissue", State: "open", HTMLURL: url(3)}
+	gh.issues[4] = &Issue{Number: 4, Title: "A PR", State: "open", PullRequest: &struct{}{}}
+	t.Chdir(t.TempDir())
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	t.Setenv("GITHUB_REPO", "vic/demo")
+	t.Setenv("AMF_API_URL", srv.URL)
+	list := func(args ...string) (string, []listedIssue) {
+		t.Helper()
+		var out bytes.Buffer
+		if err := run(context.Background(), append([]string{"list", "--json"}, args...), nil, &out, io.Discard); err != nil {
+			t.Fatalf("amf list --json %v: %v", args, err)
+		}
+		var got []listedIssue
+		if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+			t.Fatalf("amf list --json %v printed %q: %v", args, out.String(), err)
+		}
+		return out.String(), got
+	}
+	numbers := func(is []listedIssue) []int {
+		var ns []int
+		for _, i := range is {
+			ns = append(ns, i.Number)
+		}
+		return ns
+	}
+
+	raw, got := list()
+	want := []listedIssue{
+		{Number: 3, Title: "Plain\tissue", State: "open", URL: url(3), Labels: []string{}},
+		{Number: 2, Title: "Waiting", State: "open", URL: url(2), Labels: []string{"enhancement", "amf:ready"}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("amf list --json = %+v, want %+v", got, want)
+	}
+	if !strings.HasPrefix(raw, "[") || !strings.HasSuffix(raw, "]\n") || strings.Count(raw, "\n") != 1 {
+		t.Errorf("amf list --json should print one array and a newline, got %q", raw)
+	}
+	// Every field is there, with its JSON type, and nothing else.
+	var generic []map[string]any
+	if err := json.Unmarshal([]byte(raw), &generic); err != nil {
+		t.Fatal(err)
+	}
+	if len(generic[0]) != 5 {
+		t.Errorf("entry has fields %v, want exactly number, title, state, url and labels", generic[0])
+	}
+	if _, ok := generic[0]["number"].(float64); !ok {
+		t.Errorf("number = %#v, want a JSON number", generic[0]["number"])
+	}
+	if labels, ok := generic[0]["labels"].([]any); !ok || len(labels) != 0 {
+		t.Errorf("labels of an unlabeled issue = %#v, want []", generic[0]["labels"])
+	}
+
+	if _, got := list("--state", "all"); !slices.Equal(numbers(got), []int{3, 2, 1}) || got[2].State != "closed" || !slices.Equal(got[2].Labels, []string{"amf:done", "bug"}) {
+		t.Errorf("amf list --json --state all = %+v", got)
+	}
+	if _, got := list("--label", "amf:ready"); !slices.Equal(numbers(got), []int{2}) {
+		t.Errorf("amf list --json --label amf:ready = %+v", got)
+	}
+	if _, got := list("--state", "all", "--limit", "2"); !slices.Equal(numbers(got), []int{3, 2}) {
+		t.Errorf("amf list --json --state all --limit 2 = %+v", got)
+	}
+	if _, got := list("--limit", "0"); !slices.Equal(numbers(got), []int{3, 2}) {
+		t.Errorf("amf list --json --limit 0 = %+v", got)
+	}
+	if raw, _ := list("--state", "closed", "--label", "amf:failed"); raw != "[]\n" {
+		t.Errorf("empty amf list --json = %q, want %q", raw, "[]\n")
+	}
+	for _, args := range [][]string{{"--limit", "-1"}, {"--state", "bogus"}} {
+		var out bytes.Buffer
+		if err := run(context.Background(), append([]string{"list", "--json"}, args...), nil, &out, io.Discard); err == nil || out.Len() != 0 {
+			t.Errorf("amf list --json %v: err = %v, stdout %q; want an error and no output", args, err, out.String())
+		}
+	}
+
+	// --json=false keeps the table.
+	var out bytes.Buffer
+	if err := run(context.Background(), []string{"list", "--json=false"}, nil, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if want := "ISSUE  AMF        TITLE\n#3     -          Plain issue\n#2     amf:ready  Waiting\n"; out.String() != want {
+		t.Errorf("amf list --json=false =\n%s\nwant\n%s", out.String(), want)
+	}
+}
+
 // fakeReleases serves /releases/latest and one release's archive and checksums
 // the way GitHub does, for this platform. The archive's amf is a script that
 // prints reports.

@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -1984,5 +1985,108 @@ func TestRetryKeepsDraftState(t *testing.T) {
 				t.Errorf("labels = %v", got)
 			}
 		})
+	}
+}
+
+// listJSONEnv points amf list at srv from an empty directory.
+func listJSONEnv(t *testing.T, srv *httptest.Server) {
+	t.Chdir(t.TempDir())
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	t.Setenv("GITHUB_REPO", "vic/demo")
+	t.Setenv("AMF_API_URL", srv.URL)
+}
+
+// amf list --json leaves out PRs across pages, and --limit counts issues only.
+func TestListJSONPaginatesAndSkipsPRs(t *testing.T) {
+	gh, srv := newFakeGitHub(t)
+	for n := 1; n <= 250; n++ {
+		gh.issues[n] = &Issue{Number: n, Title: fmt.Sprint("issue ", n), State: "open"}
+	}
+	gh.issues[249].PullRequest = &struct{}{}
+	gh.issues[150].PullRequest = &struct{}{}
+	listJSONEnv(t, srv)
+	list := func(args ...string) []listedIssue {
+		t.Helper()
+		var out bytes.Buffer
+		if err := run(context.Background(), append([]string{"list", "--json"}, args...), nil, &out, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		var got []listedIssue
+		if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	all := list()
+	if len(all) != 248 || all[0].Number != 250 || all[1].Number != 248 || all[247].Number != 1 {
+		t.Fatalf("got %d issues, want 248 newest first without the PRs", len(all))
+	}
+	if slices.ContainsFunc(all, func(is listedIssue) bool { return is.Number == 150 || is.Number == 249 }) {
+		t.Error("pull requests should be left out")
+	}
+	if got := list("--limit", "3"); len(got) != 3 || got[0].Number != 250 || got[1].Number != 248 || got[2].Number != 247 {
+		t.Errorf("amf list --json --limit 3 = %+v, want #250, #248, #247", got)
+	}
+}
+
+// Titles survive JSON as GitHub sent them, tabs included.
+func TestListJSONKeepsTitles(t *testing.T) {
+	gh, srv := newFakeGitHub(t)
+	titles := []string{"Say \"hi\" \\ back", "Tab\there", "Two\nlines", "Ünïcödé ✓ 日本 <&>"}
+	for i, title := range titles {
+		gh.issues[i+1] = &Issue{Number: i + 1, Title: title, State: "open"}
+	}
+	listJSONEnv(t, srv)
+	var out bytes.Buffer
+	if err := run(context.Background(), []string{"list", "--json"}, nil, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	var got []listedIssue
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("%q: %v", out.String(), err)
+	}
+	if len(got) != len(titles) {
+		t.Fatalf("got %d issues, want %d", len(got), len(titles))
+	}
+	for i, is := range got {
+		if want := titles[len(titles)-1-i]; is.Title != want {
+			t.Errorf("#%d title = %q, want %q", is.Number, is.Title, want)
+		}
+	}
+}
+
+// A GitHub error fails amf list --json without printing an array.
+func TestListJSONAPIError(t *testing.T) {
+	_, srv := newFakeGitHub(t)
+	target, _ := url.Parse(srv.URL)
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues") {
+			writeJSON(w, 502, map[string]string{"message": "Bad Gateway"})
+			return
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(failing.Close)
+	listJSONEnv(t, failing)
+	var out bytes.Buffer
+	if err := run(context.Background(), []string{"list", "--json"}, nil, &out, io.Discard); err == nil || !strings.Contains(err.Error(), "502") {
+		t.Errorf("err = %v, want the 502", err)
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout = %q, want nothing", out.String())
+	}
+}
+
+type failWriter struct{}
+
+func (failWriter) Write([]byte) (int, error) { return 0, errors.New("disk full") }
+
+// amf list --json returns the error when stdout can't be written.
+func TestListJSONWriteError(t *testing.T) {
+	_, srv := newFakeGitHub(t)
+	listJSONEnv(t, srv)
+	if err := run(context.Background(), []string{"list", "--json"}, nil, failWriter{}, io.Discard); err == nil || !strings.Contains(err.Error(), "disk full") {
+		t.Errorf("err = %v, want disk full", err)
 	}
 }
