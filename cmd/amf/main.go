@@ -46,8 +46,8 @@ Usage:
   amf init                                                           write .env (backing up an existing one) and create amf's labels
   amf issue "Title" [-b body | -f file.md] [--label L] [--no-label]  create an issue (body may also come from stdin)
   amf list [--state open|closed|all] [--label L] [--limit N]         list issues, newest first, with their amf labels
-  amf run <issue-number> [--agent A] [--agent-timeout 60m]           process one issue into a PR (also takes --eval-rounds, --log-level, --log-file)
-  amf watch [--agent A] [--interval 60s] [--label amf:ready]         process amf:ready issues as they arrive (also takes --agent-timeout, --eval-rounds, --log-level, --log-file)
+  amf run <issue-number> [--agent A] [--agent-timeout 60m]           process one issue into a PR (also takes --draft, --eval-rounds, --log-level, --log-file)
+  amf watch [--agent A] [--interval 60s] [--label amf:ready]         process amf:ready issues as they arrive (also takes --draft, --agent-timeout, --eval-rounds, --log-level, --log-file)
   amf pipeline [--fetch]                                             check the plan/code/eval pipeline in this checkout's AGENTS.md
   amf doctor                                                         check the setup here, one line per check, changing nothing
   amf update [--version vX.Y.Z] [--check]                            replace this amf binary with the latest (or given) release
@@ -189,13 +189,14 @@ func cmdRun(ctx context.Context, args []string, stderr io.Writer) error {
 	at, alias := addTimeoutFlags(fs)
 	evalRounds := fs.Int("eval-rounds", 2, "how many times a pipeline's eval stage may send the change back to code")
 	agent := fs.String("agent", "", agentFlagHelp)
+	draft := fs.Bool("draft", false, draftFlagHelp)
 	lo := addLogFlags(fs)
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return errUsage
 	}
 	if len(pos) != 1 {
-		fmt.Fprintln(stderr, "usage: amf run <issue-number> [--agent claudecode|codex|opencode] [--agent-timeout 60m] [--eval-rounds 2]")
+		fmt.Fprintln(stderr, "usage: amf run <issue-number> [--agent claudecode|codex|opencode] [--agent-timeout 60m] [--eval-rounds 2] [--draft]")
 		return errUsage
 	}
 	timeout, err := timeoutFlag(fs, at, alias)
@@ -214,6 +215,7 @@ func cmdRun(ctx context.Context, args []string, stderr io.Writer) error {
 		return err
 	}
 	defer r.Close()
+	r.Draft = *draft
 	err = redactErr(r.Redact, r.Run(ctx, n))
 	r.DB.logError(err)
 	return err
@@ -227,13 +229,14 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 	at, alias := addTimeoutFlags(fs)
 	evalRounds := fs.Int("eval-rounds", 2, "how many times a pipeline's eval stage may send the change back to code")
 	agent := fs.String("agent", "", agentFlagHelp)
+	draft := fs.Bool("draft", false, draftFlagHelp)
 	lo := addLogFlags(fs)
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return errUsage
 	}
 	if len(pos) != 0 {
-		fmt.Fprintln(stderr, "usage: amf watch [--agent claudecode|codex|opencode] [--interval 60s] [--label amf:ready] [--agent-timeout 60m] [--eval-rounds 2]")
+		fmt.Fprintln(stderr, "usage: amf watch [--agent claudecode|codex|opencode] [--interval 60s] [--label amf:ready] [--agent-timeout 60m] [--eval-rounds 2] [--draft]")
 		return errUsage
 	}
 	if *interval <= 0 {
@@ -251,6 +254,7 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 		return err
 	}
 	defer r.Close()
+	r.Draft = *draft
 	err = redactErr(r.Redact, r.Watch(ctx, *label, *interval))
 	r.DB.logError(err)
 	return err
@@ -258,6 +262,9 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 
 // agentFlagHelp describes --agent for run and watch.
 const agentFlagHelp = "agent for issues without a pipeline: claudecode, codex or opencode (default: claude if installed with ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN, else codex if installed with OPENAI_API_KEY, else opencode)"
+
+// draftFlagHelp describes --draft for run and watch.
+const draftFlagHelp = "open new pull requests as drafts (a retry leaves an open PR a draft or ready for review as it was)"
 
 // addTimeoutFlags registers the agent timeout flags for run and watch:
 // --agent-timeout, and the deprecated --timeout alias next to it.

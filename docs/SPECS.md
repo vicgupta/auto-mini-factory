@@ -22,6 +22,8 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened)
 
 - `amf:ready` marks an issue for amf. Adding it again retries an issue that is
   done or failed.
+- `amf:done` means amf produced a PR for the issue, a draft one (`--draft`)
+  included.
 - amf removes `amf:ready` when it starts, and an issue has at most one status
   label at a time.
 - amf owns these four labels and every `amf/issue-<N>` branch.
@@ -33,8 +35,8 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened)
 | `amf init` | Writes `./.env` and creates the labels (see below). |
 | `amf issue "Title" [-b body \| -f file \| -f -] [--label L] [--no-label]` | Creates an issue labeled `amf:ready`. The body can also come from stdin when it's piped. Prints `#N <url>`. |
 | `amf list [--state open\|closed\|all] [--label L] [--limit N]` | Lists issues, newest first (highest number first), with every page fetched and PRs left out. Columns: `ISSUE`, `STATE` (with `--state all` only), `AMF` (the issue's `amf` and `amf:*` labels, or `-`) and `TITLE`. `--limit N` (default `0`, no limit) prints only the first N issues after filtering; a negative value errors with `--limit must be 0 or more, got N`. Prints `No … in owner/name.` when nothing matches. Needs no git checkout. |
-| `amf run <N> [--agent A] [--agent-timeout 60m] [--eval-rounds 2] [--log-level L] [--log-file P]` | Processes issue N once. |
-| `amf watch [--agent A] [--interval 60s] [--label amf:ready] [--agent-timeout 60m] [--eval-rounds 2] [--log-level L] [--log-file P]` | Polls open issues with the label (every page), oldest first by issue number (GitHub's `created_at` can tie for issues opened in the same second), and processes them one at a time until interrupted. |
+| `amf run <N> [--agent A] [--agent-timeout 60m] [--eval-rounds 2] [--draft] [--log-level L] [--log-file P]` | Processes issue N once. |
+| `amf watch [--agent A] [--interval 60s] [--label amf:ready] [--agent-timeout 60m] [--eval-rounds 2] [--draft] [--log-level L] [--log-file P]` | Polls open issues with the label (every page), oldest first by issue number (GitHub's `created_at` can tie for issues opened in the same second), and processes them one at a time until interrupted. |
 | `amf pipeline [--fetch]` | Checks the pipeline in `AGENTS.md` of the enclosing checkout, as it is on disk. See below. |
 | `amf doctor` | Checks the whole setup, one line per check, changing nothing. See below. |
 | `amf update [--version vX.Y.Z] [--check]` | Replaces the running binary with the latest release, or with the given one, which can be a downgrade. Needs no `.env`. See below. |
@@ -57,6 +59,11 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened)
   positive.
 - `--eval-rounds` is how many times a pipeline's eval stage may send the
   change back to the code stage. A negative value is an error.
+- `--draft` (default off; `--draft=false` is the same as leaving it out)
+  opens each PR that `run` or `watch` creates as a draft, with or without a
+  pipeline. A retry that updates the branch's open PR leaves it a draft or
+  ready for review as it was, whatever the flag says; amf never converts a
+  PR either way, and marking a draft ready for review is up to you.
 - **Event log.** Besides its `amf: …` lines on stderr, each `run` and
   `watch` process writes an event log: one JSON object per line, with
   `time`, `level`, `msg`, `run_id` and, for a line about an issue, `issue`.
@@ -343,7 +350,11 @@ work. Starter skills are in this repo under `skills/`.
    credentials.
 9. **PR.** Open `amf/issue-N` → `<default>`, titled `Fix #N: <title>`. If
    the branch already has an open PR (a retry), the push has updated it, so
-   amf replaces that PR's title and body instead. The
+   amf replaces that PR's title and body instead. With `--draft`, the create
+   request sends `"draft": true`, so a new PR opens as a draft; without it
+   the request has no `draft` field and the PR is ready for review. An
+   updated PR keeps its draft or ready state: the update sends only the
+   title and body. The
    body is the summary (or `Resolves #N.` if there isn't one), then any
    pipeline sections, then `Closes #N` and an "Opened by amf" footer. amf
    first removes Claude attribution lines ("Generated with Claude Code",
@@ -489,7 +500,7 @@ event log opens, are not. The fields of each event, besides those:
 | `pg.retry` | debug | `attempt` (since the last success), `backoff`, `error` |
 | `pg.drop` | debug | `rows` that never reached the database, and `error` when amf gave up at exit |
 | `checkout.resolve` | debug | `how` (`checkout`, `clone` for a clone reused, `cloned`), `dir` |
-| `watch.start` | info | `repo`, `label`, `interval`, `timeout`, `eval_rounds`, `agent_flag`, `version` |
+| `watch.start` | info | `repo`, `label`, `interval`, `timeout`, `eval_rounds`, `draft`, `agent_flag`, `version` |
 | `watch.agents` | info | The heading line has none; one per agent with `agent`, `path`, `key` (the variable's name, never its value), `usable`, `model`; then `picked`, or `error` (warn) when none is usable |
 | `watch.tick` | debug | `cycle` (1 for the first poll), `issues`: how many the poll returned; warn with `error` when listing failed |
 | `watch.skip` | debug | `reason`: `pr`, `closed`, `in_progress` or `status_label` (done or failed without `amf:ready`) |

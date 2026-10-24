@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -1813,5 +1814,175 @@ func TestDoctorPostgres(t *testing.T) {
 		if strings.Contains(out, "secret") {
 			t.Errorf("doctor printed the password:\n%s", out)
 		}
+	}
+}
+
+// --- draft PRs ---
+
+// draftCLI runs amf with args, as a user would, against the fake GitHub and
+// a fake claude, from a checkout whose issues 1 and 2 are labeled amf:ready.
+// A watch runs until both issues are done.
+func draftCLI(t *testing.T, args ...string) (*fakeGitHub, string) {
+	t.Helper()
+	root, origin := setupRepo(t)
+	gh, srv := newFakeGitHub(t)
+	gh.issues[1] = readyIssue(1, "One")
+	gh.issues[2] = readyIssue(2, "Two")
+	t.Chdir(root)
+	for k, v := range map[string]string{
+		"GITHUB_TOKEN": "test-token", "GITHUB_REPO": "vic/demo", "AMF_API_URL": srv.URL, "AMF_CLONE_URL": origin,
+		"AMF_CLAUDE":        fakeAgent(t, "claude", shResult+"cat >/dev/null\necho x > x.txt\nresult 'Done.'\n"),
+		"ANTHROPIC_API_KEY": "sk-ant-test", "CLAUDE_CODE_OAUTH_TOKEN": "", "OPENAI_API_KEY": "",
+		"AMF_TRUSTED": "", "AMF_POSTGRES_URL": "", "AMF_AGENT_TIMEOUT": "", "AMF_LOG_LEVEL": "",
+	} {
+		t.Setenv(k, v)
+	}
+	var stderr syncBuffer
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- run(ctx, args, strings.NewReader(""), io.Discard, &stderr) }()
+	if args[0] == "watch" {
+		for !slices.Contains(gh.labels(1), labelDone) || !slices.Contains(gh.labels(2), labelDone) {
+			if ctx.Err() != nil {
+				t.Fatalf("amf %q: issues not processed:\n%s", args, stderr.String())
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		cancel()
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("amf %q: %v\n%s", args, err, stderr.String())
+	}
+	return gh, root
+}
+
+func TestDraftFlag(t *testing.T) {
+	for _, tc := range []struct {
+		args  []string
+		draft bool
+	}{
+		{[]string{"run", "1"}, false},
+		{[]string{"run", "1", "--draft"}, true},
+		{[]string{"run", "--draft", "1"}, true},
+		{[]string{"run", "1", "--draft=true"}, true},
+		{[]string{"run", "1", "--draft=false"}, false},
+		{[]string{"watch", "--interval", "50ms"}, false},
+		{[]string{"watch", "--draft", "--interval", "50ms"}, true},
+		{[]string{"watch", "--draft=false", "--interval", "50ms"}, false},
+	} {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			gh, root := draftCLI(t, append(tc.args, "--log-file", "off")...)
+			want := 1
+			if tc.args[0] == "watch" {
+				want = 2
+			}
+			if len(gh.creates) != want || len(gh.prs) != want {
+				t.Fatalf("creates = %v, PRs = %v, want %d", gh.creates, gh.prs, want)
+			}
+			for i, in := range gh.creates {
+				// The JSON boolean true for a draft; omitted otherwise, as before.
+				if d, ok := in["draft"]; tc.draft && d != true || !tc.draft && ok {
+					t.Errorf("create %d: draft = %#v (sent: %t), want %t", i, d, ok, tc.draft)
+				}
+				if gh.drafts[i] != tc.draft {
+					t.Errorf("PR %d: draft = %t, want %t", i, gh.drafts[i], tc.draft)
+				}
+				// A draft PR is done like any other: linked, labeled and cleaned up.
+				n := i + 1
+				if pr := gh.prs[i]; pr["title"] != fmt.Sprintf("Fix #%d: %s", n, gh.issues[n].Title) || !strings.HasPrefix(pr["body"], fmt.Sprintf("Done.\n\nCloses #%d", n)) {
+					t.Errorf("PR %d = %v", i, pr)
+				}
+				if c := gh.comments[n]; len(c) != 1 || c[0] != fmt.Sprintf("amf opened https://github.com/vic/demo/pull/%d for this issue.", 100+n) {
+					t.Errorf("#%d comments = %q", n, c)
+				}
+				if got := gh.labels(n); !reflect.DeepEqual(got, []string{labelDone}) {
+					t.Errorf("#%d labels = %v", n, got)
+				}
+				if _, err := os.Stat(filepath.Join(root, ".amf", "worktrees", fmt.Sprintf("issue-%d", n))); !os.IsNotExist(err) {
+					t.Errorf("#%d worktree still there: %v", n, err)
+				}
+			}
+			if len(gh.updates) != 0 {
+				t.Errorf("updates = %v", gh.updates)
+			}
+		})
+	}
+}
+
+func TestDraftFlagHelp(t *testing.T) {
+	for _, cmd := range []string{"run", "watch"} {
+		var stderr bytes.Buffer
+		if err := run(context.Background(), []string{cmd, "-h"}, nil, io.Discard, &stderr); !errors.Is(err, errUsage) {
+			t.Errorf("amf %s -h: %v", cmd, err)
+		}
+		if !strings.Contains(stderr.String(), "-draft") || !strings.Contains(stderr.String(), "open new pull requests as drafts") {
+			t.Errorf("amf %s -h doesn't describe --draft:\n%s", cmd, stderr.String())
+		}
+	}
+	if !strings.Contains(usage, "also takes --draft") {
+		t.Error("usage doesn't mention --draft")
+	}
+}
+
+func TestPipelineDraftPR(t *testing.T) {
+	skills := skillServer(t, testSkills)
+	root, _ := setupPipelineRepo(t, pipelineTable(skills.URL))
+	gh, srv := newFakeGitHub(t)
+	gh.issues[1] = readyIssue(1, "Add feature file")
+	r, log := newPipelineRunner(t, srv, skills, root)
+	r.Draft = true
+	if err := r.Run(context.Background(), 1); err != nil {
+		t.Fatalf("Run: %v\nlog:\n%s", err, log)
+	}
+	if len(gh.creates) != 1 || gh.creates[0]["draft"] != true || !gh.drafts[0] {
+		t.Fatalf("creates = %v", gh.creates)
+	}
+	if body := gh.prs[0]["body"]; !strings.Contains(body, "## Evaluation") || !strings.Contains(body, "Closes #1") {
+		t.Errorf("PR body = %q", body)
+	}
+	if c := gh.comments[1]; len(c) != 1 || !strings.Contains(c[0], "amf opened https://github.com/vic/demo/pull/101") {
+		t.Errorf("comments = %q", c)
+	}
+	if got := gh.labels(1); !reflect.DeepEqual(got, []string{labelDone}) {
+		t.Errorf("labels = %v", got)
+	}
+}
+
+// TestRetryKeepsDraftState checks that a retry updates the branch's open PR
+// and leaves it a draft or ready for review, whatever --draft says.
+func TestRetryKeepsDraftState(t *testing.T) {
+	for _, tc := range []struct{ existing, flag bool }{{true, false}, {true, true}, {false, true}, {false, false}} {
+		t.Run(fmt.Sprintf("draft=%t/--draft=%t", tc.existing, tc.flag), func(t *testing.T) {
+			root, _ := setupRepo(t)
+			gh, srv := newFakeGitHub(t)
+			gh.issues[1] = readyIssue(1, "Add a file")
+			gh.prs = []map[string]string{{"head": "amf/issue-1", "base": "main", "title": "old", "body": "old", "state": "open"}}
+			gh.drafts = []bool{tc.existing}
+			r, log := newTestRunner(t, srv, root, fakeAgent(t, "claude", shResult+"cat >/dev/null\necho two > f.txt\nresult 'Second try.'\n"))
+			r.Draft = tc.flag
+			if err := r.Run(context.Background(), 1); err != nil {
+				t.Fatalf("Run: %v\nlog:\n%s", err, log)
+			}
+			if len(gh.prs) != 1 || gh.drafts[0] != tc.existing {
+				t.Fatalf("PRs = %v, drafts = %v, want the one PR with draft %t", gh.prs, gh.drafts, tc.existing)
+			}
+			if pr := gh.prs[0]; pr["title"] != "Fix #1: Add a file" || !strings.HasPrefix(pr["body"], "Second try.\n\nCloses #1") {
+				t.Errorf("PR = %v", pr)
+			}
+			// One update, of the title and body only: no conversion either way.
+			if len(gh.updates) != 1 {
+				t.Fatalf("updates = %v", gh.updates)
+			}
+			if keys := slices.Sorted(maps.Keys(gh.updates[0])); !reflect.DeepEqual(keys, []string{"body", "title"}) {
+				t.Errorf("update sent %v", keys)
+			}
+			if c := gh.comments[1]; len(c) != 1 || !strings.Contains(c[0], "amf updated https://github.com/vic/demo/pull/101") {
+				t.Errorf("comments = %q", c)
+			}
+			if got := gh.labels(1); !reflect.DeepEqual(got, []string{labelDone}) {
+				t.Errorf("labels = %v", got)
+			}
+		})
 	}
 }

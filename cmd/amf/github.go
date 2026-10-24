@@ -324,8 +324,13 @@ func (g *GitHub) Comment(ctx context.Context, n int, body string) error {
 	return g.do(ctx, "POST", g.repoPath("/issues/%d/comments", n), map[string]any{"body": body}, nil)
 }
 
-func (g *GitHub) CreatePR(ctx context.Context, title, head, base, body string) (PullRequest, error) {
+// CreatePR opens a pull request from head into base, as a draft when draft
+// is true.
+func (g *GitHub) CreatePR(ctx context.Context, title, head, base, body string, draft bool) (PullRequest, error) {
 	in := map[string]any{"title": title, "head": head, "base": base, "body": body}
+	if draft {
+		in["draft"] = true
+	}
 	var pr PullRequest
 	err := g.do(ctx, "POST", g.repoPath("/pulls"), in, &pr)
 	return pr, err
@@ -345,7 +350,8 @@ func (g *GitHub) OpenPR(ctx context.Context, head string) (pr PullRequest, ok bo
 	return prs[0], true, nil
 }
 
-// UpdatePR replaces a pull request's title and body.
+// UpdatePR replaces a pull request's title and body, leaving it a draft or
+// ready for review as it was.
 func (g *GitHub) UpdatePR(ctx context.Context, n int, title, body string) (PullRequest, error) {
 	var pr PullRequest
 	err := g.do(ctx, "PATCH", g.repoPath("/pulls/%d", n), map[string]any{"title": title, "body": body}, &pr)
