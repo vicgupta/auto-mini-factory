@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -163,6 +164,8 @@ result 'Done. `+leak+`'
 	r.Redact = red
 	r.Log = &redactWriter{r: red, w: r.Log}
 	r.DB = &dbLog{red: red, ch: make(chan logRow, dbLogQueue), done: make(chan struct{})}
+	var events bytes.Buffer
+	r.Events = newEventLogger(r.Log, slog.LevelInfo, &events, slog.LevelDebug, red, "test-run")
 
 	if err := r.Run(context.Background(), 1); err != nil {
 		t.Fatalf("Run(1): %v\nlog:\n%s", err, log)
@@ -171,7 +174,7 @@ result 'Done. `+leak+`'
 		t.Fatal("Run(2) should fail")
 	}
 
-	outputs := map[string]string{"console": log.String()}
+	outputs := map[string]string{"console": log.String(), "events.jsonl": events.String()}
 	logs, _ := filepath.Glob(filepath.Join(root, ".amf", "logs", "*"))
 	for _, p := range logs {
 		outputs[p] = mustRead(t, p)

@@ -207,7 +207,8 @@ shift 3
 echo "a partial final message canary-secret-value" > "$1"
 trap '' TERM
 while :; do sleep 1; done`)
-	r.Timeout = 300 * time.Millisecond
+	// Long enough for the fake codex to write its partial message first.
+	r.Timeout = 2 * time.Second
 	r.KillGrace = 100 * time.Millisecond
 	r.Redact = newRedactor("canary-secret-value")
 
@@ -416,7 +417,7 @@ func TestAgentTimeoutValidation(t *testing.T) {
 		}
 	}
 	// A flag overrides it, so the bad value isn't in the way.
-	if _, err := newRunner(context.Background(), time.Hour, 0, "", io.Discard); err != nil && strings.Contains(err.Error(), "AMF_AGENT_TIMEOUT") {
+	if _, err := newRunner(context.Background(), time.Hour, 0, "", logOptions{}, io.Discard); err != nil && strings.Contains(err.Error(), "AMF_AGENT_TIMEOUT") {
 		t.Errorf("newRunner with a flag: %v", err)
 	}
 }
