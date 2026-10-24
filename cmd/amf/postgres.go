@@ -117,6 +117,9 @@ type pgConn struct {
 	r       *bufio.Reader
 	w       []byte // the messages being built, sent by flush
 	timeout time.Duration
+
+	tls  bool   // the connection is encrypted
+	auth string // how amf logged in: trust, password, md5 or scram-sha-256
 }
 
 // pgConnect connects to database on c's server and logs in.
@@ -184,12 +187,17 @@ func (p *pgConn) startup(ctx context.Context, c pgConfig, database string) error
 			code, data := binary.BigEndian.Uint32(body), body[4:]
 			switch code {
 			case 0: // AuthenticationOk
+				if p.auth == "" {
+					p.auth = "trust"
+				}
 			case 3: // cleartext password
+				p.auth = "password"
 				p.password([]byte(c.Password + "\x00"))
 			case 5: // MD5
 				if len(data) < 4 {
 					return errors.New("postgres: short MD5 salt")
 				}
+				p.auth = "md5"
 				inner := md5.Sum([]byte(c.Password + c.User))
 				outer := md5.Sum(append([]byte(hex.EncodeToString(inner[:])), data[:4]...))
 				p.password([]byte("md5" + hex.EncodeToString(outer[:]) + "\x00"))
@@ -197,6 +205,7 @@ func (p *pgConn) startup(ctx context.Context, c pgConfig, database string) error
 				if !strings.Contains(string(data), "SCRAM-SHA-256\x00") {
 					return fmt.Errorf("postgres: the server offers no authentication amf supports (%q)", strings.TrimRight(string(data), "\x00"))
 				}
+				p.auth = "scram-sha-256"
 				scram = newScramClient("", c.Password)
 				first := scram.first()
 				msg := append([]byte("SCRAM-SHA-256\x00"), binary.BigEndian.AppendUint32(nil, uint32(len(first)))...)
@@ -270,6 +279,7 @@ func (p *pgConn) startTLS(c pgConfig) error {
 		return fmt.Errorf("postgres: TLS: %w", err)
 	}
 	p.conn = tc
+	p.tls = true
 	return nil
 }
 

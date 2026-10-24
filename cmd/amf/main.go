@@ -3,6 +3,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"flag"
@@ -406,6 +407,9 @@ func newRunner(ctx context.Context, timeout time.Duration, evalRounds int, agent
 	if file != nil {
 		r.event(slog.LevelInfo, "log.file", 0, fmt.Sprintf("logging to %s", shownPath(r.Root, path)), "path", path)
 	}
+	r.event(slog.LevelDebug, "config.load", 0, fmt.Sprintf("configuration from %s", cmp.Or(cfg.EnvFile, "the environment")),
+		"paths", cfg.EnvPaths, "file", cfg.EnvFile, slog.Group("keys", cfg.configAttrs()...))
+	r.DB.setEvents(r.Events)
 	r.event(slog.LevelDebug, "checkout.resolve", 0, fmt.Sprintf("checkout: %s (%s)", r.Root, r.checkout), "how", r.checkout, "dir", r.Root)
 	return r, nil
 }

@@ -458,6 +458,10 @@ event log opens, are not. The fields of each event, besides those:
 | Event | Level | Fields |
 |---|---|---|
 | `log.file` | info | `path`: the event log |
+| `config.load` | debug | `paths` (the `.env` files looked for), `file` (the one read, or `""`), and `keys`: for each variable read, its `source` (`env`, `.env` or `default`) and `value`. Only `GITHUB_REPO`, `AMF_API_URL`, `OPENCODE_MODEL`, `AMF_AGENT_TIMEOUT`, `AMF_LOG_LEVEL`, `AMF_CLAUDE`, `AMF_CODEX` and `AMF_OPENCODE` show their value; every other one shows `set` or `unset` |
+| `pg.connect` | debug | With `AMF_POSTGRES_URL`: `host`, `port`, `database`, and `tls` and `auth` (`trust`, `password`, `md5` or `scram-sha-256`), or `error`; `created` when amf created the database. The first connection's event follows `log.file` |
+| `pg.retry` | debug | `attempt` (since the last success), `backoff`, `error` |
+| `pg.drop` | debug | `rows` that never reached the database, and `error` when amf gave up at exit |
 | `checkout.resolve` | debug | `how` (`checkout`, `clone` for a clone reused, `cloned`), `dir` |
 | `watch.start` | info | `repo`, `label`, `interval`, `timeout`, `eval_rounds`, `agent_flag`, `version` |
 | `watch.agents` | info | The heading line has none; one per agent with `agent`, `path`, `key` (the variable's name, never its value), `usable`, `model`; then `picked`, or `error` (warn) when none is usable |
@@ -479,6 +483,9 @@ event log opens, are not. The fields of each event, besides those:
 | `issue.code.round` | debug | `round` |
 | `issue.code.done` | info | `rounds`, without an eval stage |
 | `issue.eval.verdict` | info | `round`, `pass`, `parsed` (whether eval gave a verdict), and `next_round`, or `final: true` when no rounds are left |
+| `agent.start` | debug | `agent`, `binary`, `args`, `model`, `stage` (`agent run` without a pipeline), `dir`, `timeout`, `stdin_bytes` and `stdin_sha256` of the prompt, and `env_added` and `env_removed`: the names of the variables amf added, changed or removed for the agent, never their values |
+| `agent.exit` | debug | `agent`, `stage`, `exit_code` (-1 when killed or not started), `signal` when a signal ended it, `timed_out`, `duration_ms`, `stdout_bytes`, `stderr_bytes`, `out_bytes` (codex's and opencode's final-message file), and `result_bytes` and `result` (the final message's first 512 bytes), or `error` |
+| `agent.parse` | debug | Claude: `result_found`, `json` (whether its output was JSON); codex and opencode: `out_file` (whether they wrote their final message) |
 | `agent.timeout` | warn | `agent`, `stage`, `limit`, `elapsed`, `grace`, `pgid`, `bytes` (stdout so far), `log` |
 | `issue.push` | info | `branch` |
 | `issue.pr` | info | `action` (`opened`, `updated`, or `updating` when the branch has an open PR), `number`, `url` |

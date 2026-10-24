@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
+	"maps"
 	"os"
+	"slices"
 	"strings"
 	"time"
 )
@@ -58,12 +61,24 @@ type Config struct {
 	// Trusted is AMF_TRUSTED, the lower-case GitHub logins whose issues amf
 	// works on. Nil means anyone's.
 	Trusted []string
+
+	// EnvPaths are the .env files loadConfig looked for, and EnvFile the
+	// one it read, or "".
+	EnvPaths []string
+	EnvFile  string
+	// seen is each variable loadConfig read: where from and its value.
+	seen map[string]configValue
 }
+
+// configValue is where a variable's value came from, env, .env or
+// default, and the value.
+type configValue struct{ From, Value string }
 
 // loadConfig reads the first .env file in paths that exists. Variables set in
 // the process environment take precedence over the file.
 func loadConfig(paths ...string) (Config, error) {
 	file := map[string]string{}
+	envFile := ""
 	for _, p := range paths {
 		f, err := os.Open(p)
 		if errors.Is(err, fs.ErrNotExist) {
@@ -77,16 +92,21 @@ func loadConfig(paths ...string) (Config, error) {
 		if err != nil {
 			return Config{}, fmt.Errorf("%s: %w", p, err)
 		}
+		envFile = p
 		break
 	}
+	seen := map[string]configValue{}
 	// Unfilled placeholders from `amf init` count as unset.
 	get := func(key, def string) string {
 		if v := os.Getenv(key); v != "" && !isPlaceholder(v) {
+			seen[key] = configValue{"env", v}
 			return v
 		}
 		if v := file[key]; v != "" && !isPlaceholder(v) {
+			seen[key] = configValue{".env", v}
 			return v
 		}
+		seen[key] = configValue{"default", def}
 		return def
 	}
 
@@ -106,6 +126,9 @@ func loadConfig(paths ...string) (Config, error) {
 		Trusted:       parseTrusted(get("AMF_TRUSTED", "")),
 		AgentTimeout:  get("AMF_AGENT_TIMEOUT", ""),
 		LogLevel:      get("AMF_LOG_LEVEL", ""),
+		EnvPaths:      paths,
+		EnvFile:       envFile,
+		seen:          seen,
 	}
 	if cfg.Token == "" {
 		return cfg, errors.New("GITHUB_TOKEN is not set (run amf init, then edit .env)")
@@ -192,4 +215,27 @@ func parseDotEnv(r io.Reader) (map[string]string, error) {
 		vars[key] = val
 	}
 	return vars, sc.Err()
+}
+
+// shownConfig are the variables whose values config.load may log; every
+// other one is logged only as set or unset.
+var shownConfig = []string{"GITHUB_REPO", "AMF_API_URL", "OPENCODE_MODEL", "AMF_AGENT_TIMEOUT", "AMF_LOG_LEVEL", "AMF_CLAUDE", "AMF_CODEX", "AMF_OPENCODE"}
+
+// configAttrs is, for config.load, each variable loadConfig read with where
+// it came from and its value, or set or unset for those not in shownConfig.
+func (cfg Config) configAttrs() []any {
+	keys := slices.Sorted(maps.Keys(cfg.seen))
+	var out []any
+	for _, k := range keys {
+		v := cfg.seen[k]
+		shown := v.Value
+		if !slices.Contains(shownConfig, k) {
+			shown = "unset"
+			if v.Value != "" {
+				shown = "set"
+			}
+		}
+		out = append(out, slog.Group(k, "source", v.From, "value", shown))
+	}
+	return out
 }
