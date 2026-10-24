@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -413,5 +414,28 @@ func TestAgentEnv(t *testing.T) {
 		if got := r.agentEnv(env, agent, "/wt"); !reflect.DeepEqual(got, want) {
 			t.Errorf("agentEnv(%s) = %v, want %v", agent, got, want)
 		}
+	}
+}
+
+// An OPENCODE_API_KEY already exported in the shell reaches only opencode,
+// whichever way Claude is authenticated.
+func TestAgentEnvOpencodeKeyOnlyForOpencode(t *testing.T) {
+	env := []string{"PATH=/bin", "OPENCODE_API_KEY=oc_sk_shell"}
+	for i, r := range []*Runner{{}, {ClaudeToken: "oat"}, {AnthropicKey: "key"}, {OpencodeKey: "oc_sk_cfg"}} {
+		for _, agent := range []string{agentClaude, agentCodex} {
+			for _, kv := range r.agentEnv(env, agent, "/wt") {
+				if strings.HasPrefix(kv, "OPENCODE_API_KEY=") {
+					t.Errorf("runner %d: agentEnv(%s) leaks %s", i, agent, kv)
+				}
+			}
+		}
+	}
+	got := (&Runner{}).agentEnv(env, agentOpencode, "/wt")
+	if !slices.Contains(got, "OPENCODE_API_KEY=oc_sk_shell") {
+		t.Errorf("agentEnv(opencode) dropped the shell key: %v", got)
+	}
+	got = (&Runner{OpencodeKey: "oc_sk_cfg"}).agentEnv(env, agentOpencode, "/wt")
+	if !slices.Contains(got, "OPENCODE_API_KEY=oc_sk_cfg") || slices.Contains(got, "OPENCODE_API_KEY=oc_sk_shell") {
+		t.Errorf("agentEnv(opencode) should use the configured key: %v", got)
 	}
 }

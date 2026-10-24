@@ -39,6 +39,10 @@ type Config struct {
 	// OpenAIKey is OPENAI_API_KEY. With it, amf picks codex for issues
 	// without a pipeline (when claude can't run), and passes it to Codex.
 	OpenAIKey string
+	// OpencodeKey is OPENCODE_API_KEY, an OpenCode Console API key. amf
+	// passes it to opencode, and with it opencode can run paid opencode/
+	// and Go opencode-go/ models.
+	OpencodeKey string
 	// OpencodeModel is OPENCODE_MODEL, the model amf runs opencode with,
 	// defaulting to defaultOpencodeModel.
 	OpencodeModel string
@@ -121,6 +125,7 @@ func loadConfig(paths ...string) (Config, error) {
 		ClaudeToken:   get("CLAUDE_CODE_OAUTH_TOKEN", ""),
 		AnthropicKey:  get("ANTHROPIC_API_KEY", ""),
 		OpenAIKey:     get("OPENAI_API_KEY", ""),
+		OpencodeKey:   get("OPENCODE_API_KEY", ""),
 		OpencodeModel: get("OPENCODE_MODEL", defaultOpencodeModel),
 		PostgresURL:   get("AMF_POSTGRES_URL", ""),
 		Trusted:       parseTrusted(get("AMF_TRUSTED", "")),

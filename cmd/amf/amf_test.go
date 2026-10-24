@@ -684,6 +684,7 @@ func TestMain(m *testing.M) {
 		// Agent keys decide which agent amf picks, so none leak in either.
 		os.Unsetenv("ANTHROPIC_API_KEY")
 		os.Unsetenv("OPENAI_API_KEY")
+		os.Unsetenv("OPENCODE_API_KEY")
 		os.Unsetenv("OPENCODE_MODEL")
 	}
 	if _, err := exec.LookPath("git"); err != nil {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -185,7 +186,8 @@ func (d *doctor) check(ctx context.Context) {
 	// The pipeline, its skills, and the agents. Without a pipeline, amf runs
 	// the first usable agent, as defaultAgent picks it (unless run or watch
 	// get --agent).
-	agents := &Runner{Claude: cfg.Claude, Codex: cfg.Codex, Opencode: cfg.Opencode, ClaudeToken: cfg.ClaudeToken, AnthropicKey: cfg.AnthropicKey, OpenAIKey: cfg.OpenAIKey}
+	agents := &Runner{Claude: cfg.Claude, Codex: cfg.Codex, Opencode: cfg.Opencode, ClaudeToken: cfg.ClaudeToken, AnthropicKey: cfg.AnthropicKey, OpenAIKey: cfg.OpenAIKey,
+		OpencodeKey: cfg.OpencodeKey, OpencodeModel: cfg.OpencodeModel}
 	fallback, fallbackErr := agents.defaultAgent()
 	runs := "no agent (none is available)"
 	if fallbackErr == nil {
@@ -240,6 +242,9 @@ func (d *doctor) check(ctx context.Context) {
 		case p == nil && fallbackErr != nil && agent == agentClaude:
 			// One problem, reported once: amf has no agent it can pick.
 			d.line("FAIL", agent, "%v", fallbackErr)
+		case err == nil && p == nil && agent == agentOpencode && !keyed(agents, agent):
+			d.line("warn", agent, "%s, %s; amf picks it for %s only with OPENCODE_API_KEY or a saved login, so it runs %s instead",
+				path, agentVersion(ctx, path), cfg.OpencodeModel, runs)
 		case err == nil && p == nil && !keyed(agents, agent):
 			d.line("warn", agent, "%s, %s; amf picks it only with %s, so it runs %s instead (--agent %s runs it with its own login)",
 				path, agentVersion(ctx, path), strings.Join(agentKeys[agent], " or "), runs, agent)
@@ -273,6 +278,7 @@ func (d *doctor) check(ctx context.Context) {
 	} else {
 		d.line("ok", "codex login", "OPENAI_API_KEY is not set; codex uses its own login, and amf runs it only for a pipeline or --agent codex")
 	}
+	d.checkOpencodeAuth(ctx, cfg, envFile, agents)
 	d.checkOpencodeModel(ctx, cfg)
 	if parsed {
 		d.checkPostgres(ctx, cfg, envFile)
@@ -342,6 +348,94 @@ func (d *doctor) checkOpencodeModel(ctx context.Context, cfg Config) {
 		}
 	}
 	d.line("warn", "opencode model", "%s%s isn't in `opencode models`, so opencode runs would fail; set OPENCODE_MODEL to one it lists", cfg.OpencodeModel, which)
+}
+
+// opencodeAPI is where OpenCode's Console serves its model lists, one per
+// plan; tests point it at a fake.
+var opencodeAPI = "https://opencode.ai/inference"
+
+// checkOpencodeAuth says whether opencode can run OPENCODE_MODEL: a paid
+// opencode/ or Go opencode-go/ model needs OPENCODE_API_KEY or a saved
+// login. With the key set, it asks OpenCode which plans the key grants, and
+// whether OPENCODE_MODEL is one of their models.
+func (d *doctor) checkOpencodeAuth(ctx context.Context, cfg Config, envFile string, agents *Runner) {
+	model, provider := cfg.OpencodeModel, opencodeProvider(cfg.OpencodeModel)
+	if cfg.OpencodeKey == "" {
+		_, installed := exec.LookPath(cfg.Opencode)
+		switch {
+		case provider == "":
+			d.line("ok", "opencode auth", "OPENCODE_API_KEY is not set; %s needs none", model)
+		case installed != nil:
+			d.line("skip", "opencode auth", "OPENCODE_API_KEY is not set; opencode is not installed")
+		case keyed(agents, agentOpencode):
+			d.line("ok", "opencode auth", "OPENCODE_API_KEY is not set; opencode runs %s with its saved login", model)
+		default:
+			d.line("FAIL", "opencode auth", "OPENCODE_API_KEY is not set and opencode has no saved login, so it can't run %s; "+
+				"set OPENCODE_API_KEY to an OpenCode Console API key, or OPENCODE_MODEL to a free model", model)
+		}
+		return
+	}
+	from := source("OPENCODE_API_KEY", envFile)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	console, consoleStatus, consoleErr := opencodeModels(ctx, cfg.OpencodeKey, "/v1/models")
+	goModels, goStatus, goErr := opencodeModels(ctx, cfg.OpencodeKey, "/go/v1/models")
+	switch {
+	case consoleStatus == http.StatusUnauthorized || goStatus == http.StatusUnauthorized:
+		d.line("FAIL", "opencode auth", "OpenCode rejected OPENCODE_API_KEY, from %s; check it, or create a new one in the OpenCode Console", from)
+		return
+	case consoleErr != nil:
+		d.line("warn", "opencode auth", "OPENCODE_API_KEY is set, from %s; couldn't check it: %v", from, consoleErr)
+		return
+	case goErr != nil && goStatus != http.StatusForbidden:
+		d.line("warn", "opencode auth", "OPENCODE_API_KEY is set, from %s; couldn't check its Go plan: %v", from, goErr)
+		return
+	}
+	plans := "pay-as-you-go, not Go (its workspace isn't subscribed to OpenCode Go)"
+	if goErr == nil {
+		plans = "pay-as-you-go and Go"
+	}
+	_, id, _ := strings.Cut(model, "/")
+	switch {
+	case provider == "opencode-go" && goErr != nil:
+		d.line("FAIL", "opencode auth", "OPENCODE_API_KEY, from %s, grants %s, so opencode can't run %s", from, plans, model)
+	case provider == "opencode-go" && !slices.Contains(goModels, id):
+		d.line("warn", "opencode auth", "OPENCODE_API_KEY, from %s, grants %s, but Go has no model %s", from, plans, id)
+	case strings.HasPrefix(model, "opencode/") && !slices.Contains(console, id):
+		d.line("warn", "opencode auth", "OPENCODE_API_KEY, from %s, grants %s, but the Console has no model %s", from, plans, id)
+	default:
+		d.line("ok", "opencode auth", "OPENCODE_API_KEY, from %s, grants %s; opencode runs %s with it", from, plans, model)
+	}
+}
+
+// opencodeModels lists the ids of the models at path under opencodeAPI, as
+// key sees them, with the HTTP status (0 if there was no response).
+func opencodeModels(ctx context.Context, key, path string) (ids []string, status int, err error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", opencodeAPI+path, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("Authorization", "Bearer "+key)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, resp.StatusCode, fmt.Errorf("GET %s: %s", opencodeAPI+path, resp.Status)
+	}
+	var list struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&list); err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("GET %s: %w", opencodeAPI+path, err)
+	}
+	for _, m := range list.Data {
+		ids = append(ids, m.ID)
+	}
+	return ids, resp.StatusCode, nil
 }
 
 func (d *doctor) checkVersion(ctx context.Context) {
