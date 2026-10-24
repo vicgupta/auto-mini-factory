@@ -103,7 +103,8 @@ func cmdPipeline(ctx context.Context, args []string, stdout, stderr io.Writer) e
 }
 
 // noPipeline reports which agent amf runs without a pipeline: the first
-// installed of claude, codex and opencode. None installed is an error.
+// usable of claude, codex and opencode (see pickAgent). None usable is an
+// error.
 func noPipeline(ctx context.Context, stdout io.Writer, why string) error {
 	cfg, _ := loadConfig(envPaths(ctx)...)
 	r := &Runner{Claude: cfg.Claude, Codex: cfg.Codex, Opencode: cfg.Opencode, ClaudeToken: cfg.ClaudeToken, AnthropicKey: cfg.AnthropicKey, OpenAIKey: cfg.OpenAIKey}

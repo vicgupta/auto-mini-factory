@@ -279,7 +279,7 @@ func (r *Runner) process(ctx context.Context, issue Issue, base string, p *Pipel
 		if summary, err = r.runAgent(ctx, agent, "", model, wt, buildPrompt(r.Repo, branch, issue), log, out); err != nil {
 			return PullRequest{}, false, err
 		}
-		if err := commitAll(ctx, wt, title, n, base); err != nil {
+		if err := commitAll(ctx, wt, title, n, base, agent); err != nil {
 			return PullRequest{}, false, err
 		}
 	} else {
@@ -371,9 +371,9 @@ func (r *Runner) prepareWorktree(ctx context.Context, wt, branch, base string) e
 	return err
 }
 
-// commitAll commits whatever Claude changed and fails if the branch ends up
-// changing nothing relative to base.
-func commitAll(ctx context.Context, wt, title string, n int, base string) error {
+// commitAll commits whatever the agent changed and fails if the branch ends
+// up changing nothing relative to base.
+func commitAll(ctx context.Context, wt, title string, n int, base, agent string) error {
 	if _, err := git(ctx, wt, "add", "-A"); err != nil {
 		return err
 	}
@@ -386,14 +386,14 @@ func commitAll(ctx context.Context, wt, title string, n int, base string) error 
 			return err
 		}
 	}
-	// Claude may have committed on its own despite the prompt, so compare
+	// The agent may have committed on its own despite the prompt, so compare
 	// trees rather than look for amf's commit.
 	changed, err := changedPaths(ctx, wt, base)
 	if err != nil {
 		return err
 	}
 	if len(changed) == 0 {
-		return errors.New("claude finished without making any changes")
+		return fmt.Errorf("%s finished without making any changes", agentName(agent))
 	}
 	return pathRefusal(changed)
 }

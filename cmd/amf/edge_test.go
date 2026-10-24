@@ -694,6 +694,23 @@ result 'Nothing really.'
 	}
 }
 
+// The no-changes error names the agent that ran, not always claude.
+func TestRunWithoutChangesNamesTheAgent(t *testing.T) {
+	root, _ := setupRepo(t)
+	gh, srv := newFakeGitHub(t)
+	gh.issues[1] = readyIssue(1, "Do nothing")
+	r, _ := newTestRunner(t, srv, root, "")
+	r.Agent = agentOpencode
+	r.Opencode = fakeAgent(t, "opencode", "cat >/dev/null; echo 'Nothing to do.'\n")
+	err := r.Run(context.Background(), 1)
+	if err == nil || !strings.Contains(err.Error(), "opencode finished without making any changes") {
+		t.Fatalf("error = %v", err)
+	}
+	if c := gh.comments[1]; len(c) != 1 || !strings.Contains(c[0], "opencode finished without making any changes") {
+		t.Errorf("comments = %v", c)
+	}
+}
+
 func TestRerunUpdatesOpenPR(t *testing.T) {
 	root, origin := setupRepo(t)
 	gh, srv := newFakeGitHub(t)

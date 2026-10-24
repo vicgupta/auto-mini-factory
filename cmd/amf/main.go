@@ -1,5 +1,5 @@
 // Command amf (autonomous mini factory) turns GitHub issues into pull
-// requests with Claude Code. See README.md.
+// requests with coding agents: Claude Code, Codex or opencode. See README.md.
 package main
 
 import (
@@ -43,14 +43,14 @@ const defaultAgentTimeout = 60 * time.Minute
 const usage = `amf turns GitHub issues into pull requests with coding agents: Claude Code, Codex or opencode.
 
 Usage:
-  amf init                                                    write .env (backing up an existing one) and create amf's labels
-  amf issue "Title" [-b body | -f file.md] [--no-label]       create an issue (body may also come from stdin)
-  amf list [--state open|closed|all] [--label L] [--limit N]  list issues, newest first, with their amf labels
-  amf run <issue-number> [--agent A] [--agent-timeout 60m]    process one issue into a PR (also takes --eval-rounds, --log-level, --log-file)
-  amf watch [--agent A] [--interval 60s] [--label amf:ready]  process amf:ready issues as they arrive (also takes --agent-timeout, --eval-rounds, --log-level, --log-file)
-  amf pipeline [--fetch]                                      check the plan/code/eval pipeline in this checkout's AGENTS.md
-  amf doctor                                                  check the setup here, one line per check, changing nothing
-  amf update [--version vX.Y.Z] [--check]                     replace this amf binary with the latest (or given) release
+  amf init                                                           write .env (backing up an existing one) and create amf's labels
+  amf issue "Title" [-b body | -f file.md] [--label L] [--no-label]  create an issue (body may also come from stdin)
+  amf list [--state open|closed|all] [--label L] [--limit N]         list issues, newest first, with their amf labels
+  amf run <issue-number> [--agent A] [--agent-timeout 60m]           process one issue into a PR (also takes --eval-rounds, --log-level, --log-file)
+  amf watch [--agent A] [--interval 60s] [--label amf:ready]         process amf:ready issues as they arrive (also takes --agent-timeout, --eval-rounds, --log-level, --log-file)
+  amf pipeline [--fetch]                                             check the plan/code/eval pipeline in this checkout's AGENTS.md
+  amf doctor                                                         check the setup here, one line per check, changing nothing
+  amf update [--version vX.Y.Z] [--check]                            replace this amf binary with the latest (or given) release
   amf version
 
 Configuration is read from .env (or the environment):
@@ -146,7 +146,7 @@ func cmdIssue(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 		return errUsage
 	}
 	if len(pos) != 1 || strings.TrimSpace(pos[0]) == "" {
-		fmt.Fprintln(stderr, `usage: amf issue "Title" [-b body | -f file.md] [--no-label]`)
+		fmt.Fprintln(stderr, `usage: amf issue "Title" [-b body | -f file.md] [--label L] [--no-label]`)
 		return errUsage
 	}
 

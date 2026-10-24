@@ -18,7 +18,7 @@ import (
 // OPENCODE_MODEL is unset.
 const defaultOpencodeModel = "opencode/big-pickle"
 
-// Config is everything amf needs to talk to GitHub and Claude Code.
+// Config is everything amf needs to talk to GitHub and run the agents.
 type Config struct {
 	Token    string // GITHUB_TOKEN
 	Repo     string // GITHUB_REPO, as owner/name
