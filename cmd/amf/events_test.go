@@ -61,7 +61,7 @@ func TestWatchEvents(t *testing.T) {
 case "$p" in *"# #2:"*) echo broken >&2; exit 3;; esac
 echo x > x.txt; result 'Done.'
 `))
-	var file bytes.Buffer
+	var file syncBuffer
 	r.Events = newEventLogger(r.Log, slog.LevelInfo, &file, slog.LevelDebug, nil, "run")
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -69,7 +69,9 @@ echo x > x.txt; result 'Done.'
 	time.AfterFunc(20*time.Second, cancel) // never leave a hung test running
 	done := make(chan error, 1)
 	go func() { done <- r.Watch(ctx, "amf:ready", 20*time.Millisecond) }()
-	for !slices.Contains(gh.labels(1), "amf:done") || !slices.Contains(gh.labels(2), "amf:failed") {
+	// #3 comes after #2 in a cycle, so wait for its skip too.
+	for !slices.Contains(gh.labels(1), "amf:done") || !slices.Contains(gh.labels(2), "amf:failed") ||
+		!strings.Contains(file.String(), `"event":"watch.skip"`) {
 		if ctx.Err() != nil {
 			t.Fatalf("issues not processed; log:\n%s", log)
 		}
@@ -448,13 +450,16 @@ echo x > x.txt; result 'Done.'
 	time.AfterFunc(20*time.Second, cancel)
 	done := make(chan error, 1)
 	go func() { done <- r.Watch(ctx, "amf:ready", 20*time.Millisecond) }()
-	for !slices.Contains(gh.labels(1), "amf:done") || !slices.Contains(gh.labels(2), "amf:failed") {
+	// #3 comes after #2 in a cycle, so wait for its skip, then for a few
+	// more polls, each skipping #3 again.
+	for !slices.Contains(gh.labels(1), "amf:done") || !slices.Contains(gh.labels(2), "amf:failed") ||
+		r.stats.snapshot().Issues.Skipped == 0 {
 		if ctx.Err() != nil {
 			t.Fatalf("issues not processed; log:\n%s", log)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	time.Sleep(150 * time.Millisecond) // a few more polls, each skipping #3 again
+	time.Sleep(100 * time.Millisecond)
 	cancel()
 	<-done
 	// After each issue, summary.json is already there.
