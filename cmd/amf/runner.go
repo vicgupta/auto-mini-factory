@@ -72,8 +72,11 @@ type Runner struct {
 	// Draft opens new pull requests as drafts, from --draft. A retry that
 	// updates an open PR leaves it a draft or ready for review as it was.
 	Draft bool
-	HTTP  *http.Client // for downloading skills; nil means a default client
-	Log   io.Writer    // progress output
+	// ExcludeLabels, from watch's --exclude-label, makes watch skip issues
+	// with any of these labels, leaving them as they are.
+	ExcludeLabels []string
+	HTTP          *http.Client // for downloading skills; nil means a default client
+	Log           io.Writer    // progress output
 	// DB, when set, also gets every agent's output; Log already sends it
 	// amf's own lines.
 	DB *dbLog
@@ -589,12 +592,26 @@ func skipReason(is Issue) string {
 	return ""
 }
 
+// excludedLabel is the first of exclude that the issue has, or "".
+func excludedLabel(is Issue, exclude []string) string {
+	for _, l := range exclude {
+		if is.HasLabel(l) {
+			return l
+		}
+	}
+	return ""
+}
+
 // Watch polls for open issues labeled label and runs them one at a time
-// until ctx is cancelled.
+// until ctx is cancelled, skipping those with any of r.ExcludeLabels.
 func (r *Runner) Watch(ctx context.Context, label string, interval time.Duration) error {
 	ctx = withEvents(ctx, r.Events, 0)
-	r.event(slog.LevelInfo, "watch.start", 0, fmt.Sprintf("watching %s for issues labeled %q every %s (Ctrl-C to stop)", r.Repo, label, interval),
-		"repo", r.Repo, "label", label, "interval", interval.String(), "timeout", r.Timeout.String(),
+	except := ""
+	if len(r.ExcludeLabels) > 0 {
+		except = fmt.Sprintf(", except those labeled %q", r.ExcludeLabels)
+	}
+	r.event(slog.LevelInfo, "watch.start", 0, fmt.Sprintf("watching %s for issues labeled %q%s every %s (Ctrl-C to stop)", r.Repo, label, except, interval),
+		"repo", r.Repo, "label", label, "exclude_labels", append([]string{}, r.ExcludeLabels...), "interval", interval.String(), "timeout", r.Timeout.String(),
 		"eval_rounds", r.EvalRounds, "draft", r.Draft, "agent_flag", agentName(r.Agent), "version", buildVersion())
 	r.event(slog.LevelInfo, "watch.agents", 0, "agents for issues without a pipeline (claude and codex need a key, opencode one for a paid model):")
 	for _, st := range r.agentStatuses() {
@@ -624,6 +641,10 @@ func (r *Runner) Watch(ctx context.Context, label string, interval time.Duration
 			}
 			if why := skipReason(is); why != "" {
 				r.event(slog.LevelDebug, "watch.skip", is.Number, fmt.Sprintf("#%d: skipped (%s)", is.Number, why), "reason", why)
+				continue
+			}
+			if l := excludedLabel(is, r.ExcludeLabels); l != "" {
+				r.event(slog.LevelDebug, "watch.skip", is.Number, fmt.Sprintf("#%d: skipped (excluded_label %q)", is.Number, l), "reason", "excluded_label", "label", l)
 				continue
 			}
 			if err := r.Run(ctx, is.Number); err != nil {

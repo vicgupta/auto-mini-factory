@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -47,7 +48,7 @@ Usage:
   amf issue "Title" [-b body | -f file.md] [--label L] [--no-label]  create an issue (body may also come from stdin)
   amf list [--state open|closed|all] [--label L] [--limit N]         list issues, newest first, with their amf labels (also takes --json)
   amf run <issue-number> [--agent A] [--agent-timeout 60m]           process one issue into a PR (also takes --draft, --eval-rounds, --log-level, --log-file)
-  amf watch [--agent A] [--interval 60s] [--label amf:ready]         process amf:ready issues as they arrive (also takes --draft, --agent-timeout, --eval-rounds, --log-level, --log-file)
+  amf watch [--agent A] [--interval 60s] [--label amf:ready]         process amf:ready issues as they arrive (also takes --exclude-label, --draft, --agent-timeout, --eval-rounds, --log-level, --log-file)
   amf pipeline [--fetch]                                             check the plan/code/eval pipeline in this checkout's AGENTS.md
   amf doctor                                                         check the setup here, one line per check, changing nothing
   amf update [--version vX.Y.Z] [--check]                            replace this amf binary with the latest (or given) release
@@ -228,6 +229,8 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 	fs.SetOutput(stderr)
 	interval := fs.Duration("interval", 60*time.Second, "how often to poll GitHub")
 	label := fs.String("label", labelReady, "process open issues with this label")
+	var exclude labelsFlag
+	fs.Var(&exclude, "exclude-label", "skip issues with this `label`, leaving them as they are (repeatable: any of them skips)")
 	at, alias := addTimeoutFlags(fs)
 	evalRounds := fs.Int("eval-rounds", 2, "how many times a pipeline's eval stage may send the change back to code")
 	agent := fs.String("agent", "", agentFlagHelp)
@@ -238,11 +241,14 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 		return errUsage
 	}
 	if len(pos) != 0 {
-		fmt.Fprintln(stderr, "usage: amf watch [--agent claudecode|codex|opencode] [--interval 60s] [--label amf:ready] [--agent-timeout 60m] [--eval-rounds 2] [--draft]")
+		fmt.Fprintln(stderr, "usage: amf watch [--agent claudecode|codex|opencode] [--interval 60s] [--label amf:ready] [--exclude-label L]... [--agent-timeout 60m] [--eval-rounds 2] [--draft]")
 		return errUsage
 	}
 	if *interval <= 0 {
 		return errors.New("--interval must be positive")
+	}
+	if slices.Contains(exclude, "") {
+		return errors.New("--exclude-label can't be empty")
 	}
 	timeout, err := timeoutFlag(fs, at, alias)
 	if err != nil {
@@ -257,9 +263,23 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 	}
 	defer r.Close()
 	r.Draft = *draft
+	r.ExcludeLabels = exclude
 	err = redactErr(r.Redact, r.Watch(ctx, *label, *interval))
 	r.DB.logError(err)
 	return err
+}
+
+// labelsFlag is a repeatable label flag: each value trimmed, duplicates
+// dropped. An empty value stays in, for the command to reject.
+type labelsFlag []string
+
+func (f *labelsFlag) String() string { return strings.Join(*f, ",") }
+
+func (f *labelsFlag) Set(s string) error {
+	if s = strings.TrimSpace(s); !slices.Contains(*f, s) {
+		*f = append(*f, s)
+	}
+	return nil
 }
 
 // agentFlagHelp describes --agent for run and watch.

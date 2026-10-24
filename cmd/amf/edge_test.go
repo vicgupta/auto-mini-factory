@@ -10,8 +10,10 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"maps"
 	"net"
 	"net/http"
@@ -355,6 +357,9 @@ func TestCommandLineErrors(t *testing.T) {
 		{[]string{"watch", "--interval", "0"}, "--interval must be positive"},
 		{[]string{"watch", "--timeout", "0"}, "--timeout: agent timeout must be positive"},
 		{[]string{"watch", "--eval-rounds", "-2"}, "can't be negative"},
+		{[]string{"watch", "--exclude-label", ""}, "--exclude-label can't be empty"},
+		{[]string{"watch", "--exclude-label", "blocked", "--exclude-label", " \t"}, "--exclude-label can't be empty"},
+		{[]string{"run", "1", "--exclude-label", "blocked"}, "usage"},
 		{[]string{"list", "extra"}, "usage"},
 		{[]string{"list", "--state", "bogus"}, "--state must be"},
 		{[]string{"issue"}, "usage"},
@@ -1345,6 +1350,159 @@ func TestWatchDoesntRetryUntrustedIssues(t *testing.T) {
 	r.Watch(ctx, "amf:ready", 20*time.Millisecond)
 	if c := gh.comments[1]; len(c) != 1 {
 		t.Errorf("watch commented %d times: %q", len(c), c)
+	}
+}
+
+// --exclude-label holds issues in the queue: watch leaves them as they are
+// until the label goes, and works on the others meanwhile.
+func TestWatchExcludeLabels(t *testing.T) {
+	root, _ := setupRepo(t)
+	gh, srv := newFakeGitHub(t)
+	withLabels := func(is *Issue, labels ...string) *Issue {
+		for _, l := range labels {
+			is.Labels = append(is.Labels, Label{Name: l})
+		}
+		return is
+	}
+	gh.issues[1] = withLabels(readyIssue(1, "Blocked"), "blocked")
+	gh.issues[2] = readyIssue(2, "Eligible")
+	gh.issues[3] = withLabels(readyIssue(3, "Held twice"), "needs-human", "blocked")
+	gh.issues[4] = withLabels(readyIssue(4, "Busy"), "amf:in-progress", "blocked")
+	ran := filepath.Join(t.TempDir(), "ran")
+	r, log := newTestRunner(t, srv, root, fakeAgent(t, "claude", shResult+`prompt=$(cat)
+printf '%s\n' "$prompt" | grep '^# #' >> `+ran+`
+echo x > x.txt
+result 'ok'`))
+	r.ExcludeLabels = []string{"blocked", "needs-human"}
+	summaryRunner(t, r)
+	var file syncBuffer
+	r.Events = newEventLogger(r.Log, slog.LevelInfo, &file, slog.LevelDebug, nil, "run", r.stats)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	time.AfterFunc(20*time.Second, cancel)
+	done := make(chan error, 1)
+	go func() { done <- r.Watch(ctx, labelReady, 20*time.Millisecond) }()
+	waitFor := func(what string, ok func() bool) {
+		t.Helper()
+		for !ok() {
+			if ctx.Err() != nil {
+				t.Fatalf("%s; log:\n%s", what, log)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+	waitFor("#2 not processed", func() bool {
+		return slices.Contains(gh.labels(2), "amf:done") && strings.Count(file.String(), `"reason":"excluded_label"`) >= 4
+	})
+	for n, want := range map[int][]string{1: {"amf:ready", "blocked"}, 3: {"amf:ready", "blocked", "needs-human"}} {
+		if got := gh.labels(n); !reflect.DeepEqual(got, want) {
+			t.Errorf("#%d labels = %v, want %v", n, got, want)
+		}
+	}
+
+	// Without its hold label, #1 goes through on a later poll; #3 still has one.
+	gh.mu.Lock()
+	gh.issues[1].Labels = []Label{{Name: "amf:ready"}}
+	gh.mu.Unlock()
+	waitFor("#1 not processed after its hold label went", func() bool { return slices.Contains(gh.labels(1), "amf:done") })
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+
+	if got := gh.labels(3); !reflect.DeepEqual(got, []string{"amf:ready", "blocked", "needs-human"}) {
+		t.Errorf("#3 labels = %v", got)
+	}
+	if got := gh.labels(4); !reflect.DeepEqual(got, []string{"amf:in-progress", "amf:ready", "blocked"}) {
+		t.Errorf("#4 labels = %v", got)
+	}
+	for _, n := range []int{3, 4} {
+		if c := gh.comments[n]; len(c) != 0 {
+			t.Errorf("#%d comments = %q", n, c)
+		}
+		if _, err := os.Stat(filepath.Join(root, ".amf", "worktrees", fmt.Sprintf("issue-%d", n))); !os.IsNotExist(err) {
+			t.Errorf("#%d got a worktree", n)
+		}
+	}
+	if b := mustRead(t, ran); b != "# #2: Eligible\n# #1: Blocked\n" {
+		t.Errorf("claude ran for:\n%s", b)
+	}
+	if len(gh.prs) != 2 || gh.prs[0]["head"] != "amf/issue-2" || gh.prs[1]["head"] != "amf/issue-1" {
+		t.Errorf("PRs = %v", gh.prs)
+	}
+
+	ev := eventsByName(eventLines(t, file.String()))
+	wantEvent(t, ev, "watch.start", map[string]any{"label": "amf:ready", "exclude_labels": []any{"blocked", "needs-human"}})
+	wantEvent(t, ev, "watch.skip", map[string]any{"issue": float64(1), "reason": "excluded_label", "label": "blocked"})
+	wantEvent(t, ev, "watch.skip", map[string]any{"issue": float64(3), "reason": "excluded_label", "label": "blocked"})
+	wantEvent(t, ev, "watch.skip", map[string]any{"issue": float64(4), "reason": "in_progress"})
+	for _, e := range ev["watch.skip"] {
+		if e["issue"] == float64(4) && e["reason"] != "in_progress" {
+			t.Errorf("#4 skip = %v, want the lifecycle reason", e)
+		}
+	}
+	// Skipped on every poll, each counts once.
+	if s := r.stats.snapshot(); s.Issues.Done != 2 || s.Issues.Skipped != 3 {
+		t.Errorf("summary = %+v", s)
+	}
+}
+
+// Exclusions go with a custom --label, reach candidates on later pages, and
+// leave amf run N alone.
+func TestWatchExcludeLabelAcrossPages(t *testing.T) {
+	root, _ := setupRepo(t)
+	gh, srv := newFakeGitHub(t)
+	for n := 1; n <= 100; n++ {
+		gh.issues[n] = &Issue{Number: n, Title: "Held", State: "open", Labels: []Label{{Name: "team:backend"}, {Name: "on-hold"}}}
+	}
+	gh.issues[101] = &Issue{Number: 101, Title: "Eligible", State: "open", Labels: []Label{{Name: "team:backend"}}}
+	gh.issues[102] = &Issue{Number: 102, Title: "Other queue", State: "open", Labels: []Label{{Name: "amf:ready"}}}
+	r, log := newTestRunner(t, srv, root, fakeAgent(t, "claude", shResult+"cat >/dev/null; echo x > x.txt; result 'ok'"))
+	r.ExcludeLabels = []string{"on-hold", "no-such-label"}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	time.AfterFunc(20*time.Second, cancel)
+	done := make(chan error, 1)
+	go func() { done <- r.Watch(ctx, "team:backend", 20*time.Millisecond) }()
+	for !slices.Contains(gh.labels(101), "amf:done") {
+		if ctx.Err() != nil {
+			t.Fatalf("#101 not processed; log:\n%s", log)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if len(gh.prs) != 1 || gh.prs[0]["head"] != "amf/issue-101" {
+		t.Errorf("PRs = %v", gh.prs)
+	}
+	for _, n := range []int{1, 100, 102} {
+		if len(gh.comments[n]) != 0 || slices.ContainsFunc(gh.labels(n), func(l string) bool { return l != "team:backend" && l != "on-hold" && l != "amf:ready" }) {
+			t.Errorf("#%d changed: labels %v, comments %q", n, gh.labels(n), gh.comments[n])
+		}
+	}
+
+	if err := r.Run(context.Background(), 1); err != nil {
+		t.Fatalf("amf run on a held issue: %v\nlog:\n%s", err, log)
+	}
+	if !slices.Contains(gh.labels(1), "amf:done") {
+		t.Errorf("#1 labels after amf run = %v", gh.labels(1))
+	}
+}
+
+func TestLabelsFlag(t *testing.T) {
+	fs := flag.NewFlagSet("watch", flag.ContinueOnError)
+	var f labelsFlag
+	fs.Var(&f, "exclude-label", "")
+	if err := fs.Parse([]string{"--exclude-label", " blocked ", "--exclude-label=on hold", "--exclude-label", "blocked"}); err != nil {
+		t.Fatal(err)
+	}
+	if want := (labelsFlag{"blocked", "on hold"}); !reflect.DeepEqual(f, want) {
+		t.Errorf("labels = %q, want %q", f, want)
 	}
 }
 
