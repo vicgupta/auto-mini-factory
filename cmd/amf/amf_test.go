@@ -198,7 +198,10 @@ type fakeGitHub struct {
 	mu         sync.Mutex
 	issues     map[int]*Issue
 	comments   map[int][]string
-	prs        []map[string]string
+	prs        []map[string]string  // each PR's string fields, and its state
+	drafts     []bool               // whether prs[i] is a draft
+	creates    []map[string]any     // every POST /pulls body, as sent
+	updates    []map[string]any     // every PATCH /pulls/{n} body, as sent
 	repoLabels map[string]LabelSpec // the repository's labels
 }
 
@@ -309,10 +312,26 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
 		})
 	})
 	mux.HandleFunc("POST "+repo+"/pulls", func(w http.ResponseWriter, r *http.Request) {
-		var in map[string]string
-		decode(t, r, &in)
+		var raw map[string]any
+		decode(t, r, &raw)
+		// The fields are strings, but for draft, which GitHub wants a boolean.
+		in, draft := map[string]string{}, false
+		for k, v := range raw {
+			switch v := v.(type) {
+			case string:
+				in[k] = v
+			case bool:
+				if k != "draft" {
+					t.Errorf("POST /pulls: %s = %v, want a string", k, v)
+				}
+				draft = v
+			default:
+				t.Errorf("POST /pulls: %s = %v (%T)", k, v, v)
+			}
+		}
 		f.mu.Lock()
 		defer f.mu.Unlock()
+		f.creates = append(f.creates, raw)
 		// Like GitHub, refuse a second open PR from the same branch.
 		for _, pr := range f.prs {
 			if pr["head"] == in["head"] && pr["state"] == "open" {
@@ -322,6 +341,7 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
 		}
 		in["state"] = "open"
 		f.prs = append(f.prs, in)
+		f.drafts = append(f.drafts, draft)
 		n := 100 + len(f.prs)
 		writeJSON(w, 201, PullRequest{Number: n, HTMLURL: fmt.Sprintf("https://github.com/vic/demo/pull/%d", n)})
 	})
@@ -339,17 +359,29 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
 		writeJSON(w, 200, out)
 	})
 	mux.HandleFunc("PATCH "+repo+"/pulls/{n}", func(w http.ResponseWriter, r *http.Request) {
-		var in map[string]string
+		var in map[string]any
 		decode(t, r, &in)
 		n, _ := strconv.Atoi(r.PathValue("n"))
 		f.mu.Lock()
 		defer f.mu.Unlock()
+		f.updates = append(f.updates, in)
 		if n < 101 || n > 100+len(f.prs) {
 			writeJSON(w, 404, map[string]string{"message": "Not Found"})
 			return
 		}
 		for k, v := range in {
-			f.prs[n-101][k] = v
+			switch v := v.(type) {
+			case string:
+				f.prs[n-101][k] = v
+			case bool:
+				if k == "draft" {
+					f.drafts[n-101] = v
+					continue
+				}
+				t.Errorf("PATCH /pulls/%d: %s = %v, want a string", n, k, v)
+			default:
+				t.Errorf("PATCH /pulls/%d: %s = %v (%T)", n, k, v, v)
+			}
 		}
 		writeJSON(w, 200, PullRequest{Number: n, HTMLURL: fmt.Sprintf("https://github.com/vic/demo/pull/%d", n)})
 	})

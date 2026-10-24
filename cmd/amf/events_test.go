@@ -84,7 +84,7 @@ echo x > x.txt; result 'Done.'
 
 	ev := eventsByName(eventLines(t, file.String()))
 	wantEvent(t, ev, "watch.start", map[string]any{"repo": "vic/demo", "label": "amf:ready", "interval": "20ms",
-		"timeout": "1m0s", "eval_rounds": float64(0), "agent_flag": nil, "version": nil})
+		"timeout": "1m0s", "eval_rounds": float64(0), "draft": false, "agent_flag": nil, "version": nil})
 	wantEvent(t, ev, "watch.agents", map[string]any{"agent": nil, "path": nil, "usable": nil})
 	wantEvent(t, ev, "watch.agents", map[string]any{"picked": "claude"})
 	wantEvent(t, ev, "watch.tick", map[string]any{"cycle": float64(1), "issues": float64(3)})

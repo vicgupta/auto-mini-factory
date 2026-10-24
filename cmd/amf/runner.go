@@ -67,8 +67,11 @@ type Runner struct {
 	// EvalRounds is how many times a pipeline's eval stage may send a change
 	// back to the code stage.
 	EvalRounds int
-	HTTP       *http.Client // for downloading skills; nil means a default client
-	Log        io.Writer    // progress output
+	// Draft opens new pull requests as drafts, from --draft. A retry that
+	// updates an open PR leaves it a draft or ready for review as it was.
+	Draft bool
+	HTTP  *http.Client // for downloading skills; nil means a default client
+	Log   io.Writer    // progress output
 	// DB, when set, also gets every agent's output; Log already sends it
 	// amf's own lines.
 	DB *dbLog
@@ -308,10 +311,11 @@ func (r *Runner) process(ctx context.Context, issue Issue, base string, p *Pipel
 		summary += "\n\n" + extra
 	}
 	body := r.Redact.Redact(fmt.Sprintf("%s\n\nCloses #%d\n\n---\n_Opened by amf._", summary, n))
-	pr, err = r.GH.CreatePR(ctx, title, branch, base, body)
+	pr, err = r.GH.CreatePR(ctx, title, branch, base, body, r.Draft)
 	if isStatus(err, http.StatusUnprocessableEntity) {
 		// A retry of an issue whose PR is still open: the push updated it,
-		// so bring its description up to date too.
+		// so bring its description up to date too. It stays a draft or
+		// ready for review as it was, whatever --draft says.
 		if open, ok, ferr := r.GH.OpenPR(ctx, branch); ferr == nil && ok {
 			r.event(slog.LevelInfo, "issue.pr", n, fmt.Sprintf("#%d: %s already has %s; updating it", n, branch, open.HTMLURL),
 				"action", "updating", "number", open.Number, "url", open.HTMLURL)
@@ -589,7 +593,7 @@ func (r *Runner) Watch(ctx context.Context, label string, interval time.Duration
 	ctx = withEvents(ctx, r.Events, 0)
 	r.event(slog.LevelInfo, "watch.start", 0, fmt.Sprintf("watching %s for issues labeled %q every %s (Ctrl-C to stop)", r.Repo, label, interval),
 		"repo", r.Repo, "label", label, "interval", interval.String(), "timeout", r.Timeout.String(),
-		"eval_rounds", r.EvalRounds, "agent_flag", agentName(r.Agent), "version", buildVersion())
+		"eval_rounds", r.EvalRounds, "draft", r.Draft, "agent_flag", agentName(r.Agent), "version", buildVersion())
 	r.event(slog.LevelInfo, "watch.agents", 0, "agents for issues without a pipeline (claude and codex need a key):")
 	for _, st := range r.agentStatuses() {
 		r.event(slog.LevelInfo, "watch.agents", 0, "  "+st.describe(),

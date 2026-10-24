@@ -158,6 +158,8 @@ amf list --limit 5          # just the 5 newest
 amf run 42                  # process one issue now
 amf watch --interval 60s    # process issues labeled `amf:ready`, one at a time
 amf watch --agent codex     # ...with Codex, even if Claude Code is installed
+amf run 42 --draft          # open the PR as a draft
+amf watch --draft           # ...opening each new PR as a draft
 ```
 
 ### Choosing the agent
@@ -213,9 +215,12 @@ Without a pipeline (see below), amf runs one agent once. With Claude Code:
    If the change touches anything under `.github/`, amf refuses to push it
    and the issue fails, since a pushed workflow change runs with your
    Actions secrets before anyone reviews it.
-5. Opens a PR with the agent's final message as the body plus `Closes #N`. On a
-   retry whose PR is still open, it updates that PR instead.
-6. Comments the PR link on the issue, labels it `amf:done`, removes the worktree.
+5. Opens a PR with the agent's final message as the body plus `Closes #N`, as
+   a draft with `--draft` (default off; `amf run` and `amf watch` take it). On
+   a retry whose PR is still open, it updates that PR's title and body
+   instead, and leaves it a draft or ready for review as it was.
+6. Comments the PR link on the issue, labels it `amf:done` (a draft PR
+   counts), removes the worktree.
 
 On any failure the issue gets `amf:failed` plus a comment with the reason,
 and the worktree is kept for inspection. A run that hit the agent timeout
