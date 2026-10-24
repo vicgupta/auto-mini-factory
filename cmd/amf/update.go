@@ -19,6 +19,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -78,7 +79,8 @@ func releaseArchive(tag, goos, goarch string) (folder, file, bin string) {
 }
 
 func (u *updater) run(ctx context.Context, target string, check bool) error {
-	if target == "" {
+	pinned := target != ""
+	if !pinned {
 		latest, err := u.latest(ctx)
 		if err != nil {
 			return err
@@ -90,6 +92,10 @@ func (u *updater) run(ctx context.Context, target string, check bool) error {
 
 	if target == u.current {
 		fmt.Fprintf(u.out, "amf %s is up to date\n", u.current)
+		return nil
+	}
+	if check && pinned && olderRelease(target, u.current) {
+		fmt.Fprintf(u.out, "amf %s is older than this build (%s); amf update --version %s would downgrade\n", target, u.current, target)
 		return nil
 	}
 	if check {
@@ -107,6 +113,23 @@ func (u *updater) run(ctx context.Context, target string, check bool) error {
 	}
 	fmt.Fprintf(u.out, "Updated amf %s -> %s at %s\n", u.current, target, u.exe)
 	return nil
+}
+
+// olderRelease reports whether release tag a is older than release tag b.
+// It is false unless both are vX.Y.Z.
+func olderRelease(a, b string) bool {
+	if !releaseTag.MatchString(a) || !releaseTag.MatchString(b) {
+		return false
+	}
+	pa, pb := strings.Split(a[1:], "."), strings.Split(b[1:], ".")
+	for i := range pa {
+		na, _ := strconv.Atoi(pa[i])
+		nb, _ := strconv.Atoi(pb[i])
+		if na != nb {
+			return na < nb
+		}
+	}
+	return false
 }
 
 // latest is the tag that /releases/latest redirects to.
