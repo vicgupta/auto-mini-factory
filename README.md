@@ -23,7 +23,7 @@ unzip it, and put `amf.exe` in a folder on your `PATH`. After that,
 `amf update` keeps it current. The Windows build is cross-compiled and its
 self-update is unit-tested, but it hasn't been run on a Windows machine yet.
 
-Or with Go:
+Or with Go 1.27 or newer:
 
 ```sh
 go install github.com/vicgupta/auto-mini-factory/cmd/amf@latest

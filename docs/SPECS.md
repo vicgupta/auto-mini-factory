@@ -441,6 +441,13 @@ release's `.zip`.
 
 Any failure leaves the installed binary unchanged.
 
+`AMF_RELEASES_URL`, read from the environment only (never from `.env`),
+replaces `https://github.com/vicgupta/auto-mini-factory` as where `amf update`
+and `doctor`'s `amf` check look for releases, as for a mirror or in tests; a
+trailing `/` is ignored. That server must answer `/releases/latest` with a
+redirect to a URL ending in the tag, and serve the archive and
+`checksums.txt` under `/releases/download/<tag>/`.
+
 ## Files
 
 | Path | Contents |

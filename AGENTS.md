@@ -25,7 +25,8 @@ checked against the source rather than from memory, and the change includes
 ## Testing
 
 - CI (`.github/workflows/ci.yml`) runs `gofmt`, `go vet` (also with
-  `-tags live`) and `go test -race` on Linux and macOS, and builds every
+  `-tags live`) and `go test -race` on Linux and macOS, each with the oldest
+  Go that `go.mod` allows and with the latest stable Go, and builds every
   release platform, on each push to `main` and each PR.
 - `go test -race ./...` runs the offline suite: fake GitHub (`httptest`),
   real git repos in temp dirs, and shell scripts as the agents. Every change
