@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -75,15 +76,34 @@ type Runner struct {
 	// comments and the PR body. newRunner also redacts Log with it. Nil
 	// changes nothing.
 	Redact *redactor
+	// Events, when set, is where logf's lines go: to Log as before and, as
+	// JSON, to the run's event file, which Close flushes and closes.
+	Events *slog.Logger
+	events *eventFile
 }
 
-// Close sends the logs still queued for PostgreSQL.
+// Close writes out the event file and sends the logs still queued for
+// PostgreSQL.
 func (r *Runner) Close() {
+	if err := r.events.Close(); err != nil {
+		fmt.Fprintf(r.Log, "amf: could not write the event log: %v\n", err)
+	}
 	r.DB.Close(15 * time.Second)
 }
 
+// logf prints a progress line, "amf: <message>", and records it in the
+// event file with the issue its leading "#N:" names.
 func (r *Runner) logf(format string, a ...any) {
-	fmt.Fprintf(r.Log, "amf: "+format+"\n", a...)
+	msg := fmt.Sprintf(format, a...)
+	if r.Events == nil {
+		fmt.Fprintf(r.Log, "amf: %s\n", msg)
+		return
+	}
+	var attrs []any
+	if n := messageIssue(msg); n > 0 {
+		attrs = append(attrs, "issue", n)
+	}
+	r.Events.Info(msg, attrs...)
 }
 
 // Run processes one issue end to end. On failure the issue is labeled

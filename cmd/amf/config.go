@@ -51,6 +51,10 @@ type Config struct {
 	// watch, and doctor names it, instead of every command reading .env.
 	AgentTimeout string
 
+	// LogLevel is AMF_LOG_LEVEL as written; newRunner parses it, like
+	// AgentTimeout. "" means the defaults.
+	LogLevel string
+
 	// Trusted is AMF_TRUSTED, the lower-case GitHub logins whose issues amf
 	// works on. Nil means anyone's.
 	Trusted []string
@@ -101,6 +105,7 @@ func loadConfig(paths ...string) (Config, error) {
 		PostgresURL:   get("AMF_POSTGRES_URL", ""),
 		Trusted:       parseTrusted(get("AMF_TRUSTED", "")),
 		AgentTimeout:  get("AMF_AGENT_TIMEOUT", ""),
+		LogLevel:      get("AMF_LOG_LEVEL", ""),
 	}
 	if cfg.Token == "" {
 		return cfg, errors.New("GITHUB_TOKEN is not set (run amf init, then edit .env)")

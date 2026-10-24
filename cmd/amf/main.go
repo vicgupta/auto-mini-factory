@@ -44,8 +44,8 @@ Usage:
   amf init                                                    write .env (backing up an existing one) and create amf's labels
   amf issue "Title" [-b body | -f file.md] [--no-label]       create an issue (body may also come from stdin)
   amf list [--state open|closed|all] [--label L]              list issues, newest first, with their amf labels
-  amf run <issue-number> [--agent A] [--agent-timeout 60m]    process one issue into a PR (also takes --eval-rounds)
-  amf watch [--agent A] [--interval 60s] [--label amf:ready]  process amf:ready issues as they arrive (also takes --agent-timeout, --eval-rounds)
+  amf run <issue-number> [--agent A] [--agent-timeout 60m]    process one issue into a PR (also takes --eval-rounds, --log-level, --log-file)
+  amf watch [--agent A] [--interval 60s] [--label amf:ready]  process amf:ready issues as they arrive (also takes --agent-timeout, --eval-rounds, --log-level, --log-file)
   amf pipeline [--fetch]                                      check the plan/code/eval pipeline in this checkout's AGENTS.md
   amf doctor                                                  check the setup here, one line per check, changing nothing
   amf update [--version vX.Y.Z] [--check]                     replace this amf binary with the latest (or given) release
@@ -60,6 +60,7 @@ Configuration is read from .env (or the environment):
   OPENCODE_MODEL           model for opencode (default opencode/big-pickle); see opencode models
   AMF_AGENT_TIMEOUT        how long each agent run may take, a Go duration (default 60m);
                            --agent-timeout, or its deprecated alias --timeout, overrides it
+  AMF_LOG_LEVEL            debug, info, warn or error (default info, and debug in .amf/runs/); --log-level overrides it
   AMF_POSTGRES_URL         optional postgres:// URL; run and watch also log to its amflogs database
   AMF_CLAUDE     path to the claude binary (default "claude")
   AMF_CODEX      path to the codex binary (default "codex")
@@ -186,6 +187,7 @@ func cmdRun(ctx context.Context, args []string, stderr io.Writer) error {
 	at, alias := addTimeoutFlags(fs)
 	evalRounds := fs.Int("eval-rounds", 2, "how many times a pipeline's eval stage may send the change back to code")
 	agent := fs.String("agent", "", agentFlagHelp)
+	lo := addLogFlags(fs)
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return errUsage
@@ -202,7 +204,10 @@ func cmdRun(ctx context.Context, args []string, stderr io.Writer) error {
 	if err != nil || n <= 0 {
 		return fmt.Errorf("invalid issue number %q", pos[0])
 	}
-	r, err := newRunner(ctx, timeout, *evalRounds, *agent, stderr)
+	if err := lo.check(); err != nil {
+		return err
+	}
+	r, err := newRunner(ctx, timeout, *evalRounds, *agent, *lo, stderr)
 	if err != nil {
 		return err
 	}
@@ -220,6 +225,7 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 	at, alias := addTimeoutFlags(fs)
 	evalRounds := fs.Int("eval-rounds", 2, "how many times a pipeline's eval stage may send the change back to code")
 	agent := fs.String("agent", "", agentFlagHelp)
+	lo := addLogFlags(fs)
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return errUsage
@@ -235,7 +241,10 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	r, err := newRunner(ctx, timeout, *evalRounds, *agent, stderr)
+	if err := lo.check(); err != nil {
+		return err
+	}
+	r, err := newRunner(ctx, timeout, *evalRounds, *agent, *lo, stderr)
 	if err != nil {
 		return err
 	}
@@ -314,7 +323,24 @@ func validateAgentTimeout(d time.Duration, src string) error {
 	return nil
 }
 
-func newRunner(ctx context.Context, timeout time.Duration, evalRounds int, agentFlag string, log io.Writer) (*Runner, error) {
+// addLogFlags registers --log-level and --log-file for run and watch.
+func addLogFlags(fs *flag.FlagSet) *logOptions {
+	lo := &logOptions{}
+	fs.StringVar(&lo.Level, "log-level", "", "debug, info, warn or error, for the terminal and the event log (default info, and debug in the event log)")
+	fs.StringVar(&lo.File, "log-file", "", `where the event log goes (default .amf/runs/<run_id>/events.jsonl; "off" for none)`)
+	return lo
+}
+
+// check rejects a bad --log-level before anything else runs.
+func (lo logOptions) check() error {
+	if lo.Level == "" {
+		return nil
+	}
+	_, err := parseLogLevel(lo.Level, "--log-level")
+	return err
+}
+
+func newRunner(ctx context.Context, timeout time.Duration, evalRounds int, agentFlag string, lo logOptions, log io.Writer) (*Runner, error) {
 	if evalRounds < 0 {
 		return nil, errors.New("--eval-rounds can't be negative")
 	}
@@ -328,6 +354,10 @@ func newRunner(ctx context.Context, timeout time.Duration, evalRounds int, agent
 			return nil, err
 		}
 		timeout, _ = agentTimeout(env)
+	}
+	consoleLevel, fileLevel, err := logLevels(lo.Level, cfg.LogLevel)
+	if err != nil {
+		return nil, err
 	}
 	agent, err := parseAgent(agentFlag)
 	if err != nil {
@@ -356,7 +386,35 @@ func newRunner(ctx context.Context, timeout time.Duration, evalRounds int, agent
 	}
 	r.DB = db
 	r.Redact = red
+
+	runID := newRunID()
+	path := lo.File
+	if path == "" {
+		path = filepath.Join(r.Root, ".amf", "runs", runID, "events.jsonl")
+	}
+	var file io.Writer
+	if path != "off" {
+		ef, err := openEventFile(path)
+		if err != nil {
+			r.Close()
+			return nil, fmt.Errorf("--log-file: %v", err)
+		}
+		r.events, file = ef, ef
+	}
+	r.Events = newEventLogger(r.Log, consoleLevel, file, fileLevel, red, runID)
+	if file != nil {
+		r.logf("logging to %s", shownPath(r.Root, path))
+	}
 	return r, nil
+}
+
+// shownPath is path relative to root when it is inside it, as one would
+// type it from the checkout, else as given.
+func shownPath(root, path string) string {
+	if rel, err := filepath.Rel(root, path); err == nil && !strings.HasPrefix(rel, "..") {
+		return rel
+	}
+	return path
 }
 
 func newRunnerFrom(ctx context.Context, cfg Config, timeout time.Duration, evalRounds int, agent string, log io.Writer) (*Runner, error) {

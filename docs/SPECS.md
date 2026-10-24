@@ -33,8 +33,8 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened)
 | `amf init` | Writes `./.env` and creates the labels (see below). |
 | `amf issue "Title" [-b body \| -f file \| -f -] [--label L] [--no-label]` | Creates an issue labeled `amf:ready`. The body can also come from stdin when it's piped. Prints `#N <url>`. |
 | `amf list [--state open\|closed\|all] [--label L]` | Lists issues, newest first (highest number first), with every page fetched and PRs left out. Columns: `ISSUE`, `STATE` (with `--state all` only), `AMF` (the issue's `amf` and `amf:*` labels, or `-`) and `TITLE`. Prints `No … in owner/name.` when nothing matches. Needs no git checkout. |
-| `amf run <N> [--agent A] [--agent-timeout 60m] [--eval-rounds 2]` | Processes issue N once. |
-| `amf watch [--agent A] [--interval 60s] [--label amf:ready] [--agent-timeout 60m] [--eval-rounds 2]` | Polls open issues with the label (every page), oldest first by issue number (GitHub's `created_at` can tie for issues opened in the same second), and processes them one at a time until interrupted. |
+| `amf run <N> [--agent A] [--agent-timeout 60m] [--eval-rounds 2] [--log-level L] [--log-file P]` | Processes issue N once. |
+| `amf watch [--agent A] [--interval 60s] [--label amf:ready] [--agent-timeout 60m] [--eval-rounds 2] [--log-level L] [--log-file P]` | Polls open issues with the label (every page), oldest first by issue number (GitHub's `created_at` can tie for issues opened in the same second), and processes them one at a time until interrupted. |
 | `amf pipeline [--fetch]` | Checks the pipeline in `AGENTS.md` of the enclosing checkout, as it is on disk. See below. |
 | `amf doctor` | Checks the whole setup, one line per check, changing nothing. See below. |
 | `amf update [--version vX.Y.Z] [--check]` | Replaces the running binary with the latest release, or with the given one, which can be a downgrade. Needs no `.env`. See below. |
@@ -57,6 +57,22 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened)
   positive.
 - `--eval-rounds` is how many times a pipeline's eval stage may send the
   change back to the code stage. A negative value is an error.
+- **Event log.** Besides its `amf: …` lines on stderr, each `run` and
+  `watch` process writes an event log: one JSON object per line, with
+  `time`, `level`, `msg`, `run_id` and, for a line about an issue, `issue`.
+  It is redacted like everything else (see "Redaction"). The `run_id` is
+  the UTC start time and 6 random hex characters, like
+  `20261023T222500Z-a1b2c3`. By default the log is
+  `.amf/runs/<run_id>/events.jsonl` in the checkout; `--log-file P` writes
+  it to P instead (its folder is created), and `--log-file off` writes
+  none. Once the checkout is known, amf prints `logging to <path>`; lines
+  printed before that are not in the file. Writes are buffered, flushed
+  every second and when amf exits, Ctrl-C included.
+- `--log-level` is `debug`, `info`, `warn` or `error` (case is ignored),
+  and so is `AMF_LOG_LEVEL`, which the flag overrides. Either sets the
+  level for both the terminal and the event log; without them the
+  terminal shows `info` and the event log keeps `debug`. Any other value
+  fails `run` and `watch` at startup, naming the flag or variable.
 - `--agent` picks the agent for issues without a pipeline: `claudecode`
   (or `claude`), `codex` or `opencode`, ignoring case. A named agent must be
   installed, but needs no key, since it can use its own login. `run` and
@@ -88,9 +104,10 @@ expiry; the issue is still marked failed.
 
 1. Builds `.env` from a template of `GITHUB_TOKEN`, `GITHUB_REPO`,
    `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
-   `OPENCODE_MODEL`, `AMF_AGENT_TIMEOUT`, `AMF_TRUSTED` and
-   `AMF_POSTGRES_URL`.
-   - `OPENCODE_MODEL`, `AMF_AGENT_TIMEOUT` and `AMF_POSTGRES_URL` are written
+   `OPENCODE_MODEL`, `AMF_AGENT_TIMEOUT`, `AMF_LOG_LEVEL`, `AMF_TRUSTED`
+   and `AMF_POSTGRES_URL`.
+   - `OPENCODE_MODEL`, `AMF_AGENT_TIMEOUT`, `AMF_LOG_LEVEL` and
+     `AMF_POSTGRES_URL` are written
      commented out, as `# OPENCODE_MODEL=opencode/big-pickle   # Use 'opencode models' to list all the models`
      until they have a real value. None is one of the values `init` asks
      you to fill in.
@@ -181,6 +198,7 @@ space, a trailing comment. A leading byte order mark is ignored.
 | `AMF_POSTGRES_URL` | unset | A PostgreSQL server that `run` and `watch` also write their logs to. See [Logging to PostgreSQL](#logging-to-postgresql) |
 | `AMF_CLAUDE` | `claude` | Path to the Claude CLI |
 | `AMF_AGENT_TIMEOUT` | `60m` | How long each agent run may take, as a Go duration; `--agent-timeout` (or its alias `--timeout`) overrides it. Must be at least 1m and at most 24h |
+| `AMF_LOG_LEVEL` | `info` (terminal), `debug` (event log) | `debug`, `info`, `warn` or `error`, for both the terminal and the event log of `run` and `watch`; `--log-level` overrides it |
 | `AMF_CODEX` | `codex` | Path to the Codex CLI |
 | `AMF_OPENCODE` | `opencode` | Path to the opencode CLI |
 | `AMF_API_URL` | `https://api.github.com` | GitHub API base URL |
@@ -419,6 +437,7 @@ Any failure leaves the installed binary unchanged.
 | `.amf/logs/issue-N[-<stage>].partial.md` | An agent's final-message file, kept (redacted) after a timeout cut the run short |
 | `.amf/logs/issue-N-<stage>.log` | Each pipeline stage's output: `plan`, `code-K`, `eval-K` |
 | `.amf/runs/issue-N/` | The latest pipeline run's `plan.md` and `eval-K.md` |
+| `.amf/runs/<run_id>/events.jsonl` | The event log of one `run` or `watch` process, unless `--log-file` says otherwise |
 | `.amf/opencode.json` | The config amf runs opencode with |
 
 amf only ever adds to `.git/info/exclude`. It never edits a tracked `.gitignore`.

@@ -31,6 +31,7 @@ var envTemplate = []envVar{
 	{"OPENAI_API_KEY", "sk-proj-...", "optional: OpenAI API key for codex", false},
 	{"OPENCODE_MODEL", defaultOpencodeModel, "Use 'opencode models' to list all the models", true},
 	{"AMF_AGENT_TIMEOUT", fmt.Sprintf("%dm", defaultAgentTimeout/time.Minute), "optional: how long each agent run may take (--agent-timeout overrides it)", true},
+	{"AMF_LOG_LEVEL", "info", "optional: debug, info, warn or error, for the terminal and the event log in .amf/runs/", true},
 	{"AMF_TRUSTED", "login1,login2...", "optional: only work on issues opened by these GitHub users", false},
 	{"AMF_POSTGRES_URL", "postgres://user:password@localhost:5432/postgres", "optional: also save the logs to database amflogs on this PostgreSQL server", true},
 }
