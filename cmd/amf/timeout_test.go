@@ -13,6 +13,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -85,9 +86,15 @@ func TestAgentTimeoutKillsTheGroup(t *testing.T) {
 	// PIDs before the kill, even on a loaded machine.
 	r.Timeout = 2 * time.Second
 	r.KillGrace = 100 * time.Millisecond
+	var events bytes.Buffer
+	r.Events = newEventLogger(r.Log, slog.LevelInfo, &events, slog.LevelDebug, nil, "run")
 
 	begin := time.Now()
 	err := r.Run(context.Background(), 1)
+	ev := eventsByName(eventLines(t, events.String()))
+	wantEvent(t, ev, "agent.timeout", map[string]any{"issue": float64(1), "agent": "claude", "stage": "agent run",
+		"limit": "2s", "elapsed": nil, "grace": "100ms", "pgid": nil, "bytes": nil, "log": nil})
+	wantEvent(t, ev, "issue.failed", map[string]any{"issue": float64(1), "reason": "agent_timeout", "stage": "agent run", "error": nil})
 	if time.Since(begin) > 10*time.Second {
 		t.Errorf("the run took %s", time.Since(begin))
 	}

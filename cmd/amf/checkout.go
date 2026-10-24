@@ -15,30 +15,32 @@ import (
 // checkout that is the checkout itself. Anywhere else, such as a folder that
 // only holds .env, amf clones GITHUB_REPO into ./<name>, or reuses the clone
 // a previous run made there.
-func checkoutRoot(ctx context.Context, cfg Config, log io.Writer) (string, error) {
+//
+// how says which it was: checkout, clone (reused) or cloned.
+func checkoutRoot(ctx context.Context, cfg Config, log io.Writer) (root, how string, err error) {
 	if root, err := git(ctx, ".", "rev-parse", "--show-toplevel"); err == nil {
-		return root, nil
+		return root, "checkout", nil
 	}
 	_, name, _ := strings.Cut(cfg.Repo, "/")
 	dir, err := filepath.Abs(name)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	if _, err := os.Stat(dir); err == nil {
 		origin, err := git(ctx, dir, "remote", "get-url", "origin")
 		if err != nil || !strings.EqualFold(repoFromRemote(origin), cfg.Repo) && origin != cfg.CloneURL {
-			return "", fmt.Errorf("%s already exists but is not a clone of %s; move it, or run amf inside a clone", dir, cfg.Repo)
+			return "", "", fmt.Errorf("%s already exists but is not a clone of %s; move it, or run amf inside a clone", dir, cfg.Repo)
 		}
 		fmt.Fprintf(log, "amf: not inside a git checkout; using the clone at %s\n", dir)
-		return dir, nil
+		return dir, "clone", nil
 	}
 
 	fmt.Fprintf(log, "amf: not inside a git checkout; cloning %s into %s\n", cfg.Repo, dir)
 	if _, err := git(ctx, ".", "clone", cfg.CloneURL, dir); err != nil {
-		return "", fmt.Errorf("%w\namf clones with your own git credentials (e.g. run `gh auth setup-git`), or clone %s yourself and run amf inside it", err, cfg.Repo)
+		return "", "", fmt.Errorf("%w\namf clones with your own git credentials (e.g. run `gh auth setup-git`), or clone %s yourself and run amf inside it", err, cfg.Repo)
 	}
-	return dir, nil
+	return dir, "cloned", nil
 }
 
 // checkRepo confirms GITHUB_REPO exists and GITHUB_TOKEN can see it, so a

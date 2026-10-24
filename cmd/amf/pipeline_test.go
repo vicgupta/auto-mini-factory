@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -217,12 +218,18 @@ func TestPipelineRetriesUntilEvalPasses(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "must-not-leak")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "claude-only")
 	r, log := newPipelineRunner(t, srv, skills, root)
+	var events bytes.Buffer
+	r.Events = newEventLogger(r.Log, slog.LevelInfo, &events, slog.LevelDebug, nil, "run")
 
 	if err := r.Run(context.Background(), 1); err != nil {
 		t.Fatalf("Run: %v\nlog:\n%s", err, log)
 	}
 	if len(gh.prs) != 1 {
 		t.Fatalf("expected one PR, got %v", gh.prs)
+	}
+	ev := eventsByName(eventLines(t, events.String()))
+	for _, stage := range []string{"plan", "code", "eval"} {
+		wantEvent(t, ev, "issue.skill", map[string]any{"stage": stage, "url": skills.URL + "/" + stage + "/SKILL.md"})
 	}
 	body := gh.prs[0]["body"]
 	for _, want := range []string{"Fixed the newline.", "## Evaluation", "**PASS** by opencode (opencode/test) after 2 code rounds", "All criteria met.", "<summary>Plan (claudecode, claude-opus-5-5)</summary>", "1. Add feature.txt", "Closes #1"} {

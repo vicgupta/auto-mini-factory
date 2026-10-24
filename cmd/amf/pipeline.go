@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -348,7 +349,7 @@ func (r *Runner) runPipeline(ctx context.Context, wt string, issue Issue, branch
 		if s.Skill == "" {
 			continue
 		}
-		r.logf("#%d: downloading the %s skill from %s", n, s.Name, s.Skill)
+		r.event(slog.LevelInfo, "issue.skill", n, fmt.Sprintf("#%d: downloading the %s skill from %s", n, s.Name, s.Skill), "stage", s.Name, "url", s.Skill)
 		if s.skill, err = fetchSkill(ctx, r.HTTP, s.Skill); err != nil {
 			return "", "", err
 		}
@@ -365,6 +366,7 @@ func (r *Runner) runPipeline(ctx context.Context, wt string, issue Issue, branch
 			return "", "", err
 		}
 		if first, ok := blocked(plan); ok {
+			r.event(slog.LevelDebug, "issue.plan.blocked", n, fmt.Sprintf("#%d: the plan stage needs answers: %s", n, first), "question", first)
 			return "", "", &stageError{
 				msg: fmt.Sprintf("the plan stage needs answers first: %s", first),
 				comment: fmt.Sprintf("amf's plan stage (%s, %s) needs answers before it can work on this issue. "+
@@ -373,10 +375,15 @@ func (r *Runner) runPipeline(ctx context.Context, wt string, issue Issue, branch
 		}
 	}
 
+	if plan != "" {
+		r.event(slog.LevelDebug, "issue.plan.done", n, fmt.Sprintf("#%d: plan written", n), "bytes", len(plan))
+	}
+
 	var review string
 	rounds := 0
 	for k := 1; ; k++ {
 		rounds = k
+		r.event(slog.LevelDebug, "issue.code.round", n, fmt.Sprintf("#%d: code round %d", n, k), "round", k)
 		name := fmt.Sprintf("code-%d", k)
 		out, err := r.runStage(ctx, p.Code, n, name, wt, codePrompt(r.Repo, branch, issue, p.Code, plan, review))
 		if err != nil {
@@ -409,14 +416,15 @@ func (r *Runner) runPipeline(ctx context.Context, wt string, issue Issue, branch
 			review = "eval gave no verdict.\n\n" + review
 		}
 		if pass {
-			r.logf("#%d: eval passed in round %d", n, k)
+			r.event(slog.LevelInfo, "issue.eval.verdict", n, fmt.Sprintf("#%d: eval passed in round %d", n, k), "round", k, "pass", true, "parsed", ok)
 			extra = fmt.Sprintf("## Evaluation\n\n**PASS** by %s (%s) after %d code %s.\n\n<details><summary>Review</summary>\n\n%s\n\n</details>",
 				p.Eval.Agent, p.Eval.model(), k, plural(k, "round", "rounds"), review)
 			break
 		}
 		if k > r.EvalRounds {
 			tried := fmt.Sprintf("%d code %s", k, plural(k, "round", "rounds"))
-			r.logf("#%d: eval still failing after %s; pushing %s for inspection", n, tried, branch)
+			r.event(slog.LevelInfo, "issue.eval.verdict", n, fmt.Sprintf("#%d: eval still failing after %s; pushing %s for inspection", n, tried, branch),
+				"round", k, "pass", false, "parsed", ok, "final", true)
 			if _, err := git(ctx, wt, "push", "--force", "-u", "origin", branch); err != nil {
 				return "", "", err
 			}
@@ -427,7 +435,8 @@ func (r *Runner) runPipeline(ctx context.Context, wt string, issue Issue, branch
 					"<details><summary>Last review</summary>\n\n%s\n\n</details>", p.Eval.Agent, p.Eval.model(), tried, branch, labelReady, review),
 			}
 		}
-		r.logf("#%d: eval found problems; starting code round %d", n, k+1)
+		r.event(slog.LevelInfo, "issue.eval.verdict", n, fmt.Sprintf("#%d: eval found problems; starting code round %d", n, k+1),
+			"round", k, "pass", false, "parsed", ok, "next_round", k+1)
 	}
 
 	// One commit per PR, however many rounds it took.
@@ -439,7 +448,7 @@ func (r *Runner) runPipeline(ctx context.Context, wt string, issue Issue, branch
 		return "", "", err
 	}
 	if p.Eval == nil {
-		r.logf("#%d: code finished in %d %s (no eval stage)", n, rounds, plural(rounds, "round", "rounds"))
+		r.event(slog.LevelInfo, "issue.code.done", n, fmt.Sprintf("#%d: code finished in %d %s (no eval stage)", n, rounds, plural(rounds, "round", "rounds")), "rounds", rounds)
 	}
 	if plan != "" {
 		if extra != "" {
@@ -482,7 +491,8 @@ func (r *Runner) runStage(ctx context.Context, s *Stage, n int, name, wt, prompt
 	if shown == "" {
 		shown = "default model"
 	}
-	r.logf("#%d: %s: running %s (%s, timeout %s)", n, name, s.Agent, shown, r.Timeout)
+	r.event(slog.LevelInfo, "issue.stage", n, fmt.Sprintf("#%d: %s: running %s (%s, timeout %s)", n, name, s.Agent, shown, r.Timeout),
+		"stage", name, "agent", s.Agent, "model", shown, "timeout", r.Timeout.String())
 	log := filepath.Join(r.Root, ".amf", "logs", fmt.Sprintf("issue-%d-%s.log", n, name))
 	return r.runAgent(ctx, s.Agent, s.Name, model, wt, prompt, log, filepath.Join(wt, ".amf", name+".md"))
 }
@@ -660,8 +670,10 @@ func (r *Runner) runAgent(ctx context.Context, agent, stage, model, wt, prompt, 
 			fmt.Fprintf(logOut, "amf: killed after %s %s (SIGTERM, then SIGKILL after %s)\n", elapsed, why, grace)
 		}
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			r.logf("agent.timeout: agent=%s stage=%s issue=%d limit=%s elapsed=%s grace=%s pgid=%d bytes=%d log=%s",
-				agentName(agent), stageName(stage), logIssue(logPath), r.Timeout, elapsed, grace, cmd.Process.Pid, stdout.Len(), logPath)
+			r.event(slog.LevelWarn, "agent.timeout", logIssue(logPath), fmt.Sprintf("agent.timeout: agent=%s stage=%s issue=%d limit=%s elapsed=%s grace=%s pgid=%d bytes=%d log=%s",
+				agentName(agent), stageName(stage), logIssue(logPath), r.Timeout, elapsed, grace, cmd.Process.Pid, stdout.Len(), logPath),
+				"agent", agentName(agent), "stage", stageName(stage), "limit", r.Timeout.String(), "elapsed", elapsed.String(),
+				"grace", grace.String(), "pgid", cmd.Process.Pid, "bytes", stdout.Len(), "log", logPath)
 			partial := keepPartial(logPath, outPath, r.Redact)
 			return "", &agentTimeoutError{
 				Agent:   agentName(agent),

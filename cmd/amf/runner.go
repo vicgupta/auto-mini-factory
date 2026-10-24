@@ -76,10 +76,13 @@ type Runner struct {
 	// comments and the PR body. newRunner also redacts Log with it. Nil
 	// changes nothing.
 	Redact *redactor
-	// Events, when set, is where logf's lines go: to Log as before and, as
+	// Events, when set, is where amf's events go: to Log as before and, as
 	// JSON, to the run's event file, which Close flushes and closes.
 	Events *slog.Logger
 	events *eventFile
+	// checkout is how newRunner found Root: checkout (the enclosing one),
+	// clone (reused) or cloned.
+	checkout string
 }
 
 // Close writes out the event file and sends the logs still queued for
@@ -89,21 +92,6 @@ func (r *Runner) Close() {
 		fmt.Fprintf(r.Log, "amf: could not write the event log: %v\n", err)
 	}
 	r.DB.Close(15 * time.Second)
-}
-
-// logf prints a progress line, "amf: <message>", and records it in the
-// event file with the issue its leading "#N:" names.
-func (r *Runner) logf(format string, a ...any) {
-	msg := fmt.Sprintf(format, a...)
-	if r.Events == nil {
-		fmt.Fprintf(r.Log, "amf: %s\n", msg)
-		return
-	}
-	var attrs []any
-	if n := messageIssue(msg); n > 0 {
-		attrs = append(attrs, "issue", n)
-	}
-	r.Events.Info(msg, attrs...)
 }
 
 // Run processes one issue end to end. On failure the issue is labeled
@@ -138,16 +126,19 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 			return err
 		}
 	} else if r.Agent != "" {
-		r.logf("#%d: ignoring --agent %s: AGENTS.md on origin/%s declares a pipeline, which names each stage's agent", n, r.Agent, base)
+		r.event(slog.LevelInfo, "issue.agent_ignored", n, fmt.Sprintf("#%d: ignoring --agent %s: AGENTS.md on origin/%s declares a pipeline, which names each stage's agent", n, r.Agent, base),
+			"agent", agentName(r.Agent))
 	}
 	if _, err := gitIdentity(ctx, r.Root); err != nil {
 		return err
 	}
 
-	r.logf("#%d: %s", n, issue.Title)
+	r.event(slog.LevelInfo, "issue.picked", n, fmt.Sprintf("#%d: %s", n, issue.Title),
+		"title", issue.Title, "author", issue.User.Login, "labels", labelNames(issue))
 	if err := r.setStatus(ctx, n, labelInProgress); err != nil {
 		return err
 	}
+	r.statusEvent(n, statusOf(issue), labelInProgress)
 	// The issue is no longer waiting; adding amf:ready again retries it.
 	if err := r.GH.RemoveLabel(ctx, n, labelReady); err != nil {
 		return err
@@ -160,7 +151,9 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
 		if serr := r.setStatus(cctx, n, labelFailed); serr != nil {
-			r.logf("#%d: could not set %s: %v", n, labelFailed, serr)
+			r.event(slog.LevelWarn, "issue.status", n, fmt.Sprintf("#%d: could not set %s: %v", n, labelFailed, serr), "to", labelFailed, "error", serr)
+		} else {
+			r.statusEvent(n, labelInProgress, labelFailed)
 		}
 		msg := fmt.Sprintf("amf could not turn this issue into a pull request:\n\n```\n%s\n```", err)
 		var se *stageError
@@ -170,18 +163,27 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 		var ate *agentTimeoutError
 		if errors.As(err, &ate) {
 			msg = ate.comment(r.Root)
-			r.logf("issue.failed: issue=%d reason=agent_timeout", n)
+			r.event(slog.LevelInfo, "issue.failed", n, fmt.Sprintf("issue.failed: issue=%d reason=agent_timeout", n),
+				"reason", "agent_timeout", "stage", stageName(ate.Stage), "error", err)
 			// The agent's process group is dead, so nothing still writes
 			// into the worktree, and it has no branch holding partial work.
 			r.removeWorktree(cctx, n)
 		}
-		if cerr := r.GH.Comment(cctx, n, r.Redact.Redact(msg)); cerr != nil {
-			r.logf("#%d: could not comment: %v", n, cerr)
+		if ate == nil {
+			reason := "error"
+			if se != nil {
+				reason = "stage"
+			}
+			r.event(slog.LevelDebug, "issue.failed", n, fmt.Sprintf("#%d: failed: %v", n, err), "reason", reason, "error", err)
 		}
+		r.comment(cctx, n, msg)
 	}()
 
-	if err := r.checkAuthor(issue); err != nil {
-		return err
+	trusted := r.checkAuthor(issue)
+	r.event(slog.LevelDebug, "issue.author_check", n, fmt.Sprintf("#%d: opened by @%s", n, issue.User.Login),
+		"author", issue.User.Login, "trusted", trusted == nil)
+	if trusted != nil {
+		return trusted
 	}
 
 	pr, updated, err := r.process(ctx, issue, base, pipeline, agent)
@@ -194,14 +196,31 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 	if updated {
 		verb = "updated"
 	}
-	r.logf("#%d: %s %s", n, verb, pr.HTMLURL)
+	r.event(slog.LevelInfo, "issue.pr", n, fmt.Sprintf("#%d: %s %s", n, verb, pr.HTMLURL),
+		"action", verb, "number", pr.Number, "url", pr.HTMLURL)
 	if err := r.setStatus(ctx, n, labelDone); err != nil {
-		r.logf("#%d: could not set %s: %v", n, labelDone, err)
+		r.event(slog.LevelWarn, "issue.status", n, fmt.Sprintf("#%d: could not set %s: %v", n, labelDone, err), "to", labelDone, "error", err)
+	} else {
+		r.statusEvent(n, labelInProgress, labelDone)
 	}
-	if err := r.GH.Comment(ctx, n, r.Redact.Redact(fmt.Sprintf("amf %s %s for this issue.", verb, pr.HTMLURL))); err != nil {
-		r.logf("#%d: could not comment: %v", n, err)
-	}
+	r.comment(ctx, n, fmt.Sprintf("amf %s %s for this issue.", verb, pr.HTMLURL))
+	r.event(slog.LevelDebug, "issue.done", n, fmt.Sprintf("#%d: done", n), "pr", pr.Number)
 	return nil
+}
+
+// comment posts msg, redacted, on issue n, logging how it went.
+func (r *Runner) comment(ctx context.Context, n int, msg string) {
+	msg = r.Redact.Redact(msg)
+	if err := r.GH.Comment(ctx, n, msg); err != nil {
+		r.event(slog.LevelWarn, "issue.comment", n, fmt.Sprintf("#%d: could not comment: %v", n, err), "error", err)
+		return
+	}
+	r.event(slog.LevelDebug, "issue.comment", n, fmt.Sprintf("#%d: commented", n), "bytes", len(msg))
+}
+
+// statusEvent records that issue n's status label went from one to another.
+func (r *Runner) statusEvent(n int, from, to string) {
+	r.event(slog.LevelDebug, "issue.status", n, fmt.Sprintf("#%d: %s -> %s", n, from, to), "from", from, "to", to)
 }
 
 // checkAuthor fails an issue whose author isn't in Trusted. It runs after
@@ -230,7 +249,8 @@ func (r *Runner) process(ctx context.Context, issue Issue, base string, p *Pipel
 	branch := fmt.Sprintf("amf/issue-%d", n)
 	wt := filepath.Join(r.Root, ".amf", "worktrees", fmt.Sprintf("issue-%d", n))
 
-	r.logf("#%d: creating worktree %s on %s from origin/%s", n, wt, branch, base)
+	r.event(slog.LevelInfo, "issue.worktree", n, fmt.Sprintf("#%d: creating worktree %s on %s from origin/%s", n, wt, branch, base),
+		"path", wt, "branch", branch, "base", base)
 	if err := r.prepareWorktree(ctx, wt, branch, base); err != nil {
 		return PullRequest{}, false, err
 	}
@@ -239,11 +259,13 @@ func (r *Runner) process(ctx context.Context, issue Issue, base string, p *Pipel
 	var summary, extra string
 	if p == nil {
 		model := r.agentModel(agent, "")
+		r.event(slog.LevelDebug, "issue.pipeline", n, fmt.Sprintf("#%d: no pipeline; one %s run", n, agentName(agent)),
+			"declared", false, "stages", []string{"code"}, "agents", []string{agentName(agent)}, "models", []string{model})
+		text := fmt.Sprintf("#%d: running %s (timeout %s)", n, agentName(agent), r.Timeout)
 		if model != "" {
-			r.logf("#%d: running %s (%s, timeout %s)", n, agentName(agent), model, r.Timeout)
-		} else {
-			r.logf("#%d: running %s (timeout %s)", n, agentName(agent), r.Timeout)
+			text = fmt.Sprintf("#%d: running %s (%s, timeout %s)", n, agentName(agent), model, r.Timeout)
 		}
+		r.event(slog.LevelInfo, "issue.agent", n, text, "agent", agentName(agent), "model", model, "timeout", r.Timeout.String())
 		log := filepath.Join(r.Root, ".amf", "logs", fmt.Sprintf("issue-%d.log", n))
 		out := filepath.Join(wt, ".amf", "code.md") // for agents that write their final message to a file
 		if summary, err = r.runAgent(ctx, agent, "", model, wt, buildPrompt(r.Repo, branch, issue), log, out); err != nil {
@@ -253,13 +275,18 @@ func (r *Runner) process(ctx context.Context, issue Issue, base string, p *Pipel
 			return PullRequest{}, false, err
 		}
 	} else {
-		r.logf("#%d: running the pipeline from AGENTS.md: %s", n, describePipeline(p))
+		var stages, agents, models []string
+		for _, s := range p.stages() {
+			stages, agents, models = append(stages, s.Name), append(agents, s.Agent), append(models, s.model())
+		}
+		r.event(slog.LevelInfo, "issue.pipeline", n, fmt.Sprintf("#%d: running the pipeline from AGENTS.md: %s", n, describePipeline(p)),
+			"declared", true, "stages", stages, "agents", agents, "models", models)
 		if summary, extra, err = r.runPipeline(ctx, wt, issue, branch, base, p); err != nil {
 			return PullRequest{}, false, err
 		}
 	}
 
-	r.logf("#%d: pushing %s", n, branch)
+	r.event(slog.LevelInfo, "issue.push", n, fmt.Sprintf("#%d: pushing %s", n, branch), "branch", branch)
 	// amf owns amf/issue-* branches, so a re-run may replace an earlier push.
 	if _, err := git(ctx, wt, "push", "--force", "-u", "origin", branch); err != nil {
 		return PullRequest{}, false, err
@@ -278,7 +305,8 @@ func (r *Runner) process(ctx context.Context, issue Issue, base string, p *Pipel
 		// A retry of an issue whose PR is still open: the push updated it,
 		// so bring its description up to date too.
 		if open, ok, ferr := r.GH.OpenPR(ctx, branch); ferr == nil && ok {
-			r.logf("#%d: %s already has %s; updating it", n, branch, open.HTMLURL)
+			r.event(slog.LevelInfo, "issue.pr", n, fmt.Sprintf("#%d: %s already has %s; updating it", n, branch, open.HTMLURL),
+				"action", "updating", "number", open.Number, "url", open.HTMLURL)
 			pr, err = r.GH.UpdatePR(ctx, open.Number, title, body)
 			updated = true
 		}
@@ -288,7 +316,7 @@ func (r *Runner) process(ctx context.Context, issue Issue, base string, p *Pipel
 	}
 
 	if _, err := git(ctx, r.Root, "worktree", "remove", wt); err != nil {
-		r.logf("#%d: could not remove worktree: %v", n, err)
+		r.event(slog.LevelWarn, "issue.cleanup", n, fmt.Sprintf("#%d: could not remove worktree: %v", n, err), "error", err)
 	}
 	return pr, updated, nil
 }
@@ -301,12 +329,12 @@ func (r *Runner) removeWorktree(ctx context.Context, n int) {
 	if _, err := git(ctx, r.Root, "worktree", "remove", "--force", wt); err != nil {
 		// Not a worktree git knows about, such as a leftover folder.
 		if err := os.RemoveAll(wt); err != nil {
-			r.logf("#%d: could not remove the worktree: %v", n, err)
+			r.event(slog.LevelWarn, "issue.cleanup", n, fmt.Sprintf("#%d: could not remove the worktree: %v", n, err), "error", err)
 			return
 		}
 	}
 	if _, err := git(ctx, r.Root, "worktree", "prune"); err != nil {
-		r.logf("#%d: could not prune the worktrees: %v", n, err)
+		r.event(slog.LevelWarn, "issue.cleanup", n, fmt.Sprintf("#%d: could not prune the worktrees: %v", n, err), "error", err)
 	}
 }
 
@@ -317,7 +345,7 @@ func (r *Runner) prepareWorktree(ctx context.Context, wt, branch, base string) e
 		return err
 	}
 	if _, err := os.Stat(wt); err == nil {
-		r.logf("removing stale worktree %s", wt)
+		r.event(slog.LevelInfo, "issue.worktree", 0, fmt.Sprintf("removing stale worktree %s", wt), "path", wt, "stale", true)
 		if _, err := git(ctx, r.Root, "worktree", "remove", "--force", wt); err != nil {
 			// Not a worktree git knows about, such as a leftover folder.
 			if err := os.RemoveAll(wt); err != nil {
@@ -524,56 +552,72 @@ func (r *Runner) setStatus(ctx context.Context, n int, status string) error {
 // needsWork reports whether watch should pick up an issue: one that isn't
 // already in progress, and either is marked amf:ready (a retry if it was
 // done or failed before) or carries a custom --label and no status yet.
-func needsWork(is Issue) bool {
-	if is.PullRequest != nil || is.State != "open" || is.HasLabel(labelInProgress) {
-		return false
-	}
-	if is.HasLabel(labelReady) {
-		return true
+func needsWork(is Issue) bool { return skipReason(is) == "" }
+
+// skipReason is why watch passes over an issue: pr, closed, in_progress or
+// status_label (done or failed, without amf:ready), or "" to work on it.
+func skipReason(is Issue) string {
+	switch {
+	case is.PullRequest != nil:
+		return "pr"
+	case is.State != "open":
+		return "closed"
+	case is.HasLabel(labelInProgress):
+		return "in_progress"
+	case is.HasLabel(labelReady):
+		return ""
 	}
 	for _, l := range statusLabels {
 		if is.HasLabel(l) {
-			return false
+			return "status_label"
 		}
 	}
-	return true
+	return ""
 }
 
 // Watch polls for open issues labeled label and runs them one at a time
 // until ctx is cancelled.
 func (r *Runner) Watch(ctx context.Context, label string, interval time.Duration) error {
-	r.logf("watching %s for issues labeled %q every %s (Ctrl-C to stop)", r.Repo, label, interval)
-	r.logf("agents for issues without a pipeline (claude and codex need a key):")
+	r.event(slog.LevelInfo, "watch.start", 0, fmt.Sprintf("watching %s for issues labeled %q every %s (Ctrl-C to stop)", r.Repo, label, interval),
+		"repo", r.Repo, "label", label, "interval", interval.String(), "timeout", r.Timeout.String(),
+		"eval_rounds", r.EvalRounds, "agent_flag", agentName(r.Agent), "version", buildVersion())
+	r.event(slog.LevelInfo, "watch.agents", 0, "agents for issues without a pipeline (claude and codex need a key):")
 	for _, st := range r.agentStatuses() {
-		r.logf("  %s", st.describe())
+		r.event(slog.LevelInfo, "watch.agents", 0, "  "+st.describe(),
+			"agent", st.Agent, "path", st.Path, "key", st.Key, "usable", st.usable(), "model", st.Model)
 	}
 	switch agent, _, err := r.pickAgent(); {
 	case r.Agent != "":
-		r.logf("issues without a pipeline run %s (--agent)", agentName(r.Agent))
+		r.event(slog.LevelInfo, "watch.agents", 0, fmt.Sprintf("issues without a pipeline run %s (--agent)", agentName(r.Agent)), "picked", agentName(r.Agent))
 	case err != nil:
-		r.logf("warning: %v; issues without a pipeline wait until one is available", err)
+		r.event(slog.LevelWarn, "watch.agents", 0, fmt.Sprintf("warning: %v; issues without a pipeline wait until one is available", err), "error", err)
 	default:
-		r.logf("issues without a pipeline run %s", agentName(agent))
+		r.event(slog.LevelInfo, "watch.agents", 0, fmt.Sprintf("issues without a pipeline run %s", agentName(agent)), "picked", agentName(agent))
 	}
-	for {
+	for cycle := 1; ; cycle++ {
 		issues, err := r.GH.ListIssues(ctx, "open", label, true)
-		if err != nil && ctx.Err() == nil {
-			r.logf("listing issues: %v", err)
+		switch {
+		case err != nil && ctx.Err() == nil:
+			r.event(slog.LevelWarn, "watch.tick", 0, fmt.Sprintf("listing issues: %v", err), "cycle", cycle, "error", err)
+		case err == nil:
+			r.event(slog.LevelDebug, "watch.tick", 0, fmt.Sprintf("poll %d: %d open %s labeled %s", cycle, len(issues), plural(len(issues), "issue", "issues"), label),
+				"cycle", cycle, "issues", len(issues))
 		}
 		for _, is := range issues {
 			if ctx.Err() != nil {
 				break
 			}
-			if !needsWork(is) {
+			if why := skipReason(is); why != "" {
+				r.event(slog.LevelDebug, "watch.skip", is.Number, fmt.Sprintf("#%d: skipped (%s)", is.Number, why), "reason", why)
 				continue
 			}
 			if err := r.Run(ctx, is.Number); err != nil {
-				r.logf("#%d failed: %v", is.Number, err)
+				r.event(slog.LevelWarn, "watch.failed", is.Number, fmt.Sprintf("#%d failed: %v", is.Number, err), "error", err)
 			}
 		}
 		select {
 		case <-ctx.Done():
-			r.logf("stopped")
+			r.event(slog.LevelInfo, "watch.stop", 0, "stopped", "reason", ctx.Err(), "cycles", cycle)
 			return nil
 		case <-time.After(interval):
 		}
