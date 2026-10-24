@@ -325,7 +325,8 @@ work. Starter skills are in this repo under `skills/`.
      the issue's comment names the agent, the stage and the limit, and how
      to retry with more time. A timed-out run pushes nothing and opens or
      updates no PR, and its worktree is removed; the logs and partial output
-     stay.
+     stay, as does the local `amf/issue-N` branch, which is never pushed and
+     which a retry resets to `origin/<default>`.
    - **Summary:** the final message becomes the summary.
 
    With a pipeline, this step and the next are replaced by the steps in
@@ -333,8 +334,8 @@ work. Starter skills are in this repo under `skills/`.
 7. **Commit.** Stage everything and commit as `Fix #N: <title>` with the body
    `Closes #N`. Fail if the branch doesn't change any file compared with
    `origin/<default>`, even if the agent made commits of its own. The run
-   also fails — before the push, so no branch or PR is created — when any
-   changed path is under `.github/`, where workflows and `CODEOWNERS` live;
+   also fails — before the push, so nothing is pushed and no PR is created —
+   when any changed path is under `.github/`, where workflows and `CODEOWNERS` live;
    the error names the offending paths. Changes elsewhere, even under a
    directory whose name contains `.github`, are fine.
 8. **Push.** `git push --force -u origin amf/issue-N`, with the user's git
