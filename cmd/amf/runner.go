@@ -83,11 +83,16 @@ type Runner struct {
 	// checkout is how newRunner found Root: checkout (the enclosing one),
 	// clone (reused) or cloned.
 	checkout string
+	// stats counts the events for the run summary, which goes to
+	// summaryPath ("" for none) after each issue and at Close.
+	stats       *statsHandler
+	summaryPath string
 }
 
 // Close writes out the event file and sends the logs still queued for
 // PostgreSQL.
 func (r *Runner) Close() {
+	r.summarize(true)
 	if err := r.events.Close(); err != nil {
 		fmt.Fprintf(r.Log, "amf: could not write the event log: %v\n", err)
 	}
@@ -99,6 +104,7 @@ func (r *Runner) Close() {
 // no push and no branch: it removes the worktree, keeping the logs and the
 // partial output; any other failure keeps the worktree for inspection.
 func (r *Runner) Run(ctx context.Context, n int) (err error) {
+	defer r.summarize(false)           // runs last, after the deferred failure handling
 	ctx = withEvents(ctx, r.Events, n) // git, GitHub and skill calls log there
 	issue, err := r.GH.GetIssue(ctx, n)
 	if err != nil {

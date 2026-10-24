@@ -133,7 +133,10 @@ func TestNewRunnerEventLog(t *testing.T) {
 	if e := byName["checkout.resolve"]; len(e) != 1 || e[0]["how"] != "checkout" || e[0]["dir"] != r.Root {
 		t.Errorf("checkout.resolve = %v", e)
 	}
-	last := ev[len(ev)-1]
+	last := wantEvent(t, byName, "test.hello", map[string]any{})
+	if last == nil {
+		return
+	}
 	if last["msg"] != "#3: hello [REDACTED:config]" || last["issue"] != float64(3) || !strings.Contains(files[0], last["run_id"].(string)) {
 		t.Errorf("last event = %v (file %s)", last, files[0])
 	}

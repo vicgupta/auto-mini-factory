@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -409,3 +410,115 @@ func TestPostgresEvents(t *testing.T) {
 type writerFunc func([]byte) (int, error)
 
 func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
+
+// summaryRunner is a test Runner whose events are counted for the run
+// summary, written to the returned path.
+func summaryRunner(t *testing.T, r *Runner) (summaryPath string, events *bytes.Buffer) {
+	t.Helper()
+	events = &bytes.Buffer{}
+	r.stats = newStatsHandler("run", "events.jsonl")
+	r.summaryPath = filepath.Join(t.TempDir(), "summary.json")
+	r.Events = newEventLogger(r.Log, slog.LevelInfo, events, slog.LevelDebug, nil, "run", r.stats)
+	return r.summaryPath, events
+}
+
+func readSummary(t *testing.T, path string) runSummary {
+	t.Helper()
+	var s runSummary
+	if err := json.Unmarshal([]byte(mustRead(t, path)), &s); err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+func TestWatchSummary(t *testing.T) {
+	root, _ := setupRepo(t)
+	gh, srv := newFakeGitHub(t)
+	gh.issues[1] = readyIssue(1, "Goes through")
+	gh.issues[2] = readyIssue(2, "Fails")
+	gh.issues[3] = &Issue{Number: 3, Title: "Busy", State: "open", Labels: []Label{{Name: "amf:ready"}, {Name: "amf:in-progress"}}}
+	r, log := newTestRunner(t, srv, root, fakeAgent(t, "claude", shResult+`p=$(cat)
+case "$p" in *"# #2:"*) exit 3;; esac
+echo x > x.txt; result 'Done.'
+`))
+	path, _ := summaryRunner(t, r)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	time.AfterFunc(20*time.Second, cancel)
+	done := make(chan error, 1)
+	go func() { done <- r.Watch(ctx, "amf:ready", 20*time.Millisecond) }()
+	for !slices.Contains(gh.labels(1), "amf:done") || !slices.Contains(gh.labels(2), "amf:failed") {
+		if ctx.Err() != nil {
+			t.Fatalf("issues not processed; log:\n%s", log)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	time.Sleep(150 * time.Millisecond) // a few more polls, each skipping #3 again
+	cancel()
+	<-done
+	// After each issue, summary.json is already there.
+	if s := readSummary(t, path); s.Issues.Done != 1 {
+		t.Errorf("summary after the issues = %+v", s)
+	}
+	r.Close()
+
+	s := readSummary(t, path)
+	if s.RunID != "run" || s.Issues.Done != 1 || s.Issues.Failed != 1 || s.Issues.Skipped != 1 ||
+		s.GitHubCalls == 0 || s.GitCalls == 0 || s.Errors == 0 || s.Log != "events.jsonl" || s.RateLimitLowest != nil {
+		t.Errorf("summary = %+v", s)
+	}
+	if _, ok := s.AgentMS["agent run"]; !ok {
+		t.Errorf("agent_ms = %v", s.AgentMS)
+	}
+	if !strings.Contains(log.String(), "amf: summary: 2 issues (1 done, 1 failed, 1 skipped); ") || !strings.Contains(log.String(), "; log events.jsonl\n") {
+		t.Errorf("console:\n%s", log)
+	}
+}
+
+func TestSummaryAfterCancel(t *testing.T) {
+	root, _ := setupRepo(t)
+	gh, srv := newFakeGitHub(t)
+	gh.issues[1] = readyIssue(1, "Hangs")
+	r, log := newTestRunner(t, srv, root, fakeAgent(t, "claude", "cat >/dev/null; while :; do sleep 1; done\n"))
+	r.KillGrace = 50 * time.Millisecond
+	path, _ := summaryRunner(t, r)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	time.AfterFunc(20*time.Second, cancel)
+	done := make(chan error, 1)
+	go func() { done <- r.Watch(ctx, "amf:ready", 20*time.Millisecond) }()
+	for !slices.Contains(gh.labels(1), "amf:in-progress") {
+		if ctx.Err() != nil {
+			t.Fatalf("issue not picked up; log:\n%s", log)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	time.Sleep(200 * time.Millisecond) // the agent is running
+	cancel()
+	<-done
+	r.Close()
+	if s := readSummary(t, path); s.Issues.Failed != 1 || s.Issues.Done != 0 {
+		t.Errorf("summary after Ctrl-C = %+v", s)
+	}
+	if !strings.Contains(log.String(), "amf: summary: 1 issue (0 done, 1 failed, 0 skipped)") {
+		t.Errorf("console:\n%s", log)
+	}
+}
+
+func TestStatsHandlerRateLimit(t *testing.T) {
+	h := newStatsHandler("run", "")
+	log := slog.New(h)
+	for _, left := range []string{"4999", "4990", "", "4995"} {
+		log.Debug("call", "event", "github.call", "ratelimit_remaining", left)
+	}
+	log.Debug("exit", "event", "agent.exit", "stage", "code-1", "duration_ms", int64(100))
+	log.Debug("exit", "event", "agent.exit", "stage", "code-2", "duration_ms", int64(50))
+	log.Debug("exit", "event", "agent.exit", "stage", "eval-1", "duration_ms", int64(7))
+	s := h.snapshot()
+	if s.GitHubCalls != 4 || s.RateLimitLowest == nil || *s.RateLimitLowest != 4990 ||
+		!reflect.DeepEqual(s.AgentMS, map[string]int64{"code": 150, "eval": 7}) {
+		t.Errorf("snapshot = %+v (lowest %v)", s, s.RateLimitLowest)
+	}
+}

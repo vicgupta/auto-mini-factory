@@ -77,6 +77,7 @@ func TestDoctorAllGood(t *testing.T) {
 		`ok +checkout +.*/work \(origin .*origin\.git\)$`,
 		`ok +git push +your git credentials can push`,
 		`ok +git identity +commits as amf test <amf@example\.com>$`,
+		`ok +log folder +.*/work/\.amf/runs is writable$`,
 		`ok +pipeline +origin/main: code \(claudecode, default model\)$`,
 		`ok +claudecode +.*/claude, 1\.2\.3 \(Claude Code\)$`,
 		`warn +codex +.*no-codex is not installed; only needed by pipelines that use codex$`,
@@ -288,4 +289,27 @@ func TestDoctorAgentWithoutKey(t *testing.T) {
 		`ok +codex +.*/codex, codex-cli 9; runs issues without a pipeline$`,
 		`ok +codex login +OPENAI_API_KEY is set, from the environment; codex runs with it$`,
 	)
+}
+
+func TestDoctorLogFolder(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can write anywhere")
+	}
+	root, _ := setupRepo(t)
+	if got, err := writableFolder(filepath.Join(root, ".amf", "runs")); err != nil || got != root {
+		t.Errorf("writableFolder before .amf exists = %q, %v; want %q, nil", got, err, root)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".amf")); !os.IsNotExist(err) {
+		t.Errorf("the check created .amf: %v", err)
+	}
+	os.MkdirAll(filepath.Join(root, ".amf", "runs"), 0o755)
+	os.Chmod(filepath.Join(root, ".amf", "runs"), 0o555)
+	t.Cleanup(func() { os.Chmod(filepath.Join(root, ".amf", "runs"), 0o755) })
+	if _, err := writableFolder(filepath.Join(root, ".amf", "runs")); err == nil {
+		t.Error("a read-only folder passed")
+	}
+	entries, _ := os.ReadDir(filepath.Join(root, ".amf", "runs"))
+	if len(entries) != 0 {
+		t.Errorf("the check left %v behind", entries)
+	}
 }

@@ -395,15 +395,24 @@ func newRunner(ctx context.Context, timeout time.Duration, evalRounds int, agent
 		path = filepath.Join(r.Root, ".amf", "runs", runID, "events.jsonl")
 	}
 	var file io.Writer
+	shownLog := ""
 	if path != "off" {
 		ef, err := openEventFile(path)
 		if err != nil {
 			r.Close()
 			return nil, fmt.Errorf("--log-file: %v", err)
 		}
-		r.events, file = ef, ef
+		r.events, file, shownLog = ef, ef, path
+		// The summary stays in the run's folder, wherever the event log goes.
+		runDir := filepath.Join(r.Root, ".amf", "runs", runID)
+		if err := os.MkdirAll(runDir, 0o755); err != nil {
+			r.Close()
+			return nil, err
+		}
+		r.summaryPath = filepath.Join(runDir, "summary.json")
 	}
-	r.Events = newEventLogger(r.Log, consoleLevel, file, fileLevel, red, runID)
+	r.stats = newStatsHandler(runID, shownLog)
+	r.Events = newEventLogger(r.Log, consoleLevel, file, fileLevel, red, runID, r.stats)
 	if file != nil {
 		r.event(slog.LevelInfo, "log.file", 0, fmt.Sprintf("logging to %s", shownPath(r.Root, path)), "path", path)
 	}

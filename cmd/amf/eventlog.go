@@ -130,12 +130,13 @@ func (e *eventFile) Close() error {
 // newEventLogger returns the logger for a run: each record goes, redacted,
 // to the console as amf has always printed it ("amf: <message>") and, when
 // file is not nil, as one JSON object per line. Every record carries
-// run_id.
-func newEventLogger(console io.Writer, consoleLevel slog.Level, file io.Writer, fileLevel slog.Level, red *redactor, runID string) *slog.Logger {
+// run_id. Each of extra also gets every record, redacted.
+func newEventLogger(console io.Writer, consoleLevel slog.Level, file io.Writer, fileLevel slog.Level, red *redactor, runID string, extra ...slog.Handler) *slog.Logger {
 	hs := []slog.Handler{&consoleHandler{w: console, level: consoleLevel}}
 	if file != nil {
 		hs = append(hs, slog.NewJSONHandler(file, &slog.HandlerOptions{Level: fileLevel}))
 	}
+	hs = append(hs, extra...)
 	return slog.New(&redactHandler{red: red, next: fanout(hs)}).With("run_id", runID)
 }
 

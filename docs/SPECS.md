@@ -69,6 +69,17 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened)
   printed before that are not in the file. Writes are buffered, flushed
   every second and when amf exits, Ctrl-C included. The events are listed
   under [Event log](#event-log).
+- **Summary.** After each issue and when `run` or `watch` exits (Ctrl-C
+  and failures included), amf writes `.amf/runs/<run_id>/summary.json`
+  (none with `--log-file off`; with another `--log-file`, it still goes
+  there): `run_id`, `issues` (`done`, `failed`, and `skipped`, each issue
+  counted once however many polls skipped it), `github_calls`,
+  `ratelimit_lowest` (the lowest `X-RateLimit-Remaining`, or null),
+  `git_calls`, `agent_ms` (agent wall time per stage: `plan`, `code`,
+  `eval`, or `agent run` without a pipeline), `errors` (warn and error
+  events) and `log` (the event log's path). At exit amf also prints
+  `summary: N issues (D done, F failed, S skipped); G GitHub calls; log
+  <path>`, the last part only with an event log.
 - `--log-level` is `debug`, `info`, `warn` or `error` (case is ignored),
   and so is `AMF_LOG_LEVEL`, which the flag overrides. Either sets the
   level for both the terminal and the event log; without them the
@@ -168,6 +179,7 @@ never prints a secret. The checks, in order:
 | `checkout` | The checkout `run` would use: the enclosing one, or `./<name>` | `warn` if `run` would clone first or origin isn't `GITHUB_REPO`; `FAIL` if `./<name>` isn't a clone or there's no origin |
 | `git push` | `git push --dry-run` to `origin` works with the user's git credentials, without prompting | `FAIL`, with git's message |
 | `git identity` | git has a name and email to commit with, in the checkout (or here); shows them | `FAIL`, with the `git config` commands to set them |
+| `log folder` | `.amf/runs/` in the checkout can be written: doctor writes and removes a file in it, or in the nearest folder above it while it doesn't exist yet | `FAIL`, naming the folder and the error; `skip` without a checkout |
 | `pipeline` | Fetches the default branch; shows the pipeline from `AGENTS.md` on it, or that there is none | `FAIL` if the table doesn't parse |
 | `skill <stage>` | Each stage's skill downloads as in `run`; shows its size and SHA-256 | `FAIL` |
 | `claudecode`, `codex`, `opencode` | Installed; shows the path and `--version`. With no pipeline, the agent amf picks adds `runs issues without a pipeline`, and the `pipeline` line names it | `FAIL` if a stage needs it. With no pipeline: one `FAIL` on `claudecode` if no agent is usable; `warn` for an installed `claude` or `codex` without its key, naming the agent amf runs instead; `warn` for one that isn't installed |
@@ -439,6 +451,7 @@ Any failure leaves the installed binary unchanged.
 | `.amf/logs/issue-N-<stage>.log` | Each pipeline stage's output: `plan`, `code-K`, `eval-K` |
 | `.amf/runs/issue-N/` | The latest pipeline run's `plan.md` and `eval-K.md` |
 | `.amf/runs/<run_id>/events.jsonl` | The event log of one `run` or `watch` process, unless `--log-file` says otherwise |
+| `.amf/runs/<run_id>/summary.json` | That process's summary, rewritten after each issue and at exit |
 | `.amf/opencode.json` | The config amf runs opencode with |
 
 amf only ever adds to `.git/info/exclude`. It never edits a tracked `.gitignore`.
@@ -458,6 +471,7 @@ event log opens, are not. The fields of each event, besides those:
 | Event | Level | Fields |
 |---|---|---|
 | `log.file` | info | `path`: the event log |
+| `run.summary` | debug, info | The fields of `summary.json` (see Commands) as `done`, `failed`, `skipped`, `github_calls`, `ratelimit_lowest`, `git_calls`, `agent_ms`, `errors`, `log`, and `final`: false (debug) after an issue, true (info, the terminal's last line) at exit |
 | `config.load` | debug | `paths` (the `.env` files looked for), `file` (the one read, or `""`), and `keys`: for each variable read, its `source` (`env`, `.env` or `default`) and `value`. Only `GITHUB_REPO`, `AMF_API_URL`, `OPENCODE_MODEL`, `AMF_AGENT_TIMEOUT`, `AMF_LOG_LEVEL`, `AMF_CLAUDE`, `AMF_CODEX` and `AMF_OPENCODE` show their value; every other one shows `set` or `unset` |
 | `pg.connect` | debug | With `AMF_POSTGRES_URL`: `host`, `port`, `database`, and `tls` and `auth` (`trust`, `password`, `md5` or `scram-sha-256`), or `error`; `created` when amf created the database. The first connection's event follows `log.file` |
 | `pg.retry` | debug | `attempt` (since the last success), `backoff`, `error` |
