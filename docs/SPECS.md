@@ -32,7 +32,7 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened)
 |---|---|
 | `amf init` | Writes `./.env` and creates the labels (see below). |
 | `amf issue "Title" [-b body \| -f file \| -f -] [--label L] [--no-label]` | Creates an issue labeled `amf:ready`. The body can also come from stdin when it's piped. Prints `#N <url>`. |
-| `amf list [--state open\|closed\|all] [--label L]` | Lists issues, newest first (highest number first), with every page fetched and PRs left out. Columns: `ISSUE`, `STATE` (with `--state all` only), `AMF` (the issue's `amf` and `amf:*` labels, or `-`) and `TITLE`. Prints `No … in owner/name.` when nothing matches. Needs no git checkout. |
+| `amf list [--state open\|closed\|all] [--label L] [--limit N]` | Lists issues, newest first (highest number first), with every page fetched and PRs left out. Columns: `ISSUE`, `STATE` (with `--state all` only), `AMF` (the issue's `amf` and `amf:*` labels, or `-`) and `TITLE`. `--limit N` (default `0`, no limit) prints only the first N issues after filtering; a negative value errors with `--limit must be 0 or more, got N`. Prints `No … in owner/name.` when nothing matches. Needs no git checkout. |
 | `amf run <N> [--agent A] [--agent-timeout 60m] [--eval-rounds 2] [--log-level L] [--log-file P]` | Processes issue N once. |
 | `amf watch [--agent A] [--interval 60s] [--label amf:ready] [--agent-timeout 60m] [--eval-rounds 2] [--log-level L] [--log-file P]` | Polls open issues with the label (every page), oldest first by issue number (GitHub's `created_at` can tie for issues opened in the same second), and processes them one at a time until interrupted. |
 | `amf pipeline [--fetch]` | Checks the pipeline in `AGENTS.md` of the enclosing checkout, as it is on disk. See below. |
