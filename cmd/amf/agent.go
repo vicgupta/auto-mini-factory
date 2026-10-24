@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // agentOrder is the order amf tries agents in for an issue without a
@@ -37,14 +40,19 @@ func agentName(agent string) string {
 
 // agentKeys are the environment variables that give an agent a credential
 // amf can see. Without --agent, amf only picks claude or codex when one of
-// its keys is set; opencode needs none.
+// its keys is set; opencode needs one only for a paid OPENCODE_MODEL (see
+// opencodeProvider), and can use its saved login instead.
 var agentKeys = map[string][]string{
-	agentClaude: {"ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"},
-	agentCodex:  {"OPENAI_API_KEY"},
+	agentClaude:   {"ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"},
+	agentCodex:    {"OPENAI_API_KEY"},
+	agentOpencode: {"OPENCODE_API_KEY"},
 }
 
-// agentKey says which of agent's keys is set, if any. ok is true for an
-// agent that needs none.
+// opencodeSavedLogin is agentKey's name for opencode's own saved login.
+const opencodeSavedLogin = "saved login"
+
+// agentKey says which of agent's keys is set, if any, or opencodeSavedLogin.
+// ok is true for an agent that needs none: opencode with a free model.
 func (r *Runner) agentKey(agent string) (name string, ok bool) {
 	switch agent {
 	case agentClaude:
@@ -60,8 +68,65 @@ func (r *Runner) agentKey(agent string) (name string, ok bool) {
 			return "OPENAI_API_KEY", true
 		}
 		return "", false
+	case agentOpencode:
+		provider := opencodeProvider(r.OpencodeModel)
+		switch {
+		case r.OpencodeKey != "":
+			return "OPENCODE_API_KEY", true
+		case provider == "":
+			return "", true
+		case r.opencodeLogin(provider):
+			return opencodeSavedLogin, true
+		}
+		return "", false
 	}
 	return "", true
+}
+
+// opencodeProvider is the OpenCode provider model belongs to when it needs
+// OPENCODE_API_KEY or a saved login: opencode for pay-as-you-go Console
+// models, opencode-go for OpenCode Go ones. It is "" for a model that needs
+// neither: a free one (opencode/big-pickle, or an opencode/ id ending in
+// -free), or another provider's, whose credentials opencode keeps itself.
+func opencodeProvider(model string) string {
+	provider, id, _ := strings.Cut(model, "/")
+	switch {
+	case provider == "opencode-go":
+		return provider
+	case provider == "opencode" && id != "big-pickle" && !strings.HasSuffix(id, "-free"):
+		return provider
+	}
+	return ""
+}
+
+// opencodeLogin reports whether opencode has a saved credential for
+// provider, as `opencode auth list --format json` lists them.
+func (r *Runner) opencodeLogin(provider string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, r.Opencode, "auth", "list", "--format", "json")
+	cmd.WaitDelay = time.Second
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	var integrations []struct {
+		ID          string `json:"id"`
+		Connections []struct {
+			Type string `json:"type"`
+		} `json:"connections"`
+	}
+	if json.Unmarshal(out, &integrations) != nil {
+		return false
+	}
+	for _, in := range integrations {
+		for _, c := range in.Connections {
+			if in.ID == provider && c.Type == "credential" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // agentStatus is what amf found for one agent: whether it's installed, and
@@ -81,6 +146,9 @@ func (s agentStatus) reason() string {
 	if s.Path == "" {
 		return s.Bin + " is not installed"
 	}
+	if s.Agent == agentOpencode {
+		return "opencode has no OPENCODE_API_KEY or saved login for " + s.Model
+	}
 	return agentName(s.Agent) + " has no " + strings.Join(agentKeys[s.Agent], " or ")
 }
 
@@ -90,16 +158,21 @@ func (s agentStatus) describe() string {
 	if s.Path != "" {
 		where = "installed at " + s.Path
 	}
-	key := "needs no key"
-	if s.Model != "" {
-		key += ", model " + s.Model
-	}
+	var key string
 	switch {
-	case len(agentKeys[s.Agent]) == 0:
+	case s.Key == opencodeSavedLogin:
+		key = "uses its saved login"
 	case s.Key != "":
 		key = s.Key + " is set"
+	case s.Agent == agentOpencode && s.Keyed:
+		key = "needs no key"
+	case s.Agent == agentOpencode:
+		key = "OPENCODE_API_KEY not set and no saved login"
 	default:
 		key = strings.Join(agentKeys[s.Agent], " and ") + " not set"
+	}
+	if s.Model != "" {
+		key += ", model " + s.Model
 	}
 	verdict := "usable"
 	if !s.usable() {
@@ -156,7 +229,8 @@ func (r *Runner) pickAgent() (agent string, passed []string, err error) {
 		passed = append(passed, st.reason())
 	}
 	return "", passed, fmt.Errorf("no coding agent is available (%s); set ANTHROPIC_API_KEY or "+
-		"CLAUDE_CODE_OAUTH_TOKEN for claude or OPENAI_API_KEY for codex, install opencode, or name one with --agent", strings.Join(passed, "; "))
+		"CLAUDE_CODE_OAUTH_TOKEN for claude or OPENAI_API_KEY for codex, install opencode (with OPENCODE_API_KEY "+
+		"for a paid OPENCODE_MODEL), or name one with --agent", strings.Join(passed, "; "))
 }
 
 // agentModel is the model to run agent with: model, if a pipeline stage

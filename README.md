@@ -63,7 +63,8 @@ GITHUB_REPO=owner/name
 CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...   # optional: Claude subscription token from `claude setup-token`
 ANTHROPIC_API_KEY=sk-ant-api03-...   # optional: Claude API key, used if there's no token above
 OPENAI_API_KEY=sk-proj-...   # optional: OpenAI API key for codex
-# OPENCODE_MODEL=opencode/big-pickle   # Use 'opencode models' to list all the models
+# OPENCODE_API_KEY=oc_sk_...   # optional: OpenCode Console API key, for pay-as-you-go and Go models
+# OPENCODE_MODEL=opencode/big-pickle   # opencode/<id> for free and pay-as-you-go models, opencode-go/<id> for Go; 'opencode models' lists them
 # AMF_AGENT_TIMEOUT=60m   # optional: how long each agent run may take (--agent-timeout overrides it)
 # AMF_LOG_LEVEL=info   # optional: debug, info, warn or error, for the terminal and the event log in .amf/runs/
 AMF_TRUSTED=login1,login2...   # optional: only work on issues opened by these GitHub users
@@ -74,6 +75,12 @@ Edit it and replace the placeholders. Placeholders ending in `...` count as
 unset, so you can leave the optional ones as they are. The agent keys decide
 which agent amf runs (see below). To run opencode with another model,
 uncomment `OPENCODE_MODEL` and set it to one that `opencode models` lists.
+Free models (`opencode/big-pickle` and the `opencode/...-free` ones) need no
+key. For a pay-as-you-go `opencode/<id>` model, or an
+[OpenCode Go](https://opencode.ai/v2/docs/console/go/) `opencode-go/<id>`
+model, also uncomment `OPENCODE_API_KEY` and set it to an OpenCode Console
+API key; one key covers both, and the model's prefix picks the plan. amf
+passes the key only to opencode, through its environment.
 To keep the logs in PostgreSQL too, uncomment `AMF_POSTGRES_URL` (see
 [Logs in PostgreSQL](#logs-in-postgresql)).
 
@@ -128,7 +135,8 @@ warn  codex           codex is not installed; amf runs claude instead, unless --
 ok    opencode        /Users/vic/.opencode/bin/opencode, opencode v2.1.3
 ok    claude login    CLAUDE_CODE_OAUTH_TOKEN is set, from /tmp/amf/.env; claude runs with it
 ok    codex login     OPENAI_API_KEY is not set; codex uses its own login, and amf runs it only for a pipeline or --agent codex
-ok    opencode model  opencode/deepseek-v4.1-flash-free; opencode lists it
+ok    opencode auth   OPENCODE_API_KEY, from /tmp/amf/.env, grants pay-as-you-go and Go; opencode runs opencode-go/kimi-k3 with it
+ok    opencode model  opencode-go/kimi-k3; opencode lists it
 ok    postgres        logging to database amflogs at amf@db.example.com:5432, from /tmp/amf/.env
 ```
 
@@ -171,14 +179,14 @@ uses the first of these that's ready:
 |---|---|
 | `claude` | installed, and `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` is set |
 | `codex` | installed, and `OPENAI_API_KEY` is set |
-| `opencode` | installed; runs with `OPENCODE_MODEL` (default `opencode/big-pickle`) |
+| `opencode` | installed; runs with `OPENCODE_MODEL` (default `opencode/big-pickle`). A paid `opencode/` or Go `opencode-go/` model also needs `OPENCODE_API_KEY` or a saved `opencode auth login` |
 
-Keys can be in `.env` or the environment. An installed agent without its key
-is skipped, even if you're logged in to it. `amf watch` prints what it found
+Keys can be in `.env` or the environment. An installed claude or codex
+without its key is skipped, even if you're logged in to it. `amf watch` prints what it found
 for each agent when it starts:
 
 ```
-amf: agents for issues without a pipeline (claude and codex need a key):
+amf: agents for issues without a pipeline (claude and codex need a key, opencode one for a paid model):
 amf:   claude   installed at /Users/vic/.local/bin/claude; CLAUDE_CODE_OAUTH_TOKEN is set: usable
 amf:   codex    installed at /Users/vic/.local/bin/codex; OPENAI_API_KEY not set: skipped
 amf:   opencode installed at /Users/vic/.opencode/bin/opencode; needs no key, model opencode/big-pickle: usable
@@ -191,7 +199,10 @@ installed but needs no key, so `--agent claudecode` runs Claude on its own
 login. amf never quietly falls back from a named agent to another. If no agent
 is ready, amf leaves the issue on `amf:ready` and `watch` tries again on its
 next poll. `amf doctor` shows which agent amf would use, and warns if
-`OPENCODE_MODEL` isn't one opencode lists. A repo with a pipeline ignores
+`OPENCODE_MODEL` isn't one opencode lists. With `OPENCODE_API_KEY` set, it
+also asks OpenCode which plans the key grants (pay-as-you-go, Go) and fails
+if the key is rejected or an `opencode-go/` model's workspace isn't
+subscribed to Go. A repo with a pipeline ignores
 `--agent`, because the pipeline names each stage's agent.
 
 ### What `amf run N` does

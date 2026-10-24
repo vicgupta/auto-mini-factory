@@ -59,6 +59,7 @@ Configuration is read from .env (or the environment):
   CLAUDE_CODE_OAUTH_TOKEN  optional subscription token for Claude Code (claude setup-token)
   ANTHROPIC_API_KEY        optional Claude API key; with it or the token above, amf picks claude
   OPENAI_API_KEY           optional OpenAI API key; with it, amf picks codex when claude can't run
+  OPENCODE_API_KEY         optional OpenCode Console API key, for paid opencode/ and Go opencode-go/ models
   OPENCODE_MODEL           model for opencode (default opencode/big-pickle); see opencode models
   AMF_AGENT_TIMEOUT        how long each agent run may take, a Go duration (default 60m);
                            --agent-timeout, or its deprecated alias --timeout, overrides it
@@ -77,7 +78,8 @@ clone GITHUB_REPO into ./<name> (or reuse that clone) and work there.
 Without a pipeline, each issue gets one agent run: the agent --agent names
 (claudecode, codex or opencode), or else claude if it's installed and has
 ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN, else codex if it's installed and
-has OPENAI_API_KEY, else opencode. amf watch shows what it found for each.
+has OPENAI_API_KEY, else opencode (which needs OPENCODE_API_KEY or its own
+login for a paid OPENCODE_MODEL). amf watch shows what it found for each.
 
 A repo can declare a pipeline in its AGENTS.md: a table under "## amf" with a
 plan, code and eval stage, each naming a skill URL, an agent (claudecode,
@@ -474,6 +476,7 @@ func newRunnerFrom(ctx context.Context, cfg Config, timeout time.Duration, evalR
 		ClaudeToken:   cfg.ClaudeToken,
 		AnthropicKey:  cfg.AnthropicKey,
 		OpenAIKey:     cfg.OpenAIKey,
+		OpencodeKey:   cfg.OpencodeKey,
 		OpencodeModel: cfg.OpencodeModel,
 		Trusted:       cfg.Trusted,
 		Timeout:       timeout,

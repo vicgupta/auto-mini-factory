@@ -54,6 +54,8 @@ type Runner struct {
 	AnthropicKey string
 	// OpenAIKey, when set, is passed to Codex as OPENAI_API_KEY.
 	OpenAIKey string
+	// OpencodeKey, when set, is passed to opencode as OPENCODE_API_KEY.
+	OpencodeKey string
 	// OpencodeModel is the model opencode runs with, from OPENCODE_MODEL:
 	// always without a pipeline, and for pipeline stages that name none.
 	OpencodeModel string
@@ -594,7 +596,7 @@ func (r *Runner) Watch(ctx context.Context, label string, interval time.Duration
 	r.event(slog.LevelInfo, "watch.start", 0, fmt.Sprintf("watching %s for issues labeled %q every %s (Ctrl-C to stop)", r.Repo, label, interval),
 		"repo", r.Repo, "label", label, "interval", interval.String(), "timeout", r.Timeout.String(),
 		"eval_rounds", r.EvalRounds, "draft", r.Draft, "agent_flag", agentName(r.Agent), "version", buildVersion())
-	r.event(slog.LevelInfo, "watch.agents", 0, "agents for issues without a pipeline (claude and codex need a key):")
+	r.event(slog.LevelInfo, "watch.agents", 0, "agents for issues without a pipeline (claude and codex need a key, opencode one for a paid model):")
 	for _, st := range r.agentStatuses() {
 		r.event(slog.LevelInfo, "watch.agents", 0, "  "+st.describe(),
 			"agent", st.Agent, "path", st.Path, "key", st.Key, "usable", st.usable(), "model", st.Model)

@@ -33,6 +33,7 @@ func TestRedact(t *testing.T) {
 		{"claude oauth token", "sk-ant-oat01-abcdefghijklmnopqrstuvwxyz_0123", "[REDACTED:api_key]"},
 		{"openai key", "sk-proj-abcdefghijklmnopqrstuvwxyz0123", "[REDACTED:api_key]"},
 		{"plain sk key", "sk-abcdefghijklmnopqrstuvwx", "[REDACTED:api_key]"},
+		{"opencode key", "key oc_sk_abcdefghijklmnopqrstuvwx0123", "key [REDACTED:api_key]"},
 		{"bearer header", "Authorization: Bearer abc.def.ghi", "Authorization: Bearer [REDACTED:auth_header]"},
 		{"token header", "authorization: token 0123456789abcdef", "authorization: token [REDACTED:auth_header]"},
 		{"basic header", "Authorization: Basic dXNlcjpwYXNz", "Authorization: Basic [REDACTED:auth_header]"},

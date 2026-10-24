@@ -885,6 +885,9 @@ func (r *Runner) agentEnv(env []string, agent, wt string) []string {
 	if agent == agentCodex && r.OpenAIKey != "" {
 		env = append(withoutEnv(env, "OPENAI_API_KEY"), "OPENAI_API_KEY="+r.OpenAIKey)
 	}
+	if agent == agentOpencode && r.OpencodeKey != "" {
+		env = append(withoutEnv(env, "OPENCODE_API_KEY"), "OPENCODE_API_KEY="+r.OpencodeKey)
+	}
 	return append(withoutEnv(env, "PWD"), "PWD="+wt)
 }
 

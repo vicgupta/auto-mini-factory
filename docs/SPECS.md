@@ -10,7 +10,8 @@ that doesn't want to run a platform.
 
 **Needs:** `git`, a GitHub token for one repository, and an agent amf can
 run: `claude` with `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`, `codex`
-with `OPENAI_API_KEY`, or `opencode`, or any of them named with `--agent`. A
+with `OPENAI_API_KEY`, or `opencode` (with `OPENCODE_API_KEY` or its own
+saved login for a paid `OPENCODE_MODEL`), or any of them named with `--agent`. A
 pipeline needs whichever agents it names.
 
 ## Issue lifecycle
@@ -105,14 +106,23 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened)
   |---|---|
   | `claude` | installed, and `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` is set |
   | `codex` | installed, and `OPENAI_API_KEY` is set |
-  | `opencode` | installed (it needs no key) |
+  | `opencode` | installed, and either `OPENCODE_MODEL` is free (`opencode/big-pickle`, an `opencode/` id ending in `-free`, or another provider's model), `OPENCODE_API_KEY` is set, or opencode has a saved login for the model's provider |
 
   Keys come from the environment or `.env`; placeholders don't count. An
-  installed agent without its key is skipped, even if it has a login of its
-  own. With none usable, the issue isn't touched (see step 3 below).
+  installed claude or codex without its key is skipped, even if it has a
+  login of its own. opencode's model picks its plan: `opencode/<id>` is a
+  free or pay-as-you-go OpenCode Console model, `opencode-go/<id>` an
+  OpenCode Go one, and both of the paid kinds need the Console API key.
+  Without `OPENCODE_API_KEY`, amf runs `opencode auth list --format json`
+  and counts a saved `credential` for `opencode` or `opencode-go` (matching
+  the model) as a login. With none usable, the issue isn't touched (see
+  step 3 below); amf passes over opencode as `opencode has no
+  OPENCODE_API_KEY or saved login for <model>`.
 - `watch` logs at startup one line per agent: where it's installed (or `not
-  installed`), whether its key is set (naming the one that is), for opencode
-  the model it runs with, and `usable` or `skipped`. Then it logs which agent issues without a pipeline run, or a
+  installed`), whether its key is set (naming the one that is; for
+  opencode, `needs no key`, `uses its saved login` or `OPENCODE_API_KEY not
+  set and no saved login`), for opencode the model it runs with, and
+  `usable` or `skipped`. Then it logs which agent issues without a pipeline run, or a
   warning that none is available.
 
 **Exit codes:** 0 on success, 1 on error, 2 on a usage error. SIGINT and
@@ -123,11 +133,11 @@ expiry; the issue is still marked failed.
 
 1. Builds `.env` from a template of `GITHUB_TOKEN`, `GITHUB_REPO`,
    `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
-   `OPENCODE_MODEL`, `AMF_AGENT_TIMEOUT`, `AMF_LOG_LEVEL`, `AMF_TRUSTED`
-   and `AMF_POSTGRES_URL`.
-   - `OPENCODE_MODEL`, `AMF_AGENT_TIMEOUT`, `AMF_LOG_LEVEL` and
-     `AMF_POSTGRES_URL` are written
-     commented out, as `# OPENCODE_MODEL=opencode/big-pickle   # Use 'opencode models' to list all the models`
+   `OPENCODE_API_KEY`, `OPENCODE_MODEL`, `AMF_AGENT_TIMEOUT`,
+   `AMF_LOG_LEVEL`, `AMF_TRUSTED` and `AMF_POSTGRES_URL`.
+   - `OPENCODE_API_KEY`, `OPENCODE_MODEL`, `AMF_AGENT_TIMEOUT`,
+     `AMF_LOG_LEVEL` and `AMF_POSTGRES_URL` are written
+     commented out, as `# OPENCODE_MODEL=opencode/big-pickle   # opencode/<id> for free and pay-as-you-go models, opencode-go/<id> for Go; 'opencode models' lists them`
      until they have a real value. None is one of the values `init` asks
      you to fill in.
    - Real values from an existing `.env` are kept, and so are any extra
@@ -189,14 +199,16 @@ never prints a secret. The checks, in order:
 | `log folder` | `.amf/runs/` in the checkout can be written: doctor writes and removes a file in it, or in the nearest folder above it while it doesn't exist yet | `FAIL`, naming the folder and the error; `skip` without a checkout |
 | `pipeline` | Fetches the default branch; shows the pipeline from `AGENTS.md` on it, or that there is none | `FAIL` if the table doesn't parse |
 | `skill <stage>` | Each stage's skill downloads as in `run`; shows its size and SHA-256 | `FAIL` |
-| `claudecode`, `codex`, `opencode` | Installed; shows the path and `--version`. With no pipeline, the agent amf picks adds `runs issues without a pipeline`, and the `pipeline` line names it | `FAIL` if a stage needs it. With no pipeline: one `FAIL` on `claudecode` if no agent is usable; `warn` for an installed `claude` or `codex` without its key, naming the agent amf runs instead; `warn` for one that isn't installed |
+| `claudecode`, `codex`, `opencode` | Installed; shows the path and `--version`. With no pipeline, the agent amf picks adds `runs issues without a pipeline`, and the `pipeline` line names it | `FAIL` if a stage needs it. With no pipeline: one `FAIL` on `claudecode` if no agent is usable; `warn` for an installed `claude` or `codex` without its key, or `opencode` that can't run a paid `OPENCODE_MODEL` (see `opencode auth`), naming the agent amf runs instead; `warn` for one that isn't installed |
 | `claude login` | Always; says whether `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` is set (and from where), or that Claude uses its own login | |
 | `codex login` | Always; says whether `OPENAI_API_KEY` is set (and from where), or that Codex uses its own login | |
+| `opencode auth` | Without `OPENCODE_API_KEY`: `OPENCODE_MODEL` is free, or opencode has a saved login for it. With it (never shown): asks OpenCode's `https://opencode.ai/inference/v1/models` and `.../inference/go/v1/models` with the key, and says which plans it grants (`pay-as-you-go and Go`, or `pay-as-you-go, not Go` when Go answers 403) and that opencode runs `OPENCODE_MODEL` with it | `FAIL` if a paid model has neither key nor saved login, if OpenCode rejects the key (401), or if an `opencode-go/` model's key has no Go plan; `warn` if the plan's list lacks the model or the lists can't be fetched; `skip` without opencode and without a key |
 | `opencode model` | `OPENCODE_MODEL` (or the default) is a line of `opencode models` | `warn` if it isn't, since every opencode run would fail, or if `opencode models` fails; `skip` without opencode |
 | `postgres` | `AMF_POSTGRES_URL` is unset (logs are only local), or amf can log in to `amflogs` on it; says whether its tables exist yet. A server without `amflogs` is `ok`: `run` and `watch` create it | `FAIL` if the URL doesn't parse; `warn` if amf can't connect or log in, with the server's message. Doctor creates nothing |
 
 Checks that need GitHub, the repo or a checkout are `skip` without them.
-Agents' own logins aren't checked: their CLIs can't report them reliably.
+Claude's and Codex's own logins aren't checked: their CLIs can't report them
+reliably.
 
 ## Configuration
 
@@ -213,7 +225,8 @@ space, a trailing comment. A leading byte order mark is ignored.
 | `CLAUDE_CODE_OAUTH_TOKEN` | unset | Claude subscription token, passed to Claude. Makes `claude` usable without `--agent` |
 | `ANTHROPIC_API_KEY` | unset | Claude API key, passed to Claude when there's no `CLAUDE_CODE_OAUTH_TOKEN`. Makes `claude` usable without `--agent` |
 | `OPENAI_API_KEY` | unset | OpenAI API key, passed to Codex. Makes `codex` usable without `--agent` |
-| `OPENCODE_MODEL` | `opencode/big-pickle` | The model opencode runs with: always without a pipeline, and for pipeline stages that name no model. `opencode models` lists the choices |
+| `OPENCODE_API_KEY` | unset | OpenCode Console API key (`oc_sk_...`), passed to opencode only. One key covers pay-as-you-go `opencode/<id>` models (with credits) and, for a workspace subscribed to OpenCode Go, `opencode-go/<id>` models. Makes `opencode` usable without `--agent` with a paid `OPENCODE_MODEL`. Never written to a file |
+| `OPENCODE_MODEL` | `opencode/big-pickle` | The model opencode runs with: always without a pipeline, and for pipeline stages that name no model. `opencode/<id>` is a free or pay-as-you-go model, `opencode-go/<id>` an OpenCode Go one. `opencode models` lists the choices |
 | `AMF_TRUSTED` | unset | GitHub logins, separated by commas or spaces (a leading `@` is allowed, case is ignored). When set, amf only works on issues they opened. Unset means anyone's |
 | `AMF_POSTGRES_URL` | unset | A PostgreSQL server that `run` and `watch` also write their logs to. See [Logging to PostgreSQL](#logging-to-postgresql) |
 | `AMF_CLAUDE` | `claude` | Path to the Claude CLI |
@@ -316,7 +329,9 @@ work. Starter skills are in this repo under `skills/`.
      `GITHUB_TOKEN`. When `CLAUDE_CODE_OAUTH_TOKEN` is set, it's passed to
      Claude only, and Claude's `ANTHROPIC_API_KEY` is removed. Otherwise an
      `ANTHROPIC_API_KEY` from `.env` or the environment is passed to Claude.
-     `OPENAI_API_KEY` from `.env` or the environment is passed to Codex.
+     `OPENAI_API_KEY` from `.env` or the environment is passed to Codex,
+     and `OPENCODE_API_KEY` to opencode, each replacing any value the agent
+     would inherit.
    - **Log:** output streams live to `.amf/logs/issue-N.log`, a line at a
      time and redacted (see "Redaction" under "Security model").
    - **Timeout:** each run may take at most `--agent-timeout` (or
@@ -501,7 +516,7 @@ event log opens, are not. The fields of each event, besides those:
 | `pg.drop` | debug | `rows` that never reached the database, and `error` when amf gave up at exit |
 | `checkout.resolve` | debug | `how` (`checkout`, `clone` for a clone reused, `cloned`), `dir` |
 | `watch.start` | info | `repo`, `label`, `interval`, `timeout`, `eval_rounds`, `draft`, `agent_flag`, `version` |
-| `watch.agents` | info | The heading line has none; one per agent with `agent`, `path`, `key` (the variable's name, never its value), `usable`, `model`; then `picked`, or `error` (warn) when none is usable |
+| `watch.agents` | info | The heading line has none; one per agent with `agent`, `path`, `key` (the variable's name, never its value, or `saved login` for opencode's own), `usable`, `model`; then `picked`, or `error` (warn) when none is usable |
 | `watch.tick` | debug | `cycle` (1 for the first poll), `issues`: how many the poll returned; warn with `error` when listing failed |
 | `watch.skip` | debug | `reason`: `pr`, `closed`, `in_progress` or `status_label` (done or failed without `amf:ready`) |
 | `watch.failed` | warn | `error`: an issue that failed (watch goes on) |
@@ -605,11 +620,11 @@ get without it. Other commands don't log there.
   bodies they post, and the error they exit with. What is masked, as
   `[REDACTED:<kind>]`:
   - the values of `GITHUB_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`,
-    `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and the password in
+    `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENCODE_API_KEY` and the password in
     `AMF_POSTGRES_URL`, wherever they appear (values shorter than 8
     characters are not matched);
   - GitHub tokens (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`),
-    `sk-` API keys, AWS access key ids (`AKIA`, `ASIA`);
+    `sk-` and `oc_sk_` API keys, AWS access key ids (`AKIA`, `ASIA`);
   - the credential in `Authorization: Bearer|token|Basic`;
   - the value of `NAME=value` or `NAME: value` (also JSON-quoted) when NAME
     ends in `_TOKEN`, `_KEY` or `_SECRET`, or in `PASSWORD`;

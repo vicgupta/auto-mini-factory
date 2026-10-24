@@ -81,7 +81,7 @@ func homeDirs() []string {
 
 var (
 	githubTokenRE = regexp.MustCompile(`\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})`)
-	apiKeyRE      = regexp.MustCompile(`\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{16,}`)
+	apiKeyRE      = regexp.MustCompile(`\b(?:sk-(?:ant-|proj-)?|oc_sk_)[A-Za-z0-9_-]{16,}`)
 	awsKeyRE      = regexp.MustCompile(`\b(?:AKIA|ASIA)[A-Z0-9]{16}\b`)
 	// authHeaderRE keeps the header and scheme, and masks the credential.
 	authHeaderRE = regexp.MustCompile(`(?i)(authorization:\s*(?:bearer|token|basic)\s+)(\S+)`)
@@ -107,7 +107,7 @@ func (r *redactor) Redact(s string) string {
 	if strings.Contains(s, "gh") && strings.Contains(s, "_") {
 		s = githubTokenRE.ReplaceAllString(s, "[REDACTED:github_token]")
 	}
-	if strings.Contains(s, "sk-") {
+	if strings.Contains(s, "sk-") || strings.Contains(s, "oc_sk_") {
 		s = apiKeyRE.ReplaceAllString(s, "[REDACTED:api_key]")
 	}
 	if strings.Contains(s, "AKIA") || strings.Contains(s, "ASIA") {
@@ -154,7 +154,7 @@ func maskGroup(re *regexp.Regexp, s, kind string) string {
 // configRedactor masks the secret values in cfg: the GitHub token, the
 // agents' keys, and the password in AMF_POSTGRES_URL.
 func configRedactor(cfg Config) *redactor {
-	lits := []string{cfg.Token, cfg.ClaudeToken, cfg.AnthropicKey, cfg.OpenAIKey}
+	lits := []string{cfg.Token, cfg.ClaudeToken, cfg.AnthropicKey, cfg.OpenAIKey, cfg.OpencodeKey}
 	if pg, err := parsePostgresURL(cfg.PostgresURL); cfg.PostgresURL != "" && err == nil {
 		lits = append(lits, pg.Password)
 	}

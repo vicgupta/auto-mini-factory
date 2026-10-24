@@ -1439,7 +1439,7 @@ func TestWatchShowsAgents(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"amf: agents for issues without a pipeline (claude and codex need a key):",
+		"amf: agents for issues without a pipeline (claude and codex need a key, opencode one for a paid model):",
 		"claude   installed at " + r.Claude + "; CLAUDE_CODE_OAUTH_TOKEN is set: usable",
 		"codex    installed at " + r.Codex + "; OPENAI_API_KEY not set: skipped",
 		"opencode not installed; needs no key: skipped",
@@ -1615,9 +1615,9 @@ func TestOpencodeModel(t *testing.T) {
 	gh, srv := newFakeGitHub(t)
 	gh.issues[1] = readyIssue(1, "Add feature file")
 	r, log := newTestRunner(t, srv, root, filepath.Join(t.TempDir(), "no-claude"))
-	r.OpencodeModel = "opencode/test-model"
+	r.OpencodeModel = "opencode/test-model-free"
 	r.Opencode = fakeAgent(t, "opencode", `
-[ "$*" = "run --model opencode/test-model" ] || { echo "bad args: $*" >&2; exit 5; }
+[ "$*" = "run --model opencode/test-model-free" ] || { echo "bad args: $*" >&2; exit 5; }
 out=$(cat | sed -n 's/.*final reply, exactly as you give it, to the file \(.*\)\.$/\1/p')
 echo hello > feature.txt
 echo "Added with the model." > "$out"
@@ -1625,7 +1625,7 @@ echo "Added with the model." > "$out"
 	if err := r.Run(context.Background(), 1); err != nil {
 		t.Fatalf("Run: %v\nlog:\n%s", err, log)
 	}
-	if !strings.Contains(log.String(), "#1: running opencode (opencode/test-model, timeout ") {
+	if !strings.Contains(log.String(), "#1: running opencode (opencode/test-model-free, timeout ") {
 		t.Errorf("log = %s", log)
 	}
 }
@@ -1663,7 +1663,7 @@ func TestInitOpencodeModelLine(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := mustRead(t, ".env")
-	if !strings.Contains(env, "\n# OPENCODE_MODEL=opencode/big-pickle   # Use 'opencode models' to list all the models\n") {
+	if !strings.Contains(env, "\n# OPENCODE_MODEL=opencode/big-pickle   # opencode/<id> for free and pay-as-you-go models, opencode-go/<id> for Go; 'opencode models' lists them\n") {
 		t.Fatalf(".env:\n%s", env)
 	}
 	if !strings.Contains(env, "\n# AMF_POSTGRES_URL=postgres://user:password@localhost:5432/postgres   # optional: also save the logs to database amflogs on this PostgreSQL server\n") {
@@ -1680,7 +1680,7 @@ func TestInitOpencodeModelLine(t *testing.T) {
 	}
 	os.WriteFile(".env", []byte(strings.Replace(env, "# OPENCODE_MODEL=opencode/big-pickle", "OPENCODE_MODEL=opencode/mine", 1)), 0o600)
 	run(context.Background(), []string{"init"}, nil, io.Discard, io.Discard)
-	if env := mustRead(t, ".env"); !strings.Contains(env, "\nOPENCODE_MODEL=opencode/mine   # Use 'opencode models'") || strings.Contains(env, "Kept from the previous") {
+	if env := mustRead(t, ".env"); !strings.Contains(env, "\nOPENCODE_MODEL=opencode/mine   # opencode/<id> for free") || strings.Contains(env, "Kept from the previous") {
 		t.Errorf(".env after a real value:\n%s", env)
 	}
 }
@@ -1701,10 +1701,160 @@ func TestDoctorOpencodeModel(t *testing.T) {
 }
 
 func TestWatchShowsOpencodeModel(t *testing.T) {
-	r := &Runner{Opencode: fakeAgent(t, "opencode", "exit 0"), OpencodeModel: "opencode/m"}
+	r := &Runner{Opencode: fakeAgent(t, "opencode", "exit 0"), OpencodeModel: "opencode/m-free"}
 	sts := r.agentStatuses()
-	if len(sts) != 1 || !strings.HasSuffix(sts[0].describe(), "; needs no key, model opencode/m: usable") {
+	if len(sts) != 1 || !strings.HasSuffix(sts[0].describe(), "; needs no key, model opencode/m-free: usable") {
 		t.Fatalf("statuses = %+v", sts)
+	}
+}
+
+// --- OPENCODE_API_KEY ---
+
+// fakeOpencodeAuth is an opencode whose `auth list --format json` lists a
+// saved credential for each of providers.
+func fakeOpencodeAuth(t *testing.T, providers ...string) string {
+	t.Helper()
+	var list []string
+	for _, p := range providers {
+		list = append(list, `{"id":"`+p+`","name":"x","connections":[{"type":"credential","id":"cred_1","label":"API key","method":"key"}]}`)
+	}
+	// An environment variable is a connection too, but not a saved login.
+	list = append(list, `{"id":"opencode","name":"OpenCode Console","connections":[{"type":"env","name":"OPENCODE_API_KEY"}]}`)
+	return fakeAgent(t, "opencode", `case "$*" in
+"auth list --format json") echo '[`+strings.Join(list, ",")+`]' ;;
+*) echo "opencode v2" ;;
+esac`)
+}
+
+func TestOpencodeProvider(t *testing.T) {
+	for model, want := range map[string]string{
+		"opencode/big-pickle":               "",
+		"opencode/deepseek-v4.1-flash-free": "",
+		"opencode/gpt-6.1-sol":              "opencode",
+		"opencode-go/kimi-k3":               "opencode-go",
+		"anthropic/claude-sonnet-5-5":       "",
+		"":                                  "",
+	} {
+		if got := opencodeProvider(model); got != want {
+			t.Errorf("opencodeProvider(%q) = %q, want %q", model, got, want)
+		}
+	}
+}
+
+func TestOpencodeKeyPicksOpencode(t *testing.T) {
+	// The model × key matrix: a free model needs nothing; a paid or Go one
+	// needs OPENCODE_API_KEY or a saved login for its provider.
+	for _, tc := range []struct {
+		model, key string
+		saved      []string
+		want       string
+	}{
+		{"opencode/big-pickle", "", nil, "needs no key, model opencode/big-pickle: usable"},
+		{"opencode/big-pickle", "oc_sk_test", nil, "OPENCODE_API_KEY is set, model opencode/big-pickle: usable"},
+		{"opencode/gpt-6.1-sol", "oc_sk_test", nil, "OPENCODE_API_KEY is set, model opencode/gpt-6.1-sol: usable"},
+		{"opencode/gpt-6.1-sol", "", nil, "OPENCODE_API_KEY not set and no saved login, model opencode/gpt-6.1-sol: skipped"},
+		{"opencode/gpt-6.1-sol", "", []string{"opencode"}, "uses its saved login, model opencode/gpt-6.1-sol: usable"},
+		{"opencode-go/kimi-k3", "oc_sk_test", nil, "OPENCODE_API_KEY is set, model opencode-go/kimi-k3: usable"},
+		{"opencode-go/kimi-k3", "", []string{"opencode"}, "OPENCODE_API_KEY not set and no saved login, model opencode-go/kimi-k3: skipped"},
+		{"opencode-go/kimi-k3", "", []string{"opencode-go"}, "uses its saved login, model opencode-go/kimi-k3: usable"},
+	} {
+		r := &Runner{Opencode: fakeOpencodeAuth(t, tc.saved...), OpencodeModel: tc.model, OpencodeKey: tc.key}
+		sts := r.agentStatuses()
+		if len(sts) != 1 || !strings.HasSuffix(sts[0].describe(), "; "+tc.want) {
+			t.Errorf("%s, key %q, saved %v: %+v, want %q", tc.model, tc.key, tc.saved, sts, tc.want)
+			continue
+		}
+		_, passed, err := r.pickAgent()
+		if sts[0].usable() != (err == nil) {
+			t.Errorf("%s: pickAgent = %v", tc.model, err)
+		}
+		if err != nil && !strings.Contains(err.Error(), "opencode has no OPENCODE_API_KEY or saved login for "+tc.model) {
+			t.Errorf("%s: pickAgent = %v, passed %v", tc.model, err, passed)
+		}
+	}
+}
+
+func TestOpencodeKeyReachesOpencode(t *testing.T) {
+	r := &Runner{OpencodeKey: "oc_sk_file"}
+	env := []string{"PATH=/bin", "OPENCODE_API_KEY=from-env"}
+	if c := r.agentEnv(slices.Clone(env), agentOpencode, "/wt"); !slices.Contains(c, "OPENCODE_API_KEY=oc_sk_file") || slices.Contains(c, "OPENCODE_API_KEY=from-env") {
+		t.Errorf("opencode env = %v", c)
+	}
+	for _, agent := range []string{agentClaude, agentCodex} {
+		if c := r.agentEnv(slices.Clone(env), agent, "/wt"); slices.Contains(c, "OPENCODE_API_KEY=oc_sk_file") {
+			t.Errorf("%s got opencode's key: %v", agent, c)
+		}
+	}
+	// Without the key, opencode keeps what it inherited.
+	r.OpencodeKey = ""
+	if c := r.agentEnv(slices.Clone(env), agentOpencode, "/wt"); !slices.Contains(c, "OPENCODE_API_KEY=from-env") {
+		t.Errorf("opencode env without a key = %v", c)
+	}
+
+	cfg, err := loadConfig(writeEnv(t, "GITHUB_TOKEN=t\nGITHUB_REPO=vic/demo\nOPENCODE_API_KEY=oc_sk_0123456789abcdef\n"))
+	if err != nil || cfg.OpencodeKey != "oc_sk_0123456789abcdef" {
+		t.Fatalf("OpencodeKey = %q, %v", cfg.OpencodeKey, err)
+	}
+	if got := configRedactor(cfg).Redact("key=oc_sk_0123456789abcdef"); strings.Contains(got, "0123456789abcdef") {
+		t.Errorf("redacted = %q", got)
+	}
+	cfg, _ = loadConfig(writeEnv(t, "GITHUB_TOKEN=t\nGITHUB_REPO=vic/demo\n# OPENCODE_API_KEY=oc_sk_...\n"))
+	if cfg.OpencodeKey != "" {
+		t.Errorf("the init placeholder should leave OPENCODE_API_KEY unset, got %q", cfg.OpencodeKey)
+	}
+}
+
+// fakeOpencodeAPI serves the Console's model lists: /v1/models to any key
+// but "bad", and /go/v1/models only to "go".
+func fakeOpencodeAPI(t *testing.T) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		switch {
+		case key == "oc_sk_bad":
+			http.Error(w, `{"error":{"message":"Invalid credential"}}`, http.StatusUnauthorized)
+		case r.URL.Path == "/v1/models":
+			io.WriteString(w, `{"object":"list","data":[{"id":"big-pickle"},{"id":"gpt-6.1-sol"}]}`)
+		case r.URL.Path == "/go/v1/models" && key == "oc_sk_go":
+			io.WriteString(w, `{"object":"list","data":[{"id":"kimi-k3"}]}`)
+		case r.URL.Path == "/go/v1/models":
+			http.Error(w, "not subscribed", http.StatusForbidden)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	old := opencodeAPI
+	opencodeAPI = srv.URL
+	t.Cleanup(func() { opencodeAPI = old })
+}
+
+func TestDoctorOpencodeAuth(t *testing.T) {
+	withGitUser(t)
+	t.Chdir(t.TempDir())
+	t.Setenv("AMF_RELEASES_URL", "http://127.0.0.1:1")
+	fakeOpencodeAPI(t)
+	noLogin, login := fakeOpencodeAuth(t), fakeOpencodeAuth(t, "opencode", "opencode-go")
+	for _, tc := range []struct{ model, key, bin, want string }{
+		{"", "", noLogin, `ok +opencode auth +OPENCODE_API_KEY is not set; opencode/big-pickle needs none$`},
+		{"opencode/gpt-6.1-sol", "", noLogin, `FAIL +opencode auth +OPENCODE_API_KEY is not set and opencode has no saved login, so it can't run opencode/gpt-6.1-sol; set OPENCODE_API_KEY`},
+		{"opencode-go/kimi-k3", "", login, `ok +opencode auth +OPENCODE_API_KEY is not set; opencode runs opencode-go/kimi-k3 with its saved login$`},
+		{"opencode-go/kimi-k3", "", "no-opencode", `skip +opencode auth +OPENCODE_API_KEY is not set; opencode is not installed$`},
+		{"opencode-go/kimi-k3", "oc_sk_go", noLogin, `ok +opencode auth +OPENCODE_API_KEY, from the environment, grants pay-as-you-go and Go; opencode runs opencode-go/kimi-k3 with it$`},
+		{"opencode-go/kimi-k3", "oc_sk_paid", noLogin, `FAIL +opencode auth +OPENCODE_API_KEY, from the environment, grants pay-as-you-go, not Go \(its workspace isn't subscribed to OpenCode Go\), so opencode can't run opencode-go/kimi-k3$`},
+		{"opencode-go/nope", "oc_sk_go", noLogin, `warn +opencode auth +OPENCODE_API_KEY, from the environment, grants pay-as-you-go and Go, but Go has no model nope$`},
+		{"opencode/gpt-6.1-sol", "oc_sk_paid", noLogin, `ok +opencode auth +OPENCODE_API_KEY, from the environment, grants pay-as-you-go, not Go .*; opencode runs opencode/gpt-6.1-sol with it$`},
+		{"opencode/nope", "oc_sk_paid", noLogin, `warn +opencode auth +.*but the Console has no model nope$`},
+		{"opencode/gpt-6.1-sol", "oc_sk_bad", noLogin, `FAIL +opencode auth +OpenCode rejected OPENCODE_API_KEY, from the environment`},
+	} {
+		t.Setenv("OPENCODE_MODEL", tc.model)
+		t.Setenv("OPENCODE_API_KEY", tc.key)
+		t.Setenv("AMF_OPENCODE", tc.bin)
+		out, _ := doctorOutput(t)
+		wantLines(t, out, tc.want)
+		if tc.key != "" && strings.Contains(out, tc.key) {
+			t.Errorf("doctor printed the key:\n%s", out)
+		}
 	}
 }
 
