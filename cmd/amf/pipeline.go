@@ -646,18 +646,14 @@ func (r *Runner) runAgent(ctx context.Context, agent, stage, model, wt, prompt, 
 	// grace period a second kill escalates to SIGKILL, which an agent that
 	// ignores SIGTERM can't trap.
 	procGroup(cmd)
+	exited := make(chan struct{}) // closed once Run returns
 	cmd.Cancel = func() error {
 		if cmd.Process != nil {
 			_ = killGroup(cmd.Process, syscall.SIGTERM)
 			if !groupOutlivesLeader {
 				return nil // that kill was already the hard one
 			}
-			go func() {
-				timer := time.NewTimer(grace)
-				defer timer.Stop()
-				<-timer.C
-				_ = killGroup(cmd.Process, syscall.SIGKILL)
-			}()
+			killAfter(grace, exited, func() { _ = killGroup(cmd.Process, syscall.SIGKILL) })
 		}
 		return nil
 	}
@@ -699,6 +695,7 @@ func (r *Runner) runAgent(ctx context.Context, agent, stage, model, wt, prompt, 
 		callEvent(ctx, "agent.exit", fmt.Sprintf("%s: %s exited %d", stageName(stage), agentName(agent), code), attrs...)
 	}()
 	runErr := cmd.Run()
+	close(exited)
 	outLog.Flush()
 	errLog.Flush()
 	// However the run ended, nothing the agent spawned outlives it: the
@@ -821,6 +818,21 @@ func keepPartial(logPath, outPath string, red *redactor) string {
 		return ""
 	}
 	return partial
+}
+
+// killAfter calls kill once d has passed, unless done is closed first: the
+// SIGKILL escalation is pointless once the agent has exited, and by then the
+// group's id may belong to something else.
+func killAfter(d time.Duration, done <-chan struct{}, kill func()) {
+	go func() {
+		timer := time.NewTimer(d)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+			kill()
+		case <-done:
+		}
+	}()
 }
 
 // agentTimeoutError is a run that hit the agent timeout: amf killed the

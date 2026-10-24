@@ -271,6 +271,10 @@ func TestPipelineStageTimeoutFailsWithoutPush(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, ".amf", "worktrees", "issue-1")); !os.IsNotExist(err) {
 		t.Errorf("the worktree should be removed after a timeout, stat = %v", err)
 	}
+	// The local branch stays, as SPECS says; a retry resets it.
+	if _, err := git(context.Background(), root, "rev-parse", "--verify", "amf/issue-1"); err != nil {
+		t.Errorf("the local branch should stay after a timeout: %v", err)
+	}
 }
 
 // TestWatchContinuesAfterTimeout checks that watch fails the hung issue and
@@ -427,5 +431,29 @@ func TestAgentTimeoutValidation(t *testing.T) {
 	// A flag overrides it, so the bad value isn't in the way.
 	if _, err := newRunner(context.Background(), time.Hour, 0, "", logOptions{}, io.Discard); err != nil && strings.Contains(err.Error(), "AMF_AGENT_TIMEOUT") {
 		t.Errorf("newRunner with a flag: %v", err)
+	}
+}
+
+// TestKillAfter checks the SIGKILL escalation: it fires once the grace
+// period is over, and not at all when the agent exits first, as the group's
+// id may by then belong to something else.
+func TestKillAfter(t *testing.T) {
+	killed := make(chan struct{}, 1)
+	kill := func() { killed <- struct{}{} }
+
+	killAfter(10*time.Millisecond, make(chan struct{}), kill)
+	select {
+	case <-killed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no kill after the grace period")
+	}
+
+	done := make(chan struct{})
+	killAfter(50*time.Millisecond, done, kill)
+	close(done)
+	select {
+	case <-killed:
+		t.Fatal("killed after the agent had exited")
+	case <-time.After(200 * time.Millisecond):
 	}
 }

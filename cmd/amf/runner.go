@@ -100,9 +100,10 @@ func (r *Runner) Close() {
 }
 
 // Run processes one issue end to end. On failure the issue is labeled
-// amf:failed and the reason is commented. A run that timed out leaves no PR,
-// no push and no branch: it removes the worktree, keeping the logs and the
-// partial output; any other failure keeps the worktree for inspection.
+// amf:failed and the reason is commented. A run that timed out leaves no PR
+// and pushes nothing: it removes the worktree, keeping the logs, the partial
+// output and the unpushed local branch, which a retry resets; any other
+// failure keeps the worktree for inspection.
 func (r *Runner) Run(ctx context.Context, n int) (err error) {
 	defer r.summarize(false)           // runs last, after the deferred failure handling
 	ctx = withEvents(ctx, r.Events, n) // git, GitHub and skill calls log there
@@ -173,7 +174,7 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 			r.event(slog.LevelInfo, "issue.failed", n, fmt.Sprintf("issue.failed: issue=%d reason=agent_timeout", n),
 				"reason", "agent_timeout", "stage", stageName(ate.Stage), "error", err)
 			// The agent's process group is dead, so nothing still writes
-			// into the worktree, and it has no branch holding partial work.
+			// into the worktree, and its partial work is never pushed.
 			r.removeWorktree(cctx, n)
 		}
 		if ate == nil {
@@ -417,7 +418,7 @@ func changedPaths(ctx context.Context, wt, base string) ([]string, error) {
 // pathRefusal returns an error when any of changed is under .github/: a
 // pushed workflow change could run whatever the agent put there with the
 // repo's Actions secrets the moment the PR opens. amf runs the check before
-// any push, so no branch or PR is created.
+// any push, so nothing is pushed and no PR is created.
 // protectedPaths decides which paths count.
 func pathRefusal(changed []string) error {
 	if bad := protectedPaths(changed); bad != nil {
