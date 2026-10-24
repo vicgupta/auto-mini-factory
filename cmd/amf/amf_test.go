@@ -1040,6 +1040,10 @@ func TestUpdateNoChange(t *testing.T) {
 		{"up to date", "v9.9.9", "", false, "amf v9.9.9 is up to date"},
 		{"pinned, no v", "v9.9.9", "9.9.9", false, "is up to date"},
 		{"check only", "v0.0.7", "", true, "amf v9.9.9 is available (you have v0.0.7)"},
+		{"check newer pinned", "v0.0.7", "v9.9.9", true, "amf v9.9.9 is available (you have v0.0.7)"},
+		{"check same pinned", "v9.9.9", "v9.9.9", true, "amf v9.9.9 is up to date"},
+		{"check older pinned", "v0.10.0", "v0.9.12", true, "amf v0.9.12 is older than this build (v0.10.0); amf update --version v0.9.12 would downgrade"},
+		{"check pinned on dev", "dev", "v0.0.1", true, "amf v0.0.1 is available (you have dev)"},
 	} {
 		u, out := newTestUpdater(t, srv, tc.current)
 		if err := u.run(context.Background(), tc.target, tc.check); err != nil {

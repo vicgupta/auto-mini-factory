@@ -418,8 +418,11 @@ partial output. If Claim itself fails, the issue can be left on
 1. Resolve the target: `--version` (a leading `v` is added if missing), or
    the tag that `https://github.com/vicgupta/auto-mini-factory/releases/latest`
    redirects to. If it equals the running version, print `amf <v> is up to
-   date` and stop. `--check` stops here too and reports whether a newer
-   release is available.
+   date` and stop. `--check` stops here too: it prints `amf <v> is available
+   (you have <current>); run amf update`, except that when `--version` names
+   a release older than the running one (both `vX.Y.Z`) it prints `amf <v>
+   is older than this build (<current>); amf update --version <v> would
+   downgrade`.
 2. Download the archive for this platform and `checksums.txt` from that
    release: `amf_<tag>_<os>_<arch>.tar.gz` on macOS and Linux, or
    `amf_<tag>_windows_<arch>.zip` on Windows. If the archive is missing, fail
