@@ -1,6 +1,14 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -104,5 +112,109 @@ func BenchmarkRedact(b *testing.B) {
 	b.SetBytes(int64(len(line)))
 	for b.Loop() {
 		r.Redact(line)
+	}
+}
+
+// TestRunRedactsOutputs plants secrets in the configuration, the agent's
+// output and final message, and a GitHub error body, runs one issue to done
+// and one to failed, and checks that none of them reaches the console, the
+// agent logs, the comments, the PR body or the rows for PostgreSQL.
+func TestRunRedactsOutputs(t *testing.T) {
+	root, _ := setupRepo(t)
+	t.Setenv("HOME", "/home/canaryuser")
+	cfg := Config{
+		Token:        "canary-github-token-value",
+		ClaudeToken:  "canary-claude-oauth-value",
+		AnthropicKey: "canary-anthropic-key-value",
+		OpenAIKey:    "canary-openai-key-value",
+		PostgresURL:  "postgres://amf:canary-pg-password@db.example.com/x",
+	}
+	canaries := []string{
+		cfg.Token, cfg.ClaudeToken, cfg.AnthropicKey, cfg.OpenAIKey, "canary-pg-password",
+		"AKIACANARY12345678AB", "canary@example.com", "/home/canaryuser",
+	}
+	leak := strings.Join(canaries, " ")
+
+	gh, fake := newFakeGitHub(t)
+	gh.issues[1] = readyIssue(1, "Goes through")
+	gh.issues[2] = readyIssue(2, "Fails to open its PR")
+	// Issue 2's PR is refused with an error body holding a secret.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.Method == "POST" && strings.HasSuffix(req.URL.Path, "/pulls") {
+			body, _ := io.ReadAll(req.Body)
+			if strings.Contains(string(body), "amf/issue-2") {
+				writeJSON(w, 500, map[string]string{"message": "boom " + cfg.Token})
+				return
+			}
+			req.Body = io.NopCloser(bytes.NewReader(body))
+		}
+		fake.Config.Handler.ServeHTTP(w, req)
+	}))
+	t.Cleanup(srv.Close)
+
+	r, log := newTestRunner(t, srv, root, fakeAgent(t, "claude", shResult+`cat >/dev/null
+echo "out `+leak+`"
+echo "err `+leak+`" >&2
+printf 'partial line without a newline `+leak+`' >&2
+echo x >> x.txt
+result 'Done. `+leak+`'
+`))
+	red := configRedactor(cfg)
+	r.Redact = red
+	r.Log = &redactWriter{r: red, w: r.Log}
+	r.DB = &dbLog{red: red, ch: make(chan logRow, dbLogQueue), done: make(chan struct{})}
+
+	if err := r.Run(context.Background(), 1); err != nil {
+		t.Fatalf("Run(1): %v\nlog:\n%s", err, log)
+	}
+	if err := r.Run(context.Background(), 2); err == nil {
+		t.Fatal("Run(2) should fail")
+	}
+
+	outputs := map[string]string{"console": log.String()}
+	logs, _ := filepath.Glob(filepath.Join(root, ".amf", "logs", "*"))
+	for _, p := range logs {
+		outputs[p] = mustRead(t, p)
+	}
+	for n, cs := range gh.comments {
+		outputs[fmt.Sprintf("comments on #%d", n)] = strings.Join(cs, "\n")
+	}
+	for i, pr := range gh.prs {
+		outputs[fmt.Sprintf("PR %d", i)] = pr["body"]
+	}
+	close(r.DB.ch)
+	var rows []string
+	for row := range r.DB.ch {
+		rows = append(rows, row.line)
+	}
+	outputs["postgres rows"] = strings.Join(rows, "\n")
+
+	if !strings.Contains(outputs["console"], "#2") || len(logs) == 0 || len(gh.prs) != 1 || len(rows) == 0 {
+		t.Fatalf("too little output to check: logs %v, PRs %v, %d rows\nconsole:\n%s", logs, gh.prs, len(rows), outputs["console"])
+	}
+	if !strings.Contains(outputs["comments on #2"], "boom [REDACTED:config]") {
+		t.Errorf("the failure comment should keep the redacted error: %q", outputs["comments on #2"])
+	}
+	if !strings.Contains(outputs["postgres rows"], "partial line without a newline") {
+		t.Errorf("the agent's last line, without a newline, is missing from the rows:\n%s", outputs["postgres rows"])
+	}
+	for where, out := range outputs {
+		for _, c := range canaries {
+			if strings.Contains(out, c) {
+				t.Errorf("%s leaks %q:\n%s", where, c, out)
+			}
+		}
+	}
+}
+
+func TestRedactErr(t *testing.T) {
+	red := newRedactor("canary-secret-value")
+	base := fmt.Errorf("wrapped: %w", context.Canceled)
+	err := redactErr(red, fmt.Errorf("token canary-secret-value: %w", base))
+	if err.Error() != "token [REDACTED:config]: wrapped: context canceled" || !errors.Is(err, context.Canceled) {
+		t.Errorf("redactErr = %q, Is(Canceled) = %v", err, errors.Is(err, context.Canceled))
+	}
+	if redactErr(red, nil) != nil {
+		t.Error("redactErr(nil) should be nil")
 	}
 }

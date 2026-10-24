@@ -103,6 +103,7 @@ type dbLog struct {
 	cfg        pgConfig
 	host, repo string
 	local      io.Writer // for amf's own warnings about the database
+	red        *redactor // masks every line before it is queued
 
 	mu      sync.Mutex
 	closed  bool
@@ -122,8 +123,8 @@ const (
 // startDBLog starts copying logs to the amflogs database on c's server. It
 // connects (and creates what's missing) before returning, so the first line
 // says whether that worked.
-func startDBLog(ctx context.Context, c pgConfig, repo string, local io.Writer) *dbLog {
-	d := &dbLog{cfg: c, host: hostname(), repo: repo, local: local, ch: make(chan logRow, dbLogQueue), done: make(chan struct{})}
+func startDBLog(ctx context.Context, c pgConfig, repo string, local io.Writer, red *redactor) *dbLog {
+	d := &dbLog{cfg: c, host: hostname(), repo: repo, local: local, red: red, ch: make(chan logRow, dbLogQueue), done: make(chan struct{})}
 	conn, created, err := openLogDatabase(ctx, c, true)
 	switch {
 	case err != nil:
@@ -149,7 +150,7 @@ func (d *dbLog) logError(err error) {
 // add queues a line to send. It never blocks: with the queue full, the line
 // only stays local.
 func (d *dbLog) add(r logRow) {
-	r.line = strings.ToValidUTF8(strings.ReplaceAll(r.line, "\x00", ""), "�") // text can't hold either
+	r.line = strings.ToValidUTF8(strings.ReplaceAll(d.red.Redact(r.line), "\x00", ""), "�") // text can't hold either
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.closed {

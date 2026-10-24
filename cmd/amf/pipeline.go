@@ -597,8 +597,17 @@ func (r *Runner) runAgent(ctx context.Context, agent, stage, model, wt, prompt, 
 		defer dbOut.Flush()
 		logOut = io.MultiWriter(logFile, dbOut)
 	}
-	cmd.Stdout = io.MultiWriter(&stdout, logOut)
-	cmd.Stderr = logOut
+	// The log and the database get the output redacted, a line at a time,
+	// so a secret split across writes is still caught; stdout stays as
+	// printed for reading the final message.
+	redacted := func() *lineWriter {
+		return &lineWriter{emit: func(line string) {
+			io.WriteString(logOut, r.Redact.Redact(line)+"\n")
+		}}
+	}
+	outLog, errLog := redacted(), redacted()
+	cmd.Stdout = io.MultiWriter(&stdout, outLog)
+	cmd.Stderr = errLog
 
 	// The agent runs in its own process group, so a deadline or Ctrl-C can
 	// stop it and everything it spawned, not just the direct child. The kill
@@ -630,6 +639,8 @@ func (r *Runner) runAgent(ctx context.Context, agent, stage, model, wt, prompt, 
 		name = "claude"
 	}
 	runErr := cmd.Run()
+	outLog.Flush()
+	errLog.Flush()
 	// However the run ended, nothing the agent spawned outlives it: the
 	// group-wide SIGKILL costs nothing when the group is already gone.
 	if cmd.Process != nil && groupOutlivesLeader {
@@ -651,7 +662,7 @@ func (r *Runner) runAgent(ctx context.Context, agent, stage, model, wt, prompt, 
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			r.logf("agent.timeout: agent=%s stage=%s issue=%d limit=%s elapsed=%s grace=%s pgid=%d bytes=%d log=%s",
 				agentName(agent), stageName(stage), logIssue(logPath), r.Timeout, elapsed, grace, cmd.Process.Pid, stdout.Len(), logPath)
-			partial := keepPartial(logPath, outPath)
+			partial := keepPartial(logPath, outPath, r.Redact)
 			return "", &agentTimeoutError{
 				Agent:   agentName(agent),
 				Stage:   stage,
@@ -692,8 +703,9 @@ func stageName(stage string) string {
 
 // keepPartial copies whatever an agent's final-message file holds to
 // <log>.partial.md next to the log, so a timeout keeps the message it was
-// cut off in. It returns the file's path, or "" when there was nothing.
-func keepPartial(logPath, outPath string) string {
+// cut off in, redacted like the log. It returns the file's path, or "" when
+// there was nothing.
+func keepPartial(logPath, outPath string, red *redactor) string {
 	if outPath == "" {
 		return ""
 	}
@@ -702,7 +714,7 @@ func keepPartial(logPath, outPath string) string {
 		return ""
 	}
 	partial := strings.TrimSuffix(logPath, ".log") + ".partial.md"
-	if err := os.WriteFile(partial, b, 0o644); err != nil {
+	if err := os.WriteFile(partial, []byte(red.Redact(string(b))), 0o644); err != nil {
 		return ""
 	}
 	return partial
