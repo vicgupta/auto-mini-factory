@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -558,7 +559,7 @@ func commitRound(ctx context.Context, wt string, k int, base string, s *Stage) e
 // message write it to outPath instead. Claude doesn't need outPath. stage
 // names the run for timeout errors: plan, code or eval, or "" without a
 // pipeline.
-func (r *Runner) runAgent(ctx context.Context, agent, stage, model, wt, prompt, logPath, outPath string) (string, error) {
+func (r *Runner) runAgent(ctx context.Context, agent, stage, model, wt, prompt, logPath, outPath string) (summary string, err error) {
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
 		return "", err
 	}
@@ -635,8 +636,9 @@ func (r *Runner) runAgent(ctx context.Context, agent, stage, model, wt, prompt, 
 		}}
 	}
 	outLog, errLog := redacted(), redacted()
+	var stderrBytes countWriter
 	cmd.Stdout = io.MultiWriter(&stdout, outLog)
-	cmd.Stderr = errLog
+	cmd.Stderr = io.MultiWriter(&stderrBytes, errLog)
 
 	// The agent runs in its own process group, so a deadline or Ctrl-C can
 	// stop it and everything it spawned, not just the direct child. The kill
@@ -667,6 +669,35 @@ func (r *Runner) runAgent(ctx context.Context, agent, stage, model, wt, prompt, 
 	if name == "" {
 		name = "claude"
 	}
+	added, removed := envDiff(os.Environ(), cmd.Env)
+	sum := sha256.Sum256([]byte(prompt))
+	callEvent(ctx, "agent.start", fmt.Sprintf("%s: starting %s", stageName(stage), agentName(agent)),
+		"agent", agentName(agent), "binary", cmd.Path, "args", cmd.Args[1:], "model", model, "stage", stageName(stage),
+		"dir", wt, "timeout", r.Timeout.String(), "stdin_bytes", len(prompt), "stdin_sha256", hex.EncodeToString(sum[:]),
+		"env_added", added, "env_removed", removed)
+	defer func() {
+		attrs := []any{"agent", agentName(agent), "stage", stageName(stage), "duration_ms", ms(time.Since(begin)),
+			"timed_out", errors.Is(ctx.Err(), context.DeadlineExceeded), "stdout_bytes", stdout.Len(), "stderr_bytes", stderrBytes.n}
+		code := -1
+		if ps := cmd.ProcessState; ps != nil {
+			code = ps.ExitCode()
+			if !ps.Exited() {
+				attrs = append(attrs, "signal", ps.String())
+			}
+		}
+		attrs = append(attrs, "exit_code", code)
+		if outPath != "" {
+			if fi, serr := os.Stat(outPath); serr == nil {
+				attrs = append(attrs, "out_bytes", fi.Size())
+			}
+		}
+		if err != nil {
+			attrs = append(attrs, "error", err)
+		} else {
+			attrs = append(attrs, "result_bytes", len(summary), "result", excerpt(summary))
+		}
+		callEvent(ctx, "agent.exit", fmt.Sprintf("%s: %s exited %d", stageName(stage), agentName(agent), code), attrs...)
+	}()
 	runErr := cmd.Run()
 	outLog.Flush()
 	errLog.Flush()
@@ -711,7 +742,10 @@ func (r *Runner) runAgent(ctx context.Context, agent, stage, model, wt, prompt, 
 	switch agent {
 	case agentCodex, agentOpencode:
 		b, err := os.ReadFile(outPath)
-		if err == nil && strings.TrimSpace(string(b)) != "" {
+		present := err == nil && strings.TrimSpace(string(b)) != ""
+		callEvent(ctx, "agent.parse", fmt.Sprintf("%s: final message file %s", agentName(agent), map[bool]string{true: "written", false: "missing"}[present]),
+			"agent", agentName(agent), "out_file", present)
+		if present {
 			return strings.TrimSpace(string(b)), nil
 		}
 		if agent == agentCodex {
@@ -720,8 +754,46 @@ func (r *Runner) runAgent(ctx context.Context, agent, stage, model, wt, prompt, 
 		// opencode didn't write the file; fall back to what it printed.
 		return strings.TrimSpace(stdout.String()), nil
 	default:
+		_, found, isJSON := lastResult(bytes.TrimSpace(stdout.Bytes()))
+		callEvent(ctx, "agent.parse", fmt.Sprintf("claude: result message %s", map[bool]string{true: "found", false: "missing"}[found]),
+			"agent", agentName(agent), "result_found", found, "json", isJSON)
 		return parseClaudeResult(stdout.Bytes())
 	}
+}
+
+// countWriter counts the bytes written to it.
+type countWriter struct{ n int }
+
+func (c *countWriter) Write(p []byte) (int, error) {
+	c.n += len(p)
+	return len(p), nil
+}
+
+// envDiff is the names of the variables env adds to base or changes, and
+// those it removes: never their values.
+func envDiff(base, env []string) (added, removed []string) {
+	parse := func(kvs []string) map[string]string {
+		m := map[string]string{}
+		for _, kv := range kvs {
+			k, v, _ := strings.Cut(kv, "=")
+			m[k] = v
+		}
+		return m
+	}
+	b, e := parse(base), parse(env)
+	for k, v := range e {
+		if old, ok := b[k]; !ok || old != v {
+			added = append(added, k)
+		}
+	}
+	for k := range b {
+		if _, ok := e[k]; !ok {
+			removed = append(removed, k)
+		}
+	}
+	slices.Sort(added)
+	slices.Sort(removed)
+	return added, removed
 }
 
 // stageName is a stage for messages, or "agent run" without a pipeline.

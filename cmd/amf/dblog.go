@@ -5,10 +5,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -112,6 +115,41 @@ type dbLog struct {
 	done    chan struct{}
 
 	conn *pgConn // owned by run
+
+	// events gets pg.* events once the event log exists (setEvents);
+	// first is how the first connection went, logged then.
+	events atomic.Pointer[slog.Logger]
+	first  []any
+}
+
+// setEvents starts logging pg.* events to log, beginning with how the first
+// connection went. It is safe on nil.
+func (d *dbLog) setEvents(log *slog.Logger) {
+	if d == nil || log == nil {
+		return
+	}
+	d.events.Store(log)
+	text := fmt.Sprintf("postgres: connected to %s", d.cfg)
+	if slices.Contains(d.first, "error") {
+		text = fmt.Sprintf("postgres: couldn't connect to %s", d.cfg)
+	}
+	d.event("pg.connect", text, d.first...)
+}
+
+// event logs a pg.* event at debug, once setEvents has been called.
+func (d *dbLog) event(name, text string, attrs ...any) {
+	if log := d.events.Load(); log != nil {
+		log.Debug(text, append([]any{"event", name}, attrs...)...)
+	}
+}
+
+// connectAttrs describes a connection attempt for pg.connect.
+func (d *dbLog) connectAttrs(conn *pgConn, err error) []any {
+	a := []any{"host", d.cfg.Host, "port", d.cfg.Port, "database", logDatabase}
+	if err != nil {
+		return append(a, "error", err)
+	}
+	return append(a, "tls", conn.tls, "auth", conn.auth)
 }
 
 const (
@@ -126,6 +164,7 @@ const (
 func startDBLog(ctx context.Context, c pgConfig, repo string, local io.Writer, red *redactor) *dbLog {
 	d := &dbLog{cfg: c, host: hostname(), repo: repo, local: local, red: red, ch: make(chan logRow, dbLogQueue), done: make(chan struct{})}
 	conn, created, err := openLogDatabase(ctx, c, true)
+	d.first = append(d.connectAttrs(conn, err), "created", created)
 	switch {
 	case err != nil:
 		fmt.Fprintf(local, "amf: warning: can't log to PostgreSQL at %s: %v; logging locally only, and retrying\n", c, err)
@@ -191,7 +230,7 @@ func (d *dbLog) run(down bool) {
 		}
 	}()
 	var pending []logRow
-	backoff, retryAt := time.Second, time.Time{}
+	backoff, retryAt, attempt := time.Second, time.Time{}, 0
 	if down {
 		retryAt = time.Now().Add(backoff)
 	}
@@ -229,9 +268,11 @@ func (d *dbLog) run(down bool) {
 			d.mu.Lock()
 			if d.dropped > 0 {
 				fmt.Fprintf(d.local, "amf: warning: %d log %s couldn't be queued for PostgreSQL; they're only in the local logs\n", d.dropped, plural(d.dropped, "line", "lines"))
+				d.event("pg.drop", fmt.Sprintf("postgres: dropped %d lines", d.dropped), "rows", d.dropped)
 				d.dropped = 0
 			}
 			d.mu.Unlock()
+			attempt = 0
 			continue
 		}
 		if d.conn != nil {
@@ -240,12 +281,15 @@ func (d *dbLog) run(down bool) {
 		}
 		if closed {
 			fmt.Fprintf(d.local, "amf: warning: couldn't send %d log %s to PostgreSQL: %v; they're only in the local logs\n", len(pending), plural(len(pending), "line", "lines"), err)
+			d.event("pg.drop", fmt.Sprintf("postgres: dropped %d lines", len(pending)), "rows", len(pending), "error", err)
 			return
 		}
 		if !down {
 			fmt.Fprintf(d.local, "amf: warning: can't log to PostgreSQL at %s: %v; logging locally only, and retrying\n", d.cfg, err)
 			down = true
 		}
+		attempt++
+		d.event("pg.retry", fmt.Sprintf("postgres: retrying in %s", backoff), "attempt", attempt, "backoff", backoff.String(), "error", err)
 		retryAt = time.Now().Add(backoff)
 		backoff = min(backoff*2, time.Minute)
 	}
@@ -257,11 +301,12 @@ func (d *dbLog) send(pending *[]logRow) error {
 	ctx, cancel := context.WithTimeout(context.Background(), d.cfg.Timeout+10*time.Second)
 	defer cancel()
 	if d.conn == nil {
-		conn, _, err := openLogDatabase(ctx, d.cfg, true)
+		conn, created, err := openLogDatabase(ctx, d.cfg, true)
 		if err != nil {
 			return err
 		}
 		d.conn = conn
+		d.event("pg.connect", fmt.Sprintf("postgres: connected to %s", d.cfg), append(d.connectAttrs(conn, nil), "created", created)...)
 	}
 	for len(*pending) > 0 {
 		batch := (*pending)[:min(len(*pending), dbLogBatch)]

@@ -95,6 +95,7 @@ func TestAgentTimeoutKillsTheGroup(t *testing.T) {
 	wantEvent(t, ev, "agent.timeout", map[string]any{"issue": float64(1), "agent": "claude", "stage": "agent run",
 		"limit": "2s", "elapsed": nil, "grace": "100ms", "pgid": nil, "bytes": nil, "log": nil})
 	wantEvent(t, ev, "issue.failed", map[string]any{"issue": float64(1), "reason": "agent_timeout", "stage": "agent run", "error": nil})
+	wantEvent(t, ev, "agent.exit", map[string]any{"issue": float64(1), "timed_out": true, "exit_code": float64(-1), "signal": nil, "error": nil})
 	if time.Since(begin) > 10*time.Second {
 		t.Errorf("the run took %s", time.Since(begin))
 	}

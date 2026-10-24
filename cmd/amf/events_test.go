@@ -14,6 +14,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -276,3 +277,135 @@ func TestFetchSkillEvent(t *testing.T) {
 		"bytes": float64(8), "sha256": hex.EncodeToString(sum[:]), "duration_ms": nil})
 	wantEvent(t, ev, "http.fetch", map[string]any{"url": srv.URL + "/missing", "status": float64(404), "error": nil})
 }
+
+func TestAgentEvents(t *testing.T) {
+	root, _ := setupRepo(t)
+	gh, srv := newFakeGitHub(t)
+	gh.issues[1] = readyIssue(1, "Goes through")
+	gh.issues[2] = readyIssue(2, "Fails")
+	gh.issues[3] = readyIssue(3, "Codex")
+	t.Setenv("GITHUB_TOKEN", "must-not-leak")
+	r, _ := newTestRunner(t, srv, root, fakeAgent(t, "claude", shResult+`p=$(cat)
+echo working >&2
+case "$p" in *"# #2:"*) exit 3;; esac
+echo x > x.txt; result 'Done.'
+`))
+	var file bytes.Buffer
+	r.Events = newEventLogger(r.Log, slog.LevelInfo, &file, slog.LevelDebug, nil, "run")
+	if err := r.Run(context.Background(), 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Run(context.Background(), 2); err == nil {
+		t.Fatal("#2 should fail")
+	}
+	r.Agent = agentCodex
+	r.Codex = fakeAgent(t, "codex", `while [ "$1" != "-o" ]; do shift; done
+cat >/dev/null; echo y > y.txt; echo "Codex did it." > "$2"`)
+	if err := r.Run(context.Background(), 3); err != nil {
+		t.Fatal(err)
+	}
+
+	ev := eventsByName(eventLines(t, file.String()))
+	start := wantEvent(t, ev, "agent.start", map[string]any{"issue": float64(1), "agent": "claude", "binary": r.Claude, "model": "",
+		"stage": "agent run", "dir": nil, "timeout": "1m0s", "stdin_bytes": nil, "stdin_sha256": nil})
+	if start != nil {
+		if args := start["args"].([]any); !slices.Contains(args, any("--dangerously-skip-permissions")) {
+			t.Errorf("args = %v", args)
+		}
+		if added := start["env_added"].([]any); !slices.Contains(added, any("ANTHROPIC_API_KEY")) || !slices.Contains(added, any("PWD")) {
+			t.Errorf("env_added = %v", added)
+		}
+		if removed := start["env_removed"].([]any); !slices.Contains(removed, any("GITHUB_TOKEN")) {
+			t.Errorf("env_removed = %v", removed)
+		}
+	}
+	wantEvent(t, ev, "agent.exit", map[string]any{"issue": float64(1), "exit_code": float64(0), "timed_out": false,
+		"duration_ms": nil, "stdout_bytes": nil, "stderr_bytes": float64(len("working\n")), "result_bytes": float64(5), "result": "Done."})
+	wantEvent(t, ev, "agent.parse", map[string]any{"issue": float64(1), "result_found": true, "json": true})
+	wantEvent(t, ev, "agent.exit", map[string]any{"issue": float64(2), "exit_code": float64(3), "timed_out": false, "error": nil})
+	wantEvent(t, ev, "agent.exit", map[string]any{"issue": float64(3), "agent": "codex", "exit_code": float64(0), "out_bytes": nil, "result": "Codex did it."})
+	wantEvent(t, ev, "agent.parse", map[string]any{"issue": float64(3), "agent": "codex", "out_file": true})
+	for _, secret := range []string{"must-not-leak", "sk-ant-test"} {
+		if strings.Contains(file.String(), secret) {
+			t.Errorf("an event holds %q", secret)
+		}
+	}
+}
+
+func TestConfigLoadEvent(t *testing.T) {
+	root, _ := setupRepo(t)
+	_, srv := newFakeGitHub(t)
+	t.Chdir(root)
+	os.WriteFile(filepath.Join(root, ".env"), []byte("GITHUB_REPO=vic/demo\nOPENAI_API_KEY=sk-proj-from-the-file-0123456789\n"), 0o600)
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	t.Setenv("AMF_API_URL", srv.URL)
+	own := filepath.Join(t.TempDir(), "events.jsonl")
+	r, err := newRunner(context.Background(), defaultAgentTimeout, 2, "", logOptions{File: own}, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Close()
+	out := mustRead(t, own)
+	e := wantEvent(t, eventsByName(eventLines(t, out)), "config.load", map[string]any{"paths": nil, "file": ".env", "keys": nil})
+	if e == nil {
+		return
+	}
+	keys := e["keys"].(map[string]any)
+	for k, want := range map[string]map[string]any{
+		"GITHUB_TOKEN":      {"source": "env", "value": "set"},
+		"GITHUB_REPO":       {"source": ".env", "value": "vic/demo"},
+		"OPENAI_API_KEY":    {"source": ".env", "value": "set"},
+		"ANTHROPIC_API_KEY": {"source": "default", "value": "unset"},
+		"OPENCODE_MODEL":    {"source": "default", "value": defaultOpencodeModel},
+		"AMF_API_URL":       {"source": "env", "value": srv.URL},
+	} {
+		if !reflect.DeepEqual(keys[k], any(want)) {
+			t.Errorf("keys[%s] = %v, want %v", k, keys[k], want)
+		}
+	}
+	if strings.Contains(out, "sk-proj-from-the-file") || strings.Contains(out, "test-token") {
+		t.Errorf("config.load holds a secret:\n%s", out)
+	}
+}
+
+func TestPostgresEvents(t *testing.T) {
+	pg, err := parsePostgresURL("postgres://amf:pw@127.0.0.1:1/x?sslmode=disable&connect_timeout=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	var mu sync.Mutex
+	log := newEventLogger(io.Discard, slog.LevelInfo, writerFunc(func(p []byte) (int, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		return buf.Write(p)
+	}), slog.LevelDebug, nil, "run")
+	d := startDBLog(context.Background(), pg, "vic/demo", io.Discard, nil)
+	d.setEvents(log)
+	d.add(logRow{at: time.Now(), line: "a line"})
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		mu.Lock()
+		got := strings.Contains(buf.String(), `"pg.retry"`)
+		mu.Unlock()
+		if got || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	d.Close(10 * time.Second)
+	mu.Lock()
+	defer mu.Unlock()
+	ev := eventsByName(eventLines(t, buf.String()))
+	wantEvent(t, ev, "pg.connect", map[string]any{"host": "127.0.0.1", "port": "1", "database": "amflogs", "error": nil, "created": false})
+	wantEvent(t, ev, "pg.retry", map[string]any{"attempt": float64(1), "backoff": "1s", "error": nil})
+	wantEvent(t, ev, "pg.drop", map[string]any{"rows": float64(1), "error": nil})
+	if strings.Contains(buf.String(), ":pw@") {
+		t.Errorf("an event holds the password:\n%s", buf.String())
+	}
+}
+
+// writerFunc is a function as an io.Writer.
+type writerFunc func([]byte) (int, error)
+
+func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
