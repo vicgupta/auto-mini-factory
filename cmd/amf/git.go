@@ -8,16 +8,22 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
+	"time"
 )
 
-// git runs a git command in dir and returns its trimmed stdout.
+// git runs a git command in dir and returns its trimmed stdout. It logs a
+// git.exec event, and git.push for a push, to the logger ctx carries.
 func git(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Run(); err != nil {
+	begin := time.Now()
+	err := cmd.Run()
+	logGit(ctx, dir, args, cmd, err, time.Since(begin), stdout.Len(), stderr.String())
+	if err != nil {
 		msg := strings.TrimSpace(stderr.String())
 		if msg == "" {
 			msg = err.Error()
@@ -25,6 +31,41 @@ func git(ctx context.Context, dir string, args ...string) (string, error) {
 		return "", fmt.Errorf("git %s: %s", strings.Join(args, " "), msg)
 	}
 	return strings.TrimSpace(stdout.String()), nil
+}
+
+// logGit logs one git command: git.exec, and git.push for a push.
+func logGit(ctx context.Context, dir string, args []string, cmd *exec.Cmd, err error, took time.Duration, stdoutBytes int, stderr string) {
+	sub := ""
+	for _, a := range args {
+		if !strings.HasPrefix(a, "-") {
+			sub = a
+			break
+		}
+	}
+	shown := make([]string, len(args))
+	for i, a := range args {
+		// Commit messages can be long; the event keeps their start.
+		if i > 0 && args[i-1] == "-m" && len(a) > 80 {
+			a = a[:80] + "…"
+		}
+		shown[i] = a
+	}
+	code := 0
+	if cmd.ProcessState != nil {
+		code = cmd.ProcessState.ExitCode()
+	} else if err != nil {
+		code = -1 // git didn't start
+	}
+	attrs := []any{"subcommand", sub, "args", shown, "dir", dir, "exit_code", code, "duration_ms", ms(took),
+		"stdout_bytes", stdoutBytes, "stderr_bytes", len(stderr)}
+	if err != nil {
+		attrs = append(attrs, "stderr", excerpt(stderr))
+	}
+	callEvent(ctx, "git.exec", fmt.Sprintf("git %s: exit %d", sub, code), attrs...)
+	if sub == "push" {
+		callEvent(ctx, "git.push", fmt.Sprintf("git push %s: exit %d", args[len(args)-1], code),
+			"branch", args[len(args)-1], "forced", slices.Contains(args, "--force"), "exit_code", code)
+	}
 }
 
 // gitIdentity is the name and email git commits with in dir, as

@@ -99,6 +99,7 @@ func (r *Runner) Close() {
 // no push and no branch: it removes the worktree, keeping the logs and the
 // partial output; any other failure keeps the worktree for inspection.
 func (r *Runner) Run(ctx context.Context, n int) (err error) {
+	ctx = withEvents(ctx, r.Events, n) // git, GitHub and skill calls log there
 	issue, err := r.GH.GetIssue(ctx, n)
 	if err != nil {
 		return err
@@ -578,6 +579,7 @@ func skipReason(is Issue) string {
 // Watch polls for open issues labeled label and runs them one at a time
 // until ctx is cancelled.
 func (r *Runner) Watch(ctx context.Context, label string, interval time.Duration) error {
+	ctx = withEvents(ctx, r.Events, 0)
 	r.event(slog.LevelInfo, "watch.start", 0, fmt.Sprintf("watching %s for issues labeled %q every %s (Ctrl-C to stop)", r.Repo, label, interval),
 		"repo", r.Repo, "label", label, "interval", interval.String(), "timeout", r.Timeout.String(),
 		"eval_rounds", r.EvalRounds, "agent_flag", agentName(r.Agent), "version", buildVersion())
