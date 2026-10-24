@@ -37,7 +37,7 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened)
 | `amf issue "Title" [-b body \| -f file \| -f -] [--label L] [--no-label]` | Creates an issue labeled `amf:ready`. The body can also come from stdin when it's piped. Prints `#N <url>`. |
 | `amf list [--state open\|closed\|all] [--label L] [--limit N] [--json]` | Lists issues, newest first (highest number first), with every page fetched and PRs left out. Columns: `ISSUE`, `STATE` (with `--state all` only), `AMF` (the issue's `amf` and `amf:*` labels, or `-`) and `TITLE`. `--limit N` (default `0`, no limit) prints only the first N issues after filtering; a negative value errors with `--limit must be 0 or more, got N`. Prints `No … in owner/name.` when nothing matches. `--json` (default `false`) prints instead one JSON array and a newline, with no header: one object per issue, in the same order and after the same filters and limit, with exactly `number` (integer), `title`, `state`, `url` (the issue's GitHub page) and `labels` (every label name, in GitHub's order, `[]` when none); titles are kept as GitHub sent them, tabs included. Nothing matching prints `[]`. On an error nothing is printed to stdout, and a failure to write stdout is an error. Needs no git checkout. |
 | `amf run <N> [--agent A] [--agent-timeout 60m] [--eval-rounds 2] [--draft] [--log-level L] [--log-file P]` | Processes issue N once. |
-| `amf watch [--agent A] [--interval 60s] [--label amf:ready] [--agent-timeout 60m] [--eval-rounds 2] [--draft] [--log-level L] [--log-file P]` | Polls open issues with the label (every page), oldest first by issue number (GitHub's `created_at` can tie for issues opened in the same second), and processes them one at a time until interrupted. |
+| `amf watch [--agent A] [--interval 60s] [--label amf:ready] [--max-issues N] [--agent-timeout 60m] [--eval-rounds 2] [--draft] [--log-level L] [--log-file P]` | Polls open issues with the label (every page), oldest first by issue number (GitHub's `created_at` can tie for issues opened in the same second), and processes them one at a time until interrupted, or until `--max-issues` is reached (see below). |
 | `amf pipeline [--fetch]` | Checks the pipeline in `AGENTS.md` of the enclosing checkout, as it is on disk. See below. |
 | `amf doctor` | Checks the whole setup, one line per check, changing nothing. See below. |
 | `amf update [--version vX.Y.Z] [--check]` | Replaces the running binary with the latest release, or with the given one, which can be a downgrade. Needs no `.env`. See below. |
@@ -58,6 +58,20 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened)
   same way. On Windows, amf instead ends the run's whole process tree at once
   with `taskkill /T /F`, with no grace period. `--interval` also must be
   positive.
+- `--max-issues N` (`watch` only; default `0`, no limit) stops `watch` once
+  it has attempted N issues. An attempt is each time it starts processing
+  one, whether that succeeds or fails, a failure before the issue is
+  touched (such as no agent available) included; pipeline stages and eval
+  rounds don't count separately. It counts attempts, not issues: one still
+  eligible on a later poll is attempted, and counted, again. Issues `watch`
+  skips and polls whose listing fails don't count, and the count carries
+  across polls, so with fewer than N attempts `watch` keeps polling, an
+  empty queue included. As soon as the Nth attempt returns, `watch` prints
+  `stopped after N issues (--max-issues N)` and exits 0, without listing
+  again or waiting for the next poll; issues beyond the limit are left as
+  they are. A Ctrl-C during the last attempt stops `watch` as any Ctrl-C
+  does. A negative value errors at startup with `--max-issues must be 0 or
+  more, got N`, and one that isn't an integer is a usage error.
 - `--eval-rounds` is how many times a pipeline's eval stage may send the
   change back to the code stage. A negative value is an error.
 - `--draft` (default off; `--draft=false` is the same as leaving it out)
@@ -515,12 +529,12 @@ event log opens, are not. The fields of each event, besides those:
 | `pg.retry` | debug | `attempt` (since the last success), `backoff`, `error` |
 | `pg.drop` | debug | `rows` that never reached the database, and `error` when amf gave up at exit |
 | `checkout.resolve` | debug | `how` (`checkout`, `clone` for a clone reused, `cloned`), `dir` |
-| `watch.start` | info | `repo`, `label`, `interval`, `timeout`, `eval_rounds`, `draft`, `agent_flag`, `version` |
+| `watch.start` | info | `repo`, `label`, `interval`, `timeout`, `eval_rounds`, `draft`, `agent_flag`, `max_issues` (`0` for no limit), `version` |
 | `watch.agents` | info | The heading line has none; one per agent with `agent`, `path`, `key` (the variable's name, never its value, or `saved login` for opencode's own), `usable`, `model`; then `picked`, or `error` (warn) when none is usable |
 | `watch.tick` | debug | `cycle` (1 for the first poll), `issues`: how many the poll returned; warn with `error` when listing failed |
 | `watch.skip` | debug | `reason`: `pr`, `closed`, `in_progress` or `status_label` (done or failed without `amf:ready`) |
 | `watch.failed` | warn | `error`: an issue that failed (watch goes on) |
-| `watch.stop` | info | `reason` (the context's error, such as `context canceled`), `cycles` |
+| `watch.stop` | info | `reason` (the context's error, such as `context canceled`, or `max_issues` when `--max-issues` was reached, with `attempted` and `max_issues`), `cycles` |
 | `issue.picked` | info | `title`, `author`, `labels` |
 | `issue.agent_ignored` | info | `agent`: the `--agent` a pipeline overrides |
 | `issue.author_check` | debug | `author`, `trusted`; an untrusted issue then fails |

@@ -298,7 +298,7 @@ case "$p" in *"# #1:"*) while :; do sleep 1; done;; *) echo x > x.txt; echo done
 	time.AfterFunc(15*time.Second, cancel) // never leave a hung test running
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- r.Watch(ctx, "amf:ready", 20*time.Millisecond) }()
+	go func() { done <- r.Watch(ctx, "amf:ready", 20*time.Millisecond, 0) }()
 	deadline := time.Now().Add(10 * time.Second)
 	for !slices.Contains(gh.labels(1), "amf:failed") || !slices.Contains(gh.labels(2), "amf:done") {
 		if time.Now().After(deadline) {

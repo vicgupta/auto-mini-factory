@@ -600,7 +600,7 @@ func TestWatchProcessesLabeledIssues(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error)
-	go func() { done <- r.Watch(ctx, "amf:ready", 50*time.Millisecond) }()
+	go func() { done <- r.Watch(ctx, "amf:ready", 50*time.Millisecond, 0) }()
 	deadline := time.Now().Add(10 * time.Second)
 	for !slices.Contains(gh.labels(1), "amf:done") || !slices.Contains(gh.labels(4), "amf:done") {
 		if time.Now().After(deadline) {

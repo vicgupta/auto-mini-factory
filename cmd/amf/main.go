@@ -47,7 +47,7 @@ Usage:
   amf issue "Title" [-b body | -f file.md] [--label L] [--no-label]  create an issue (body may also come from stdin)
   amf list [--state open|closed|all] [--label L] [--limit N]         list issues, newest first, with their amf labels (also takes --json)
   amf run <issue-number> [--agent A] [--agent-timeout 60m]           process one issue into a PR (also takes --draft, --eval-rounds, --log-level, --log-file)
-  amf watch [--agent A] [--interval 60s] [--label amf:ready]         process amf:ready issues as they arrive (also takes --draft, --agent-timeout, --eval-rounds, --log-level, --log-file)
+  amf watch [--agent A] [--interval 60s] [--label amf:ready]         process amf:ready issues as they arrive (also takes --max-issues, --draft, --agent-timeout, --eval-rounds, --log-level, --log-file)
   amf pipeline [--fetch]                                             check the plan/code/eval pipeline in this checkout's AGENTS.md
   amf doctor                                                         check the setup here, one line per check, changing nothing
   amf update [--version vX.Y.Z] [--check]                            replace this amf binary with the latest (or given) release
@@ -232,17 +232,21 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 	evalRounds := fs.Int("eval-rounds", 2, "how many times a pipeline's eval stage may send the change back to code")
 	agent := fs.String("agent", "", agentFlagHelp)
 	draft := fs.Bool("draft", false, draftFlagHelp)
+	maxIssues := fs.Int("max-issues", 0, "stop after attempting this many issues, each counted whether it succeeds or fails (0: no limit)")
 	lo := addLogFlags(fs)
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return errUsage
 	}
 	if len(pos) != 0 {
-		fmt.Fprintln(stderr, "usage: amf watch [--agent claudecode|codex|opencode] [--interval 60s] [--label amf:ready] [--agent-timeout 60m] [--eval-rounds 2] [--draft]")
+		fmt.Fprintln(stderr, "usage: amf watch [--agent claudecode|codex|opencode] [--interval 60s] [--label amf:ready] [--max-issues N] [--agent-timeout 60m] [--eval-rounds 2] [--draft]")
 		return errUsage
 	}
 	if *interval <= 0 {
 		return errors.New("--interval must be positive")
+	}
+	if *maxIssues < 0 {
+		return fmt.Errorf("--max-issues must be 0 or more, got %d", *maxIssues)
 	}
 	timeout, err := timeoutFlag(fs, at, alias)
 	if err != nil {
@@ -257,7 +261,7 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 	}
 	defer r.Close()
 	r.Draft = *draft
-	err = redactErr(r.Redact, r.Watch(ctx, *label, *interval))
+	err = redactErr(r.Redact, r.Watch(ctx, *label, *interval, *maxIssues))
 	r.DB.logError(err)
 	return err
 }

@@ -355,6 +355,10 @@ func TestCommandLineErrors(t *testing.T) {
 		{[]string{"watch", "--interval", "0"}, "--interval must be positive"},
 		{[]string{"watch", "--timeout", "0"}, "--timeout: agent timeout must be positive"},
 		{[]string{"watch", "--eval-rounds", "-2"}, "can't be negative"},
+		{[]string{"watch", "--max-issues", "-1"}, "--max-issues must be 0 or more, got -1"},
+		{[]string{"watch", "--max-issues", "two"}, "usage"},
+		{[]string{"watch", "--max-issues", "1.5"}, "usage"},
+		{[]string{"run", "1", "--max-issues", "1"}, "usage"},
 		{[]string{"list", "extra"}, "usage"},
 		{[]string{"list", "--state", "bogus"}, "--state must be"},
 		{[]string{"issue"}, "usage"},
@@ -797,7 +801,7 @@ result 'ok'
 	r.Log = &mu
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error)
-	go func() { done <- r.Watch(ctx, "amf:ready", 20*time.Millisecond) }()
+	go func() { done <- r.Watch(ctx, "amf:ready", 20*time.Millisecond, 0) }()
 	deadline := time.Now().Add(15 * time.Second)
 	for !slices.Contains(gh.labels(1), "amf:failed") || !slices.Contains(gh.labels(2), "amf:done") {
 		if time.Now().After(deadline) {
@@ -1342,7 +1346,7 @@ func TestWatchDoesntRetryUntrustedIssues(t *testing.T) {
 	r.Log = &out
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
-	r.Watch(ctx, "amf:ready", 20*time.Millisecond)
+	r.Watch(ctx, "amf:ready", 20*time.Millisecond, 0)
 	if c := gh.comments[1]; len(c) != 1 {
 		t.Errorf("watch commented %d times: %q", len(c), c)
 	}
@@ -1436,7 +1440,7 @@ func TestWatchShowsAgents(t *testing.T) {
 	r.Opencode = filepath.Join(t.TempDir(), "no-opencode")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // print the startup lines, then stop
-	if err := r.Watch(ctx, labelReady, time.Minute); err != nil {
+	if err := r.Watch(ctx, labelReady, time.Minute, 0); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
@@ -1454,7 +1458,7 @@ func TestWatchShowsAgents(t *testing.T) {
 	// Without claude's token it falls through codex (no key) to nothing.
 	log.Reset()
 	r.ClaudeToken = ""
-	if err := r.Watch(ctx, labelReady, time.Minute); err != nil {
+	if err := r.Watch(ctx, labelReady, time.Minute, 0); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
@@ -2021,6 +2025,7 @@ func TestDraftFlag(t *testing.T) {
 		{[]string{"watch", "--interval", "50ms"}, false},
 		{[]string{"watch", "--draft", "--interval", "50ms"}, true},
 		{[]string{"watch", "--draft=false", "--interval", "50ms"}, false},
+		{[]string{"watch", "--max-issues", "0", "--interval", "50ms"}, false}, // no limit, as without it
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
 			gh, root := draftCLI(t, append(tc.args, "--log-file", "off")...)
@@ -2242,5 +2247,206 @@ func TestListJSONWriteError(t *testing.T) {
 	listJSONEnv(t, srv)
 	if err := run(context.Background(), []string{"list", "--json"}, nil, failWriter{}, io.Discard); err == nil || !strings.Contains(err.Error(), "disk full") {
 		t.Errorf("err = %v, want disk full", err)
+	}
+}
+
+// --- watch --max-issues ---
+
+// TestWatchMaxIssuesStopsAtTheCap fills the first page of the listing with
+// skipped issues, which don't count, then caps watch at two attempts: one
+// that fails and one that succeeds. The poll interval is an hour, so watch
+// returning at all shows it doesn't wait for another poll.
+func TestWatchMaxIssuesStopsAtTheCap(t *testing.T) {
+	root, _ := setupRepo(t)
+	gh, srv := newFakeGitHub(t)
+	for n := 1; n <= 100; n++ {
+		gh.issues[n] = &Issue{Number: n, Title: "Busy", State: "open", Labels: []Label{{Name: labelReady}, {Name: labelInProgress}}}
+	}
+	gh.issues[101] = readyIssue(101, "Fails")
+	gh.issues[102] = readyIssue(102, "Goes through")
+	gh.issues[103] = readyIssue(103, "Beyond the cap")
+	ran := filepath.Join(t.TempDir(), "ran")
+	r, log := newTestRunner(t, srv, root, fakeAgent(t, "claude", shResult+`p=$(cat)
+printf '%s\n' "$p" | grep '^# #' >> `+ran+`
+case "$p" in *"# #101:"*) exit 3;; esac
+echo x > x.txt; result 'Done.'
+`))
+	path, events := summaryRunner(t, r)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if err := r.Watch(ctx, labelReady, time.Hour, 2); err != nil {
+		t.Fatal(err)
+	}
+	if ctx.Err() != nil {
+		t.Fatalf("watch didn't stop at the cap; log:\n%s", log)
+	}
+	r.Close()
+
+	if got := mustRead(t, ran); got != "# #101: Fails\n# #102: Goes through\n" {
+		t.Errorf("claude ran for:\n%s", got)
+	}
+	if !slices.Contains(gh.labels(101), labelFailed) || !slices.Contains(gh.labels(102), labelDone) {
+		t.Errorf("labels: #101 %v, #102 %v", gh.labels(101), gh.labels(102))
+	}
+	if got := gh.labels(103); !reflect.DeepEqual(got, []string{labelReady}) {
+		t.Errorf("#103 labels = %v", got)
+	}
+	if c := gh.comments[103]; len(c) != 0 {
+		t.Errorf("#103 comments = %q", c)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".amf", "worktrees", "issue-103")); !os.IsNotExist(err) {
+		t.Error("#103 got a worktree")
+	}
+	if len(gh.prs) != 1 || gh.prs[0]["head"] != "amf/issue-102" {
+		t.Errorf("PRs = %v", gh.prs)
+	}
+
+	ev := eventsByName(eventLines(t, events.String()))
+	wantEvent(t, ev, "watch.start", map[string]any{"max_issues": float64(2)})
+	wantEvent(t, ev, "watch.tick", map[string]any{"cycle": float64(1), "issues": float64(103)})
+	wantEvent(t, ev, "watch.failed", map[string]any{"issue": float64(101)})
+	wantEvent(t, ev, "watch.stop", map[string]any{"reason": "max_issues", "attempted": float64(2), "max_issues": float64(2), "cycles": float64(1)})
+	if n := len(ev["watch.tick"]); n != 1 {
+		t.Errorf("%d polls, want 1", n)
+	}
+	if s := readSummary(t, path); s.Issues.Done != 1 || s.Issues.Failed != 1 || s.Issues.Skipped != 100 {
+		t.Errorf("summary = %+v", s)
+	}
+	for _, want := range []string{"stopped after 2 issues (--max-issues 2)\n", "amf: summary: 2 issues (1 done, 1 failed, 100 skipped); "} {
+		if !strings.Contains(log.String(), want) {
+			t.Errorf("console missing %q:\n%s", want, log)
+		}
+	}
+}
+
+// TestWatchMaxIssuesSpansPolls counts attempts, not issues, across polls:
+// two listings fail and then the queue is empty, and neither counts; then an
+// issue with a custom label arrives, and with no agent available it fails
+// before it is touched, stays eligible, and is attempted on each poll until
+// the cap.
+func TestWatchMaxIssuesSpansPolls(t *testing.T) {
+	root, _ := setupRepo(t)
+	gh, srv := newFakeGitHub(t)
+	target, _ := url.Parse(srv.URL)
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	var lists atomic.Int32
+	flaky := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues") && lists.Add(1) <= 2 {
+			writeJSON(w, 502, map[string]string{"message": "Bad Gateway"})
+			return
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(flaky.Close)
+	r, _ := newTestRunner(t, flaky, root, filepath.Join(t.TempDir(), "no-claude"))
+	r.Codex, r.Opencode = filepath.Join(t.TempDir(), "no-codex"), filepath.Join(t.TempDir(), "no-opencode")
+	var out syncBuffer
+	r.Log = &out
+	_, events := summaryRunner(t, r)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- r.Watch(ctx, "team:backend", 20*time.Millisecond, 3) }()
+	for lists.Load() < 4 {
+		if ctx.Err() != nil {
+			t.Fatalf("watch didn't poll; log:\n%s", out.String())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	gh.mu.Lock()
+	gh.issues[1] = &Issue{Number: 1, Title: "Backend", State: "open", Labels: []Label{{Name: "team:backend"}}}
+	gh.mu.Unlock()
+	if err := <-done; err != nil || ctx.Err() != nil {
+		t.Fatalf("Watch: %v, ctx %v; log:\n%s", err, ctx.Err(), out.String())
+	}
+
+	log := out.String()
+	if n := strings.Count(log, "#1 failed: no coding agent is available"); n != 3 {
+		t.Errorf("#1 attempted %d times, want 3:\n%s", n, log)
+	}
+	if !strings.Contains(log, "listing issues: github GET") {
+		t.Errorf("log missing the listing error:\n%s", log)
+	}
+	if got := gh.labels(1); !reflect.DeepEqual(got, []string{"team:backend"}) {
+		t.Errorf("labels = %v", got)
+	}
+	if c := gh.comments[1]; len(c) != 0 {
+		t.Errorf("comments = %q", c)
+	}
+	ev := eventsByName(eventLines(t, events.String()))
+	stop := wantEvent(t, ev, "watch.stop", map[string]any{"reason": "max_issues", "attempted": float64(3), "max_issues": float64(3)})
+	if c, _ := stop["cycles"].(float64); c < 6 {
+		t.Errorf("cycles = %v, want 2 failed listings, at least one empty poll and 3 attempts", stop["cycles"])
+	}
+}
+
+// TestWatchMaxIssuesCancelledLastAttempt stops on Ctrl-C during the last
+// permitted attempt as any cancelled watch does, not as one at its cap.
+func TestWatchMaxIssuesCancelledLastAttempt(t *testing.T) {
+	root, _ := setupRepo(t)
+	gh, srv := newFakeGitHub(t)
+	gh.issues[1] = readyIssue(1, "Hangs")
+	r, log := newTestRunner(t, srv, root, fakeAgent(t, "claude", "cat >/dev/null; while :; do sleep 1; done\n"))
+	r.KillGrace = 50 * time.Millisecond
+	path, events := summaryRunner(t, r)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	time.AfterFunc(20*time.Second, cancel)
+	done := make(chan error, 1)
+	go func() { done <- r.Watch(ctx, labelReady, time.Hour, 1) }()
+	for !slices.Contains(gh.labels(1), labelInProgress) {
+		if ctx.Err() != nil {
+			t.Fatalf("issue not picked up; log:\n%s", log)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	time.Sleep(200 * time.Millisecond) // the agent is running
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	r.Close()
+	ev := eventsByName(eventLines(t, events.String()))
+	if stops := ev["watch.stop"]; len(stops) != 1 || stops[0]["reason"] != "context canceled" {
+		t.Errorf("watch.stop = %v", stops)
+	}
+	if s := readSummary(t, path); s.Issues.Failed != 1 {
+		t.Errorf("summary = %+v", s)
+	}
+}
+
+// TestWatchMaxIssuesCommand runs amf watch --max-issues 1 as a user would:
+// it processes the oldest issue and exits 0 on its own, leaving the other.
+func TestWatchMaxIssuesCommand(t *testing.T) {
+	root, origin := setupRepo(t)
+	gh, srv := newFakeGitHub(t)
+	gh.issues[1] = readyIssue(1, "One")
+	gh.issues[2] = readyIssue(2, "Two")
+	t.Chdir(root)
+	for k, v := range map[string]string{
+		"GITHUB_TOKEN": "test-token", "GITHUB_REPO": "vic/demo", "AMF_API_URL": srv.URL, "AMF_CLONE_URL": origin,
+		"AMF_CLAUDE":        fakeAgent(t, "claude", shResult+"cat >/dev/null\necho x > x.txt\nresult 'Done.'\n"),
+		"ANTHROPIC_API_KEY": "sk-ant-test", "CLAUDE_CODE_OAUTH_TOKEN": "", "OPENAI_API_KEY": "",
+		"AMF_TRUSTED": "", "AMF_POSTGRES_URL": "", "AMF_AGENT_TIMEOUT": "", "AMF_LOG_LEVEL": "",
+	} {
+		t.Setenv(k, v)
+	}
+	var stderr bytes.Buffer
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	args := []string{"watch", "--max-issues", "1", "--interval", "1h", "--log-file", "off"}
+	if err := run(ctx, args, strings.NewReader(""), io.Discard, &stderr); err != nil || ctx.Err() != nil {
+		t.Fatalf("amf %q: %v, ctx %v\n%s", args, err, ctx.Err(), stderr.String())
+	}
+	if !slices.Contains(gh.labels(1), labelDone) || !reflect.DeepEqual(gh.labels(2), []string{labelReady}) {
+		t.Errorf("labels: #1 %v, #2 %v", gh.labels(1), gh.labels(2))
+	}
+	for _, want := range []string{", stopping after 1 issue (Ctrl-C to stop)", "amf: stopped after 1 issue (--max-issues 1)\n", "amf: summary: 1 issue (1 done, 0 failed, 0 skipped)"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("stderr missing %q:\n%s", want, stderr.String())
+		}
 	}
 }

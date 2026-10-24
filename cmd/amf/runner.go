@@ -590,12 +590,17 @@ func skipReason(is Issue) string {
 }
 
 // Watch polls for open issues labeled label and runs them one at a time
-// until ctx is cancelled.
-func (r *Runner) Watch(ctx context.Context, label string, interval time.Duration) error {
+// until ctx is cancelled or, with maxIssues above 0, until it has attempted
+// that many: each Run counts, whether it succeeds or fails.
+func (r *Runner) Watch(ctx context.Context, label string, interval time.Duration, maxIssues int) error {
 	ctx = withEvents(ctx, r.Events, 0)
-	r.event(slog.LevelInfo, "watch.start", 0, fmt.Sprintf("watching %s for issues labeled %q every %s (Ctrl-C to stop)", r.Repo, label, interval),
+	limit := ""
+	if maxIssues > 0 {
+		limit = fmt.Sprintf(", stopping after %d %s", maxIssues, plural(maxIssues, "issue", "issues"))
+	}
+	r.event(slog.LevelInfo, "watch.start", 0, fmt.Sprintf("watching %s for issues labeled %q every %s%s (Ctrl-C to stop)", r.Repo, label, interval, limit),
 		"repo", r.Repo, "label", label, "interval", interval.String(), "timeout", r.Timeout.String(),
-		"eval_rounds", r.EvalRounds, "draft", r.Draft, "agent_flag", agentName(r.Agent), "version", buildVersion())
+		"eval_rounds", r.EvalRounds, "draft", r.Draft, "agent_flag", agentName(r.Agent), "max_issues", maxIssues, "version", buildVersion())
 	r.event(slog.LevelInfo, "watch.agents", 0, "agents for issues without a pipeline (claude and codex need a key, opencode one for a paid model):")
 	for _, st := range r.agentStatuses() {
 		r.event(slog.LevelInfo, "watch.agents", 0, "  "+st.describe(),
@@ -609,6 +614,7 @@ func (r *Runner) Watch(ctx context.Context, label string, interval time.Duration
 	default:
 		r.event(slog.LevelInfo, "watch.agents", 0, fmt.Sprintf("issues without a pipeline run %s", agentName(agent)), "picked", agentName(agent))
 	}
+	attempted := 0
 	for cycle := 1; ; cycle++ {
 		issues, err := r.GH.ListIssues(ctx, "open", label, true)
 		switch {
@@ -626,8 +632,16 @@ func (r *Runner) Watch(ctx context.Context, label string, interval time.Duration
 				r.event(slog.LevelDebug, "watch.skip", is.Number, fmt.Sprintf("#%d: skipped (%s)", is.Number, why), "reason", why)
 				continue
 			}
-			if err := r.Run(ctx, is.Number); err != nil {
+			err := r.Run(ctx, is.Number)
+			attempted++
+			if err != nil {
 				r.event(slog.LevelWarn, "watch.failed", is.Number, fmt.Sprintf("#%d failed: %v", is.Number, err), "error", err)
+			}
+			// A Ctrl-C during the last attempt stops below, as cancelled.
+			if maxIssues > 0 && attempted >= maxIssues && ctx.Err() == nil {
+				r.event(slog.LevelInfo, "watch.stop", 0, fmt.Sprintf("stopped after %d %s (--max-issues %d)", attempted, plural(attempted, "issue", "issues"), maxIssues),
+					"reason", "max_issues", "attempted", attempted, "max_issues", maxIssues, "cycles", cycle)
+				return nil
 			}
 		}
 		select {

@@ -167,6 +167,7 @@ amf list --json --label amf:failed | jq -r '.[].url'  # as JSON: number, title, 
 amf run 42                  # process one issue now
 amf watch --interval 60s    # process issues labeled `amf:ready`, one at a time
 amf watch --agent codex     # ...with Codex, even if Claude Code is installed
+amf watch --max-issues 3    # ...attempting at most 3 issues, then exiting
 amf run 42 --draft          # open the PR as a draft
 amf watch --draft           # ...opening each new PR as a draft
 ```

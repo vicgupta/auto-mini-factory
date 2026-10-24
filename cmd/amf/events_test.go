@@ -68,7 +68,7 @@ echo x > x.txt; result 'Done.'
 	defer cancel()
 	time.AfterFunc(20*time.Second, cancel) // never leave a hung test running
 	done := make(chan error, 1)
-	go func() { done <- r.Watch(ctx, "amf:ready", 20*time.Millisecond) }()
+	go func() { done <- r.Watch(ctx, "amf:ready", 20*time.Millisecond, 0) }()
 	// #3 comes after #2 in a cycle, so wait for its skip too.
 	for !slices.Contains(gh.labels(1), "amf:done") || !slices.Contains(gh.labels(2), "amf:failed") ||
 		!strings.Contains(file.String(), `"event":"watch.skip"`) {
@@ -449,7 +449,7 @@ echo x > x.txt; result 'Done.'
 	defer cancel()
 	time.AfterFunc(20*time.Second, cancel)
 	done := make(chan error, 1)
-	go func() { done <- r.Watch(ctx, "amf:ready", 20*time.Millisecond) }()
+	go func() { done <- r.Watch(ctx, "amf:ready", 20*time.Millisecond, 0) }()
 	// #3 comes after #2 in a cycle, so wait for its skip, then for a few
 	// more polls, each skipping #3 again.
 	for !slices.Contains(gh.labels(1), "amf:done") || !slices.Contains(gh.labels(2), "amf:failed") ||
@@ -493,7 +493,7 @@ func TestSummaryAfterCancel(t *testing.T) {
 	defer cancel()
 	time.AfterFunc(20*time.Second, cancel)
 	done := make(chan error, 1)
-	go func() { done <- r.Watch(ctx, "amf:ready", 20*time.Millisecond) }()
+	go func() { done <- r.Watch(ctx, "amf:ready", 20*time.Millisecond, 0) }()
 	for !slices.Contains(gh.labels(1), "amf:in-progress") {
 		if ctx.Err() != nil {
 			t.Fatalf("issue not picked up; log:\n%s", log)
