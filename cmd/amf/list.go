@@ -15,13 +15,17 @@ func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	fs.SetOutput(stderr)
 	state := fs.String("state", "open", "open, closed or all")
 	label := fs.String("label", "", "only issues with this label, e.g. amf:ready")
+	limit := fs.Int("limit", 0, "print at most N issues, 0 means no limit")
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return errUsage
 	}
 	if len(pos) != 0 {
-		fmt.Fprintln(stderr, "usage: amf list [--state open|closed|all] [--label L]")
+		fmt.Fprintln(stderr, "usage: amf list [--state open|closed|all] [--label L] [--limit N]")
 		return errUsage
+	}
+	if *limit < 0 {
+		return fmt.Errorf("--limit must be 0 or more, got %d", *limit)
 	}
 	switch *state {
 	case "open", "closed", "all":
@@ -40,6 +44,9 @@ func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	issues, err := gh.ListIssues(ctx, *state, *label, false)
 	if err != nil {
 		return err
+	}
+	if *limit > 0 && len(issues) > *limit {
+		issues = issues[:*limit]
 	}
 
 	if len(issues) == 0 {

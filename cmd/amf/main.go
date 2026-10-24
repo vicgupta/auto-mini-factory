@@ -45,7 +45,7 @@ const usage = `amf turns GitHub issues into pull requests with coding agents: Cl
 Usage:
   amf init                                                    write .env (backing up an existing one) and create amf's labels
   amf issue "Title" [-b body | -f file.md] [--no-label]       create an issue (body may also come from stdin)
-  amf list [--state open|closed|all] [--label L]              list issues, newest first, with their amf labels
+  amf list [--state open|closed|all] [--label L] [--limit N]  list issues, newest first, with their amf labels
   amf run <issue-number> [--agent A] [--agent-timeout 60m]    process one issue into a PR (also takes --eval-rounds, --log-level, --log-file)
   amf watch [--agent A] [--interval 60s] [--label amf:ready]  process amf:ready issues as they arrive (also takes --agent-timeout, --eval-rounds, --log-level, --log-file)
   amf pipeline [--fetch]                                      check the plan/code/eval pipeline in this checkout's AGENTS.md

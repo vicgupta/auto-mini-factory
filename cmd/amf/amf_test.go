@@ -932,6 +932,21 @@ func TestListCommand(t *testing.T) {
 	if got := list("--label", "amf:ready"); strings.Contains(got, "#3") || !strings.Contains(got, "#2") {
 		t.Errorf("amf list --label amf:ready =\n%s", got)
 	}
+	if got, want := list("--limit", "1"), "ISSUE  AMF  TITLE\n#3     -    Plain issue\n"; got != want {
+		t.Errorf("amf list --limit 1 =\n%s\nwant\n%s", got, want)
+	}
+	if got := list("--limit", "0"); got != list() {
+		t.Errorf("amf list --limit 0 =\n%s\nwant the unflagged output", got)
+	}
+	if got := list("--state", "all", "--limit", "2"); strings.Contains(got, "#1") || !strings.Contains(got, "#3") || !strings.Contains(got, "#2") {
+		t.Errorf("amf list --state all --limit 2 =\n%s", got)
+	}
+	if got := list("--label", "amf:ready", "--limit", "1"); strings.Contains(got, "#3") || !strings.Contains(got, "#2") {
+		t.Errorf("amf list --label amf:ready --limit 1 =\n%s", got)
+	}
+	if err := run(context.Background(), []string{"list", "--limit", "-1"}, nil, io.Discard, io.Discard); err == nil || !strings.Contains(err.Error(), "--limit") {
+		t.Errorf("amf list --limit -1: err = %v, want an error mentioning --limit", err)
+	}
 	if got := list("--state", "closed", "--label", "amf:failed"); got != "No closed issues labeled amf:failed in vic/demo.\n" {
 		t.Errorf("empty list = %q", got)
 	}
