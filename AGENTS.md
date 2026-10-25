@@ -76,3 +76,11 @@ happened to v0.1.1 and was fixed by re-uploading).
 
 If you replace a release's files, GitHub's download cache can serve the old
 ones for a few minutes, so a failure right after a re-upload may be stale.
+
+## amf
+
+| Stage | Skill | Agent | Model |
+|---|---|---|---|
+| plan | https://raw.githubusercontent.com/vicgupta/auto-mini-factory/v0.2.0/skills/plan/SKILL.md | claudecode | haiku |
+| code | https://raw.githubusercontent.com/vicgupta/auto-mini-factory/v0.2.0/skills/code/SKILL.md | opencode | opencode/deepseek-v4.1-flash-free |
+| eval | https://raw.githubusercontent.com/vicgupta/auto-mini-factory/v0.2.0/skills/eval/SKILL.md | claudecode | haiku |
