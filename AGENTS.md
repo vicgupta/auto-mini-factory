@@ -36,8 +36,8 @@ checked against the source rather than from memory, and the change includes
   against a real repository, from a directory holding its `.env`:
   `AMF_LIVE_DIR=/tmp/amf AMF_LIVE_PIPELINE=1 go test -tags live -run TestLive -v -timeout 90m ./cmd/amf`.
   It creates issues, branches and PRs, and with `AMF_LIVE_PIPELINE=1`
-  commits an `AGENTS.md` to the default branch; it cleans all of that up
-  unless `AMF_LIVE_KEEP=1`. Run it before a minor release.
+  commits an `## amf` table to the end of `AGENTS.md` on the default branch;
+  it cleans all of that up unless `AMF_LIVE_KEEP=1`. Run it before a minor release.
 
 ## Releasing
 

@@ -34,14 +34,15 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened, and merged
 | Command | Behavior |
 |---|---|
 | `amf init` | Writes `./.env` and creates the labels (see below). |
-| `amf issue "Title" [-b body \| -f file \| -f -] [--label L] [--no-label]` | Creates an issue labeled `amf:ready`. The body can also come from stdin when it's piped. Prints `#N <url>`. |
-| `amf list [--state open\|closed\|all] [--label L] [--limit N] [--json]` | Lists issues, newest first (highest number first), with every page fetched and PRs left out. Columns: `ISSUE`, `STATE` (with `--state all` only), `AMF` (the issue's `amf` and `amf:*` labels, or `-`) and `TITLE`. `--limit N` (default `0`, no limit) prints only the first N issues after filtering; a negative value errors with `--limit must be 0 or more, got N`. Prints `No … in owner/name.` when nothing matches. `--json` (default `false`) prints instead one JSON array and a newline, with no header: one object per issue, in the same order and after the same filters and limit, with exactly `number` (integer), `title`, `state`, `url` (the issue's GitHub page) and `labels` (every label name, in GitHub's order, `[]` when none); titles are kept as GitHub sent them, tabs included. Nothing matching prints `[]`. On an error nothing is printed to stdout, and a failure to write stdout is an error. Needs no git checkout. |
-| `amf run <N> [--agent A] [--agent-timeout 60m] [--eval-rounds 2] [--draft] [--merge[=squash\|rebase]] [--log-level L] [--log-file P]` | Processes issue N once. |
+| `amf issue "Title" [-b body \| -f file \| -f -] [--label L] [--no-label]` | Creates an issue labeled `amf:ready` (or `--label`'s label; none with `--no-label`). The body can also come from stdin when it's piped; `-b` and `-f` together are an error. Prints `#N <url>`. |
+| `amf list [--state open\|closed\|all] [--label L] [--limit N] [--json]` | Lists issues, newest first (highest number first), with every page fetched and PRs left out. Columns: `ISSUE`, `STATE` (with `--state all` only), `AMF` (the issue's `amf` and `amf:*` labels, or `-`) and `TITLE`. `--limit N` (default `0`, no limit) prints only the first N issues after filtering; a negative value errors with `--limit must be 0 or more, got N`. Tabs in a title print as spaces. `--state` takes only `open`, `closed` or `all`. Prints `No … in owner/name.` when nothing matches. `--json` (default `false`) prints instead one JSON array and a newline, with no header: one object per issue, in the same order and after the same filters and limit, with exactly `number` (integer), `title`, `state`, `url` (the issue's GitHub page) and `labels` (every label name, in GitHub's order, `[]` when none); titles are kept as GitHub sent them, tabs included. Nothing matching prints `[]`. On an error nothing is printed to stdout, and a failure to write stdout is an error. Needs no git checkout. |
+| `amf run <N> [--agent A] [--agent-timeout 60m] [--eval-rounds 2] [--draft] [--merge[=squash\|rebase]] [--log-level L] [--log-file P]` | Processes issue N (`42` or `#42`) once. |
 | `amf watch [--agent A] [--interval 60s] [--label amf:ready] [--exclude-label L]... [--agent-timeout 60m] [--eval-rounds 2] [--draft] [--merge[=squash\|rebase]] [--log-level L] [--log-file P]` | Polls open issues with the label (every page), oldest first by issue number (GitHub's `created_at` can tie for issues opened in the same second), and processes them one at a time until interrupted, skipping any issue that has one of the `--exclude-label` labels. |
 | `amf pipeline [--fetch]` | Checks the pipeline in `AGENTS.md` of the enclosing checkout, as it is on disk. See below. |
 | `amf doctor` | Checks the whole setup, one line per check, changing nothing. See below. |
 | `amf update [--version vX.Y.Z] [--check]` | Replaces the running binary with the latest release, or with the given one, which can be a downgrade. Needs no `.env`. See below. |
-| `amf version` | Prints the version: the release tag, or the module version for `go install`. |
+| `amf version` | Prints `amf <version>`: the release tag, or the module version for `go install`. `amf --version` is the same. |
+| `amf help` | Prints the usage, as `-h` and `--help` do. |
 
 - `--agent-timeout` limits each agent run, not the whole issue; the old
   `--timeout` is accepted as a deprecated alias of it. Both must be at least
@@ -112,8 +113,8 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened, and merged
   events) and `log` (the event log's path). At exit amf also prints
   `summary: N issues (D done, F failed, S skipped); G GitHub calls; log
   <path>`, the last part only with an event log.
-- `--log-level` is `debug`, `info`, `warn` or `error` (case is ignored),
-  and so is `AMF_LOG_LEVEL`, which the flag overrides. Either sets the
+- `--log-level` is `debug`, `info`, `warn` (or `warning`) or `error` (case
+  is ignored), and so is `AMF_LOG_LEVEL`, which the flag overrides. Either sets the
   level for both the terminal and the event log; without them the
   terminal shows `info` and the event log keeps `debug`. Any other value
   fails `run` and `watch` at startup, naming the flag or variable.
@@ -149,7 +150,10 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened, and merged
   `usable` or `skipped`. Then it logs which agent issues without a pipeline run, or a
   warning that none is available.
 
-**Exit codes:** 0 on success, 1 on error, 2 on a usage error. SIGINT and
+**Exit codes:** 0 on success, 1 on error, 2 on a usage error (no command,
+an unknown one, a bad flag or the wrong arguments; no command or an unknown
+one also prints the usage to stderr). Errors print as `amf: <error>` on
+stderr. SIGINT and
 SIGTERM cancel the current step, with the run's process group killed as on
 expiry; the issue is still marked failed.
 
@@ -212,7 +216,7 @@ never prints a secret. The checks, in order:
 | `.env` | A `.env` was found where `run` looks; shows its path | `warn` if there is none (the environment is used); `FAIL` if it doesn't parse |
 | `GITHUB_TOKEN` | Set; says whether from `.env` or the environment | `FAIL` if unset or a placeholder |
 | `GITHUB_REPO` | Set and `owner/name` | `FAIL` |
-| `github` | `GET /user` accepts the token; shows the login | `FAIL` on 401 or no connection |
+| `github` | `GET /user` accepts the token; shows the login. A 403 (a token that can't read `/user`) is `ok`, without a login | `FAIL` on 401 or no connection |
 | `repo` | The repo is readable; shows its default branch | `FAIL` on 404; `warn` if the account can't push |
 | `labels` | All four amf labels exist | `warn`, naming the missing ones |
 | `trusted` | `AMF_TRUSTED` is set; lists the logins | `warn` if unset (anyone's issues run), or if it leaves out the token's account, which `amf issue` opens issues as |
@@ -236,8 +240,8 @@ reliably.
 
 ## Configuration
 
-amf reads `./.env`, then `.env` at the top of the git checkout. Environment
-variables override the file. Values ending in `...`, and `owner/name`, are
+amf reads one `.env`: `./.env`, or else `.env` at the top of the git
+checkout. Environment variables override the file. Values ending in `...`, and `owner/name`, are
 placeholders and count as unset. The file has `KEY=value` lines, optionally
 prefixed with `export ` and quoted; `#` starts a comment line or, after a
 space, a trailing comment. A leading byte order mark is ignored.
@@ -322,8 +326,10 @@ work. Starter skills are in this repo under `skills/`.
    A 404 means the repo or token is wrong; a 401 means the token was rejected.
 2. **Checkout.** Use the enclosing git checkout. Outside one, clone the repo
    into `./<name>` with the user's git credentials, or reuse an existing clone
-   there. Refuse if `./<name>` exists but isn't a clone of the repo. Add
-   `/.amf/` to `.git/info/exclude`.
+   there. Refuse if `./<name>` exists but isn't a clone of the repo, or if
+   the checkout has no `origin`. If `origin` isn't `GITHUB_REPO` (or
+   `AMF_CLONE_URL`), warn `origin is <url> but GITHUB_REPO is <repo>` and go
+   on. Add `/.amf/` to `.git/info/exclude`.
 3. **Check.** The issue must be an open issue, not a PR. Fetch the default
    branch and read the pipeline from `AGENTS.md` on it. Without a pipeline,
    pick the agent (see `--agent` above). A table that doesn't parse, an agent
@@ -350,12 +356,16 @@ work. Starter skills are in this repo under `skills/`.
      smallest complete change, run the project's tests and build, not touch
      `.github/`, git or GitHub, and reply with only a PR description.
    - **Environment:** `PWD` is the worktree, and no agent gets
-     `GITHUB_TOKEN`. When `CLAUDE_CODE_OAUTH_TOKEN` is set, it's passed to
-     Claude only, and Claude's `ANTHROPIC_API_KEY` is removed. Otherwise an
-     `ANTHROPIC_API_KEY` from `.env` or the environment is passed to Claude.
-     `OPENAI_API_KEY` from `.env` or the environment is passed to Codex,
-     and `OPENCODE_API_KEY` to opencode, each replacing any value the agent
-     would inherit.
+     `GITHUB_TOKEN`. Only Claude gets `CLAUDE_CODE_OAUTH_TOKEN`, and only
+     opencode gets `OPENCODE_API_KEY`: amf removes each from the other
+     agents' environments, even when it's exported in the shell. When
+     `CLAUDE_CODE_OAUTH_TOKEN` is set, it's passed to Claude and Claude's
+     `ANTHROPIC_API_KEY` is removed. Otherwise an `ANTHROPIC_API_KEY` from
+     `.env` or the environment is passed to Claude. `OPENAI_API_KEY` from
+     `.env` or the environment is passed to Codex, and `OPENCODE_API_KEY` to
+     opencode, each replacing any value the agent would inherit. An
+     inherited `OPENCODE_CONFIG` is removed for Codex and replaced for
+     opencode (see Permissions).
    - **Log:** output streams live to `.amf/logs/issue-N.log`, a line at a
      time and redacted (see "Redaction" under "Security model").
    - **Timeout:** each run may take at most `--agent-timeout` (or
@@ -505,7 +515,8 @@ partial output. If Claim itself fails, the issue can be left on
 2. Download the archive for this platform and `checksums.txt` from that
    release: `amf_<tag>_<os>_<arch>.tar.gz` on macOS and Linux, or
    `amf_<tag>_windows_<arch>.zip` on Windows. If the archive is missing, fail
-   with `no amf <tag> for <os>/<arch>`. If its SHA-256 doesn't match, fail.
+   with `no amf <tag> for <os>/<arch>`. If `checksums.txt` doesn't list it,
+   or its SHA-256 doesn't match, fail.
    The binary is `amf_<tag>_<os>_<arch>/amf` inside the archive
    (`…/amf.exe` on Windows); if it isn't there, fail.
 3. Write the binary next to the running executable (symlinks resolved) as a
@@ -564,7 +575,7 @@ event log opens, are not. The fields of each event, besides those:
 | `log.file` | info | `path`: the event log |
 | `run.summary` | debug, info | The fields of `summary.json` (see Commands) as `done`, `failed`, `skipped`, `github_calls`, `ratelimit_lowest`, `git_calls`, `agent_ms`, `errors`, `log`, and `final`: false (debug) after an issue, true (info, the terminal's last line) at exit |
 | `config.load` | debug | `paths` (the `.env` files looked for), `file` (the one read, or `""`), and `keys`: for each variable read, its `source` (`env`, `.env` or `default`) and `value`. Only `GITHUB_REPO`, `AMF_API_URL`, `OPENCODE_MODEL`, `AMF_AGENT_TIMEOUT`, `AMF_LOG_LEVEL`, `AMF_CLAUDE`, `AMF_CODEX` and `AMF_OPENCODE` show their value; every other one shows `set` or `unset` |
-| `pg.connect` | debug | With `AMF_POSTGRES_URL`: `host`, `port`, `database`, and `tls` and `auth` (`trust`, `password`, `md5` or `scram-sha-256`), or `error`; `created` when amf created the database. The first connection's event follows `log.file` |
+| `pg.connect` | debug | With `AMF_POSTGRES_URL`: `host`, `port`, `database`, and `tls` and `auth` (`trust`, `password`, `md5` or `scram-sha-256`), or `error`; `created` when amf created the database. The first connection's event follows `log.file` and `config.load` |
 | `pg.retry` | debug | `attempt` (since the last success), `backoff`, `error` |
 | `pg.drop` | debug | `rows` that never reached the database, and `error` when amf gave up at exit |
 | `checkout.resolve` | debug | `how` (`checkout`, `clone` for a clone reused, `cloned`), `dir` |
@@ -647,8 +658,10 @@ get without it. Other commands don't log there.
   are dropped) and retries after 1 s, doubling to at most 1 minute. It
   prints `amf: logging to PostgreSQL at user@host:port again` when it
   recovers, and how many lines it dropped. When `run` or `watch` ends, amf
-  waits up to 15 seconds to send what's queued, then warns how many lines
-  only made it to the local logs.
+  waits up to 15 seconds to send what's queued. If the server refuses them
+  it warns how many lines only made it to the local logs; if the 15 seconds
+  run out it warns that it gave up and the lines are still in the local
+  logs.
 
 ## Security model
 
@@ -669,8 +682,9 @@ get without it. Other commands don't log there.
   checks and reviews stand between amf and the branch if you want them:
   amf merges only what GitHub allows. The `.github/` refusal (step 7)
   still applies, so no workflow change is ever pushed.
-- No agent gets `GITHUB_TOKEN`, but agents can read local files, including
-  `.env` (and so `AMF_POSTGRES_URL`'s password).
+- No agent gets `GITHUB_TOKEN`, and each agent's environment holds only
+  its own key (step 6), but agents can read local files, including `.env`
+  (and so every key in it, and `AMF_POSTGRES_URL`'s password).
 - With `AMF_POSTGRES_URL` set, everything the agents print, which can
   include code and the contents of files they read, is stored in
   `amflogs` (redacted, as below). Anyone who can read that database can
@@ -704,6 +718,7 @@ get without it. Other commands don't log there.
 ## Non-goals
 
 - Running issues in parallel. `watch` processes one at a time.
-- Reviewing, merging, or retrying failed PRs. People do that.
+- Reviewing PRs, or retrying failed ones. People do that. amf merges only
+  with `--merge`, and only what GitHub allows.
 - Sandboxing agents.
 - Skills that need authentication to download.
