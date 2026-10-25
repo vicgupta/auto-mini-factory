@@ -66,6 +66,68 @@ type PullRequest struct {
 	Head string `json:"-"`
 }
 
+// PRDetails is GitHub's PR response for listing. PullRequest.Head remains
+// the SHA used by the runner to pin merges, not this response's head object.
+type PRDetails struct {
+	Number   int     `json:"number"`
+	Title    string  `json:"title"`
+	State    string  `json:"state"`
+	HTMLURL  string  `json:"html_url"`
+	Draft    bool    `json:"draft"`
+	MergedAt *string `json:"merged_at"`
+	Head     struct {
+		Ref  string `json:"ref"`
+		Repo *struct {
+			FullName string `json:"full_name"`
+		} `json:"repo"`
+	} `json:"head"`
+	Base struct {
+		Ref string `json:"ref"`
+	} `json:"base"`
+}
+
+func (pr PRDetails) displayState() string {
+	if pr.MergedAt != nil {
+		return "merged"
+	}
+	if pr.State == "closed" {
+		return "closed"
+	}
+	if pr.Draft {
+		return "draft"
+	}
+	return "open"
+}
+
+// ListPRs fetches every page, separates merged from unmerged closed PRs,
+// and returns newest first, settling creation-time ties by number.
+func (g *GitHub) ListPRs(ctx context.Context, state string) ([]PRDetails, error) {
+	apiState := state
+	if state == "merged" {
+		apiState = "closed"
+	}
+	q := url.Values{"state": {apiState}, "sort": {"created"}, "direction": {"desc"}, "per_page": {"100"}}
+	var prs []PRDetails
+	for path := g.repoPath("/pulls?%s", q.Encode()); path != ""; {
+		var page []PRDetails
+		header, err := g.send(ctx, "GET", path, nil, &page)
+		if err != nil {
+			return nil, err
+		}
+		for _, pr := range page {
+			if state == "merged" && pr.MergedAt == nil || state == "closed" && pr.MergedAt != nil {
+				continue
+			}
+			prs = append(prs, pr)
+		}
+		if path, err = g.nextPage(header); err != nil {
+			return nil, err
+		}
+	}
+	slices.SortStableFunc(prs, func(a, b PRDetails) int { return b.Number - a.Number })
+	return prs, nil
+}
+
 // APIError is a non-2xx response from GitHub.
 type APIError struct {
 	Method, Path string
