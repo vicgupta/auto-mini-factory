@@ -79,6 +79,9 @@ type Runner struct {
 	// Merge, from --merge, is how amf merges each PR it opens or updates:
 	// merge, squash or rebase. "" leaves the PR for review.
 	Merge string
+	// DryRun, from run's --dry-run, makes the change on the local branch
+	// only: no label, comment, push, PR or merge. See dryRun.
+	DryRun bool
 	// MergeRetry is how long amf waits before asking GitHub again to merge a
 	// PR it reports as not mergeable yet, in tests small. 0 means mergeRetry.
 	MergeRetry time.Duration
@@ -158,6 +161,9 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 
 	r.event(slog.LevelInfo, "issue.picked", n, fmt.Sprintf("#%d: %s", n, issue.Title),
 		"title", issue.Title, "author", issue.User.Login, "labels", labelNames(issue))
+	if r.DryRun {
+		return r.dryRun(ctx, issue, base, pipeline, agent)
+	}
 	if err := r.setStatus(ctx, n, labelInProgress); err != nil {
 		return err
 	}
@@ -283,44 +289,10 @@ func (r *Runner) checkAuthor(issue Issue) error {
 // branch already had an open PR, which now has the new title and body.
 func (r *Runner) process(ctx context.Context, issue Issue, base string, p *Pipeline, agent string) (pr PullRequest, updated bool, err error) {
 	n := issue.Number
-	branch := fmt.Sprintf("amf/issue-%d", n)
-	wt := filepath.Join(r.Root, ".amf", "worktrees", fmt.Sprintf("issue-%d", n))
-
-	r.event(slog.LevelInfo, "issue.worktree", n, fmt.Sprintf("#%d: creating worktree %s on %s from origin/%s", n, wt, branch, base),
-		"path", wt, "branch", branch, "base", base)
-	if err := r.prepareWorktree(ctx, wt, branch, base); err != nil {
+	branch, wt := issueBranch(n), r.worktreePath(n)
+	summary, extra, err := r.build(ctx, issue, base, p, agent)
+	if err != nil {
 		return PullRequest{}, false, err
-	}
-
-	title := fmt.Sprintf("Fix #%d: %s", n, issue.Title)
-	var summary, extra string
-	if p == nil {
-		model := r.agentModel(agent, "")
-		r.event(slog.LevelDebug, "issue.pipeline", n, fmt.Sprintf("#%d: no pipeline; one %s run", n, agentName(agent)),
-			"declared", false, "stages", []string{"code"}, "agents", []string{agentName(agent)}, "models", []string{model})
-		text := fmt.Sprintf("#%d: running %s (timeout %s)", n, agentName(agent), r.Timeout)
-		if model != "" {
-			text = fmt.Sprintf("#%d: running %s (%s, timeout %s)", n, agentName(agent), model, r.Timeout)
-		}
-		r.event(slog.LevelInfo, "issue.agent", n, text, "agent", agentName(agent), "model", model, "timeout", r.Timeout.String())
-		log := filepath.Join(r.Root, ".amf", "logs", fmt.Sprintf("issue-%d.log", n))
-		out := filepath.Join(wt, ".amf", "code.md") // for agents that write their final message to a file
-		if summary, err = r.runAgent(ctx, agent, "", model, wt, buildPrompt(r.Repo, branch, issue), log, out); err != nil {
-			return PullRequest{}, false, err
-		}
-		if err := commitAll(ctx, wt, title, n, base, agent); err != nil {
-			return PullRequest{}, false, err
-		}
-	} else {
-		var stages, agents, models []string
-		for _, s := range p.stages() {
-			stages, agents, models = append(stages, s.Name), append(agents, s.Agent), append(models, s.model())
-		}
-		r.event(slog.LevelInfo, "issue.pipeline", n, fmt.Sprintf("#%d: running the pipeline from AGENTS.md: %s", n, describePipeline(p)),
-			"declared", true, "stages", stages, "agents", agents, "models", models)
-		if summary, extra, err = r.runPipeline(ctx, wt, issue, branch, base, p); err != nil {
-			return PullRequest{}, false, err
-		}
 	}
 
 	r.event(slog.LevelInfo, "issue.push", n, fmt.Sprintf("#%d: pushing %s", n, branch), "branch", branch)
@@ -333,14 +305,7 @@ func (r *Runner) process(ctx context.Context, issue Issue, base string, p *Pipel
 		return PullRequest{}, false, err
 	}
 
-	summary = cleanSummary(summary, n)
-	if summary == "" {
-		summary = fmt.Sprintf("Resolves #%d.", n)
-	}
-	if extra != "" {
-		summary += "\n\n" + extra
-	}
-	body := r.Redact.Redact(fmt.Sprintf("%s\n\nCloses #%d\n\n---\n_Opened by amf._", summary, n))
+	title, body := prTitle(issue), r.prBody(summary, extra, n)
 	pr, err = r.GH.CreatePR(ctx, title, branch, base, body, r.Draft)
 	if isStatus(err, http.StatusUnprocessableEntity) {
 		// A retry of an issue whose PR is still open: the push updated it,
@@ -362,6 +327,72 @@ func (r *Runner) process(ctx context.Context, issue Issue, base string, p *Pipel
 		r.event(slog.LevelWarn, "issue.cleanup", n, fmt.Sprintf("#%d: could not remove worktree: %v", n, err), "error", err)
 	}
 	return pr, updated, nil
+}
+
+// issueBranch is the branch amf works on for issue n.
+func issueBranch(n int) string { return fmt.Sprintf("amf/issue-%d", n) }
+
+// worktreePath is where issue n's worktree goes.
+func (r *Runner) worktreePath(n int) string {
+	return filepath.Join(r.Root, ".amf", "worktrees", fmt.Sprintf("issue-%d", n))
+}
+
+// prTitle is the title of the PR, and of the commit, for an issue.
+func prTitle(issue Issue) string { return fmt.Sprintf("Fix #%d: %s", issue.Number, issue.Title) }
+
+// prBody is the redacted PR description: the agent's summary, cleaned, then
+// the pipeline's sections and amf's footer.
+func (r *Runner) prBody(summary, extra string, n int) string {
+	summary = cleanSummary(summary, n)
+	if summary == "" {
+		summary = fmt.Sprintf("Resolves #%d.", n)
+	}
+	if extra != "" {
+		summary += "\n\n" + extra
+	}
+	return r.Redact.Redact(fmt.Sprintf("%s\n\nCloses #%d\n\n---\n_Opened by amf._", summary, n))
+}
+
+// build makes the change on the issue's branch in a fresh worktree, with a
+// single run of agent or with the pipeline p, and leaves it as one commit,
+// unpushed. It returns the agent's summary and the pipeline's sections for
+// the PR body.
+func (r *Runner) build(ctx context.Context, issue Issue, base string, p *Pipeline, agent string) (summary, extra string, err error) {
+	n := issue.Number
+	branch, wt := issueBranch(n), r.worktreePath(n)
+
+	r.event(slog.LevelInfo, "issue.worktree", n, fmt.Sprintf("#%d: creating worktree %s on %s from origin/%s", n, wt, branch, base),
+		"path", wt, "branch", branch, "base", base)
+	if err := r.prepareWorktree(ctx, wt, branch, base); err != nil {
+		return "", "", err
+	}
+
+	if p == nil {
+		model := r.agentModel(agent, "")
+		r.event(slog.LevelDebug, "issue.pipeline", n, fmt.Sprintf("#%d: no pipeline; one %s run", n, agentName(agent)),
+			"declared", false, "stages", []string{"code"}, "agents", []string{agentName(agent)}, "models", []string{model})
+		text := fmt.Sprintf("#%d: running %s (timeout %s)", n, agentName(agent), r.Timeout)
+		if model != "" {
+			text = fmt.Sprintf("#%d: running %s (%s, timeout %s)", n, agentName(agent), model, r.Timeout)
+		}
+		r.event(slog.LevelInfo, "issue.agent", n, text, "agent", agentName(agent), "model", model, "timeout", r.Timeout.String())
+		log := filepath.Join(r.Root, ".amf", "logs", fmt.Sprintf("issue-%d.log", n))
+		out := filepath.Join(wt, ".amf", "code.md") // for agents that write their final message to a file
+		if summary, err = r.runAgent(ctx, agent, "", model, wt, buildPrompt(r.Repo, branch, issue), log, out); err != nil {
+			return "", "", err
+		}
+		if err := commitAll(ctx, wt, prTitle(issue), n, base, agent); err != nil {
+			return "", "", err
+		}
+		return summary, "", nil
+	}
+	var stages, agents, models []string
+	for _, s := range p.stages() {
+		stages, agents, models = append(stages, s.Name), append(agents, s.Agent), append(models, s.model())
+	}
+	r.event(slog.LevelInfo, "issue.pipeline", n, fmt.Sprintf("#%d: running the pipeline from AGENTS.md: %s", n, describePipeline(p)),
+		"declared", true, "stages", stages, "agents", agents, "models", models)
+	return r.runPipeline(ctx, wt, issue, branch, base, p)
 }
 
 // removeWorktree force-removes an issue's worktree, even one git has already

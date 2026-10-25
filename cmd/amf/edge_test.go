@@ -2128,6 +2128,13 @@ func TestDoctorPostgres(t *testing.T) {
 
 // --- draft PRs ---
 
+// commented reports whether issue n has a comment yet.
+func (f *fakeGitHub) commented(n int) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.comments[n]) > 0
+}
+
 // draftCLI runs amf with args, as a user would, against the fake GitHub and
 // a fake claude, from a checkout whose issues 1 and 2 are labeled amf:ready.
 // A watch runs until both issues are done.
@@ -2152,7 +2159,10 @@ func draftCLI(t *testing.T, args ...string) (*fakeGitHub, string) {
 	done := make(chan error, 1)
 	go func() { done <- run(ctx, args, strings.NewReader(""), io.Discard, &stderr) }()
 	if args[0] == "watch" {
-		for !slices.Contains(gh.labels(1), labelDone) || !slices.Contains(gh.labels(2), labelDone) {
+		// The comment is amf's last write for an issue, after its label, so
+		// wait for it too: cancelling sooner can leave that request still
+		// being handled while the test reads the fake.
+		for !gh.commented(1) || !gh.commented(2) || !slices.Contains(gh.labels(1), labelDone) || !slices.Contains(gh.labels(2), labelDone) {
 			if ctx.Err() != nil {
 				t.Fatalf("amf %q: issues not processed:\n%s", args, stderr.String())
 			}

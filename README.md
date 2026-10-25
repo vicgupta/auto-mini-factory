@@ -172,6 +172,7 @@ amf run 42 --draft          # open the PR as a draft
 amf watch --draft           # ...opening each new PR as a draft
 amf run 42 --merge          # ...and merge its PR with a merge commit
 amf watch --merge=squash    # squash and merge each PR (or --merge=rebase)
+amf run 42 --dry-run        # make the change locally and show the PR, touching nothing on GitHub
 ```
 
 ### Choosing the agent
@@ -243,6 +244,14 @@ doesn't wait for checks, so with required checks or reviews GitHub refuses
 and the PR stays open; amf comments why, and `amf run` exits 1. amf never
 merges a change to the top-level `AGENTS.md`, which holds the pipeline.
 `--merge` can't be combined with `--draft`, since GitHub doesn't merge drafts.
+
+With `--dry-run`, `amf run N` only reads from GitHub. It leaves the issue's
+labels alone, runs the agent (or the pipeline) and commits on the local
+`amf/issue-N` branch as usual, then prints the diff stat and the PR it would
+open or update (and whether `--merge` would merge it) instead of pushing.
+Nothing is labeled, commented, pushed, opened or merged. See the change with
+`git diff origin/main amf/issue-N`. The agent still runs with every
+permission, so the trust rules below still apply.
 
 On any failure the issue gets `amf:failed` plus a comment with the reason,
 and the worktree is kept for inspection. A run that hit the agent timeout

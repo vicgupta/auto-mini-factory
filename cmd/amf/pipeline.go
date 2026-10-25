@@ -445,8 +445,10 @@ func (r *Runner) runPipeline(ctx context.Context, wt string, issue Issue, branch
 			tried := fmt.Sprintf("%d code %s", k, plural(k, "round", "rounds"))
 			r.event(slog.LevelInfo, "issue.eval.verdict", n, fmt.Sprintf("#%d: eval still failing after %s; pushing %s for inspection", n, tried, branch),
 				"round", k, "pass", false, "parsed", ok, "final", true)
-			if _, err := git(ctx, wt, "push", "--force", "-u", "origin", branch); err != nil {
-				return "", "", err
+			if !r.DryRun {
+				if _, err := git(ctx, wt, "push", "--force", "-u", "origin", branch); err != nil {
+					return "", "", err
+				}
 			}
 			return "", "", &stageError{
 				msg: fmt.Sprintf("the eval stage still found problems after %s; the last attempt is on %s", tried, branch),
@@ -463,8 +465,7 @@ func (r *Runner) runPipeline(ctx context.Context, wt string, issue Issue, branch
 	if _, err := git(ctx, wt, "reset", "--soft", "origin/"+base); err != nil {
 		return "", "", err
 	}
-	title := fmt.Sprintf("Fix #%d: %s", n, issue.Title)
-	if _, err := git(ctx, wt, "commit", "-m", title, "-m", fmt.Sprintf("Closes #%d", n)); err != nil {
+	if _, err := git(ctx, wt, "commit", "-m", prTitle(issue), "-m", fmt.Sprintf("Closes #%d", n)); err != nil {
 		return "", "", err
 	}
 	if p.Eval == nil {
