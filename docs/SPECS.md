@@ -36,7 +36,7 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened, and merged
 | `amf init` | Writes `./.env` and creates the labels (see below). |
 | `amf issue "Title" [-b body \| -f file \| -f -] [--label L] [--no-label]` | Creates an issue labeled `amf:ready` (or `--label`'s label; none with `--no-label`). The body can also come from stdin when it's piped; `-b` and `-f` together are an error. Prints `#N <url>`. |
 | `amf list [--state open\|closed\|all] [--label L] [--limit N] [--json]` | Lists issues, newest first (highest number first), with every page fetched and PRs left out. Columns: `ISSUE`, `STATE` (with `--state all` only), `AMF` (the issue's `amf` and `amf:*` labels, or `-`) and `TITLE`. `--limit N` (default `0`, no limit) prints only the first N issues after filtering; a negative value errors with `--limit must be 0 or more, got N`. Tabs in a title print as spaces. `--state` takes only `open`, `closed` or `all`. Prints `No … in owner/name.` when nothing matches. `--json` (default `false`) prints instead one JSON array and a newline, with no header: one object per issue, in the same order and after the same filters and limit, with exactly `number` (integer), `title`, `state`, `url` (the issue's GitHub page) and `labels` (every label name, in GitHub's order, `[]` when none); titles are kept as GitHub sent them, tabs included. Nothing matching prints `[]`. On an error nothing is printed to stdout, and a failure to write stdout is an error. Needs no git checkout. |
-| `amf run <N> [--agent A] [--agent-timeout 60m] [--eval-rounds 2] [--draft] [--merge[=squash\|rebase]] [--log-level L] [--log-file P]` | Processes issue N (`42` or `#42`) once. |
+| `amf run <N> [--agent A] [--agent-timeout 60m] [--eval-rounds 2] [--dry-run] [--draft] [--merge[=squash\|rebase]] [--log-level L] [--log-file P]` | Processes issue N (`42` or `#42`) once. |
 | `amf watch [--agent A] [--interval 60s] [--label amf:ready] [--exclude-label L]... [--agent-timeout 60m] [--eval-rounds 2] [--draft] [--merge[=squash\|rebase]] [--log-level L] [--log-file P]` | Polls open issues with the label (every page), oldest first by issue number (GitHub's `created_at` can tie for issues opened in the same second), and processes them one at a time until interrupted, skipping any issue that has one of the `--exclude-label` labels. |
 | `amf pipeline [--fetch]` | Checks the pipeline in `AGENTS.md` of the enclosing checkout, as it is on disk. See below. |
 | `amf doctor` | Checks the whole setup, one line per check, changing nothing. See below. |
@@ -90,6 +90,11 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened, and merged
   rebase, got "<value>"`, both at startup. `--merge` with `--draft` fails
   at startup with `--draft and --merge can't be used together: GitHub doesn't
   merge draft pull requests`.
+- `--dry-run` (`run` only; default off) makes the change on the local
+  `amf/issue-N` branch and prints the pull request amf would open, without
+  changing anything on GitHub: no label, comment, push, PR or merge. See
+  [Dry run](#dry-run-amf-run---dry-run). `watch` doesn't take it, since it
+  would redo every queued issue on each poll.
 - **Event log.** Besides its `amf: …` lines on stderr, each `run` and
   `watch` process writes an event log: one JSON object per line, with
   `time`, `level`, `msg`, `run_id` and, for a line about an issue, `issue`.
@@ -494,6 +499,39 @@ work. Starter skills are in this repo under `skills/`.
 number of code rounds, with the review in a collapsed block. With a plan
 stage, the plan in a collapsed block.
 
+### Dry run (`amf run --dry-run`)
+
+amf only reads from GitHub: the issue, the repo and the branch's open PR.
+
+1. **Preflight, Checkout and Check** run as in steps 1 to 3, and stop the
+   run in the same cases.
+2. **No claim.** The issue's labels aren't touched, so it stays as it was
+   (`amf:ready`, say). The trust check of step 4 still runs, since the
+   agent still runs the issue's text, and an untrusted author fails the
+   run.
+3. **Worktree, Agent and Commit** (steps 5 to 7, or the pipeline's steps)
+   run as usual, with the same logs and files in `.amf/`, the same
+   `.github/` refusal, and the change committed on the local
+   `amf/issue-N` branch. A pipeline whose eval never passes doesn't push
+   its last attempt.
+4. **Report.** amf asks GitHub for the branch's open PR, then prints
+   `#N: dry run: committed <commit> on the local branch amf/issue-N; amf
+   would push it and <what>`, where `<what>` is `open a pull request into
+   <default>` (`a draft pull request` with `--draft`) or `update <PR URL>`
+   for a retry. With `--merge` it adds `, and merge it (<method>) if GitHub
+   allows`, or `, but not merge it: <reason>` for a change to the
+   top-level `AGENTS.md`. Then it prints the change's `git diff --stat`
+   against `origin/<default>`, `Title: Fix #N: <title>`, the PR body as
+   step 9 would post it, and `Nothing was pushed, and the issue and GitHub
+   are unchanged. To see the change: git diff origin/<default>
+   amf/issue-N`.
+5. **Clean up.** The worktree is removed. The local branch and the logs are
+   kept. A later run, dry or not, resets the branch to `origin/<default>`.
+
+A dry run that fails exits 1 with the error, and leaves the issue as it
+was: no label and no comment. Its worktree is kept for inspection, except
+after `--agent-timeout`, which removes it as usual.
+
 **On failure** in any step after Claim, up to opening the PR (a failed
 merge doesn't count; see step 11): set `amf:failed`, comment the error on
 the issue, and keep the worktree and logs for inspection. This also happens if
@@ -608,8 +646,9 @@ event log opens, are not. The fields of each event, besides those:
 | `issue.merge` | info, warn, debug | `action`, `method`, `number`: `merging` (info) with `sha`, then `merged` (info) with `commit` (GitHub's merge commit) and `attempts`, or `failed` (warn) with `error`; `retry` (debug) with `attempt` and `error` when GitHub said not mergeable yet |
 | `issue.comment` | debug | `bytes`; warn with `error` when posting failed |
 | `issue.cleanup` | warn | `error`: a worktree that couldn't be removed or pruned |
-| `issue.done` | debug | `pr`: its number |
-| `issue.failed` | debug, info | `reason` (`agent_timeout` at info, with `stage`; `stage` for a stage's own failure such as a blocked plan or an untrusted author; else `error`), `error` |
+| `issue.done` | debug | `pr`: its number; `dry_run: true` instead after a dry run |
+| `issue.dry_run` | info | `branch`, `base`, `head` (the local commit), `files` (the paths it changes), `action` (`open` or `update`), `url` (the PR to update, or `""`), `draft`, `merge` (the method, `off`, or `refused` with `merge_error`), `title`, `body` |
+| `issue.failed` | debug, info | `reason` (`agent_timeout` at info, with `stage`; `stage` for a stage's own failure such as a blocked plan or an untrusted author; else `error`), `error`, and `dry_run: true` in a dry run |
 | `github.call` | debug | One per GitHub API request: `method`, `path` with `{repo}`, `{n}` and `{label}` in place of the repo, numbers and label names, `status` (0 when there was no response), `duration_ms`, `bytes_out` (request body), `bytes_in` (response body read), `ratelimit_remaining`, `ratelimit_reset`, `request_id` (GitHub's headers, `""` when absent), `page` for a later page of a list, and `error_body` (the first 512 bytes of an error response) or `error`. The token is never logged |
 | `git.exec` | debug | One per git command: `subcommand`, `args` (a commit message cut to 80 characters), `dir`, `exit_code` (-1 when git didn't start), `duration_ms`, `stdout_bytes`, `stderr_bytes`, and on failure `stderr` (its first 512 bytes) |
 | `git.push` | debug | After `git.exec` for a push: `branch`, `forced`, `exit_code` |
@@ -667,6 +706,7 @@ get without it. Other commands don't log there.
 
 - Agents run with every permission check off. An issue's body is effectively
   code run on the user's machine, so label only issues you trust.
+  `--dry-run` changes nothing on GitHub, but runs the agents just the same.
 - Labels need triage access, but amf reads the issue's text when it runs,
   not when it was labeled, so its author can change it in between.
   `AMF_TRUSTED` limits amf to issues opened by the listed users. Other

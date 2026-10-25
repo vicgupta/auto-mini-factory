@@ -47,7 +47,7 @@ Usage:
   amf init                                                           write .env (backing up an existing one) and create amf's labels
   amf issue "Title" [-b body | -f file.md] [--label L] [--no-label]  create an issue (body may also come from stdin)
   amf list [--state open|closed|all] [--label L] [--limit N]         list issues, newest first, with their amf labels (also takes --json)
-  amf run <issue-number> [--agent A] [--agent-timeout 60m]           process one issue into a PR (also takes --draft, --merge, --eval-rounds, --log-level, --log-file)
+  amf run <issue-number> [--agent A] [--agent-timeout 60m]           process one issue into a PR (also takes --draft, --dry-run, --merge, --eval-rounds, --log-level, --log-file)
   amf watch [--agent A] [--interval 60s] [--label amf:ready]         process amf:ready issues as they arrive (also takes --exclude-label, --draft, --merge, --agent-timeout, --eval-rounds, --log-level, --log-file)
   amf pipeline [--fetch]                                             check the plan/code/eval pipeline in this checkout's AGENTS.md
   amf doctor                                                         check the setup here, one line per check, changing nothing
@@ -76,6 +76,10 @@ Configuration is read from .env (or the environment):
 --merge makes run and watch merge each PR they open or update, without
 review: a merge commit, or --merge=squash or --merge=rebase. A merge GitHub
 refuses (a conflict, required checks or reviews) leaves the PR open.
+
+amf run --dry-run makes the change on the local amf/issue-N branch and prints
+the pull request it would open, without labeling, commenting, pushing,
+opening a PR or merging.
 
 run and watch work in the enclosing git checkout. Started anywhere else, they
 clone GITHUB_REPO into ./<name> (or reuse that clone) and work there.
@@ -198,6 +202,7 @@ func cmdRun(ctx context.Context, args []string, stderr io.Writer) error {
 	agent := fs.String("agent", "", agentFlagHelp)
 	draft := fs.Bool("draft", false, draftFlagHelp)
 	merge := addMergeFlag(fs)
+	dryRun := fs.Bool("dry-run", false, "make the change on the local branch only: no label, comment, push, PR or merge")
 	lo := addLogFlags(fs)
 	pos, err := parseArgs(fs, args)
 	if err != nil {
@@ -210,7 +215,7 @@ func cmdRun(ctx context.Context, args []string, stderr io.Writer) error {
 		return errDraftMerge
 	}
 	if len(pos) != 1 {
-		fmt.Fprintln(stderr, "usage: amf run <issue-number> [--agent claudecode|codex|opencode] [--agent-timeout 60m] [--eval-rounds 2] [--draft] [--merge[=squash|rebase]]")
+		fmt.Fprintln(stderr, "usage: amf run <issue-number> [--agent claudecode|codex|opencode] [--agent-timeout 60m] [--eval-rounds 2] [--dry-run] [--draft] [--merge[=squash|rebase]]")
 		return errUsage
 	}
 	timeout, err := timeoutFlag(fs, at, alias)
@@ -231,6 +236,7 @@ func cmdRun(ctx context.Context, args []string, stderr io.Writer) error {
 	defer r.Close()
 	r.Draft = *draft
 	r.Merge = merge.value
+	r.DryRun = *dryRun
 	err = redactErr(r.Redact, r.Run(ctx, n))
 	r.DB.logError(err)
 	return err

@@ -206,6 +206,8 @@ type fakeGitHub struct {
 	// mergeErrs are the errors the next merges get, one each, before
 	// merges succeed again.
 	mergeErrs []fakeError
+	// writes is every request that isn't a GET, as "METHOD path".
+	writes []string
 }
 
 type fakeError struct {
@@ -424,6 +426,11 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
 		if r.Header.Get("Authorization") != "Bearer test-token" {
 			writeJSON(w, 401, map[string]string{"message": "Bad credentials"})
 			return
+		}
+		if r.Method != "GET" {
+			f.mu.Lock()
+			f.writes = append(f.writes, r.Method+" "+r.URL.Path)
+			f.mu.Unlock()
 		}
 		mux.ServeHTTP(w, r)
 	}))
