@@ -17,7 +17,7 @@ pipeline needs whichever agents it names.
 ## Issue lifecycle
 
 ```
-amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened)
+amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened, and merged with --merge)
                        └────────▶ amf:failed  (reason commented)
 ```
 
@@ -36,8 +36,8 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened)
 | `amf init` | Writes `./.env` and creates the labels (see below). |
 | `amf issue "Title" [-b body \| -f file \| -f -] [--label L] [--no-label]` | Creates an issue labeled `amf:ready`. The body can also come from stdin when it's piped. Prints `#N <url>`. |
 | `amf list [--state open\|closed\|all] [--label L] [--limit N] [--json]` | Lists issues, newest first (highest number first), with every page fetched and PRs left out. Columns: `ISSUE`, `STATE` (with `--state all` only), `AMF` (the issue's `amf` and `amf:*` labels, or `-`) and `TITLE`. `--limit N` (default `0`, no limit) prints only the first N issues after filtering; a negative value errors with `--limit must be 0 or more, got N`. Prints `No … in owner/name.` when nothing matches. `--json` (default `false`) prints instead one JSON array and a newline, with no header: one object per issue, in the same order and after the same filters and limit, with exactly `number` (integer), `title`, `state`, `url` (the issue's GitHub page) and `labels` (every label name, in GitHub's order, `[]` when none); titles are kept as GitHub sent them, tabs included. Nothing matching prints `[]`. On an error nothing is printed to stdout, and a failure to write stdout is an error. Needs no git checkout. |
-| `amf run <N> [--agent A] [--agent-timeout 60m] [--eval-rounds 2] [--draft] [--log-level L] [--log-file P]` | Processes issue N once. |
-| `amf watch [--agent A] [--interval 60s] [--label amf:ready] [--exclude-label L]... [--agent-timeout 60m] [--eval-rounds 2] [--draft] [--log-level L] [--log-file P]` | Polls open issues with the label (every page), oldest first by issue number (GitHub's `created_at` can tie for issues opened in the same second), and processes them one at a time until interrupted, skipping any issue that has one of the `--exclude-label` labels. |
+| `amf run <N> [--agent A] [--agent-timeout 60m] [--eval-rounds 2] [--draft] [--merge[=squash\|rebase]] [--log-level L] [--log-file P]` | Processes issue N once. |
+| `amf watch [--agent A] [--interval 60s] [--label amf:ready] [--exclude-label L]... [--agent-timeout 60m] [--eval-rounds 2] [--draft] [--merge[=squash\|rebase]] [--log-level L] [--log-file P]` | Polls open issues with the label (every page), oldest first by issue number (GitHub's `created_at` can tie for issues opened in the same second), and processes them one at a time until interrupted, skipping any issue that has one of the `--exclude-label` labels. |
 | `amf pipeline [--fetch]` | Checks the pipeline in `AGENTS.md` of the enclosing checkout, as it is on disk. See below. |
 | `amf doctor` | Checks the whole setup, one line per check, changing nothing. See below. |
 | `amf update [--version vX.Y.Z] [--check]` | Replaces the running binary with the latest release, or with the given one, which can be a downgrade. Needs no `.env`. See below. |
@@ -79,6 +79,16 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened)
   pipeline. A retry that updates the branch's open PR leaves it a draft or
   ready for review as it was, whatever the flag says; amf never converts a
   PR either way, and marking a draft ready for review is up to you.
+- `--merge` makes `run` and `watch` merge each PR they open or update (step
+  11 below), without review. Off by default. Bare `--merge` (or
+  `--merge=true`, or `--merge=merge`) makes a merge commit; `--merge=squash`
+  squashes and `--merge=rebase` rebases, as GitHub's merge button does, and
+  `--merge=false` turns it off. The method needs the `=`: `--merge squash`
+  fails with `--merge takes its method after =: --merge=squash, not --merge
+  squash`, and any other method with `--merge: want merge, squash or
+  rebase, got "<value>"`, both at startup. `--merge` with `--draft` fails
+  at startup with `--draft and --merge can't be used together: GitHub doesn't
+  merge draft pull requests`.
 - **Event log.** Besides its `amf: …` lines on stderr, each `run` and
   `watch` process writes an event log: one JSON object per line, with
   `time`, `level`, `msg`, `run_id` and, for a line about an issue, `issue`.
@@ -390,10 +400,38 @@ work. Starter skills are in this repo under `skills/`.
    `Co-Authored-By`) and the agent's own `Closes`/`Fixes`/`Resolves #N` line
    from the summary, and the attribution lines from the plan and review too.
    That way each PR is credited to the user alone and closes the issue once.
-10. **Finish.** Set `amf:done`, comment `amf opened <PR URL> for this
-    issue.` (`updated` for a retry's PR), and remove the worktree. The branch
-    and logs are kept. The PR exists by now, so if setting the label or
-    commenting fails, amf logs a warning and the run still succeeds.
+10. **Clean up.** Remove the worktree. The branch and logs are kept.
+11. **Merge** (with `--merge` only). Merge the PR with the method `--merge`
+    names, through GitHub's merge API, pinned to the commit amf pushed
+    (`sha`), so GitHub refuses if the branch changed since. GitHub's default
+    commit title and message are used, and the branch isn't deleted.
+    - A change to `AGENTS.md` at the top level, where the pipeline is
+      declared, is never merged: amf fails the merge with `the change edits
+      AGENTS.md, which declares amf's pipeline, so amf leaves it for review`
+      without calling GitHub. An `AGENTS.md` in a subdirectory is fine.
+    - GitHub can answer 405 `Pull Request is not mergeable` while it is
+      still working out whether a new PR merges cleanly, so on that answer
+      amf asks up to 3 times in all, 5 seconds apart. A conflict gets the
+      same answer, so it fails after the third. Any other refusal (a
+      required check or review, a merge method the repo doesn't allow, a
+      changed branch, a retry's PR left a draft by an earlier `--draft`
+      run) is final at once.
+    - amf doesn't wait for checks to finish. With branch protection that
+      requires them, the merge fails and the PR stays open.
+12. **Finish.** Set `amf:done` and comment on the issue:
+    - without `--merge`: `amf opened <PR URL> for this issue.` (`updated`
+      for a retry's PR);
+    - merged: `amf opened <PR URL> for this issue and merged it.` (`squashed
+      and merged`, `rebased and merged`); the PR's `Closes #N` then closes
+      the issue;
+    - not merged: `amf opened <PR URL> for this issue, but could not merge
+      it:`, the reason in a code block, and that the PR is still open for
+      review. The issue is still `amf:done`, but `run` exits 1 with `opened
+      <PR URL> but could not merge it: <reason>`, and `watch` logs that as
+      a failure and goes on.
+
+    The PR exists by now, so if setting the label or commenting fails, amf
+    logs a warning and the run still succeeds.
 
 ### With a pipeline
 
@@ -446,7 +484,8 @@ work. Starter skills are in this repo under `skills/`.
 number of code rounds, with the review in a collapsed block. With a plan
 stage, the plan in a collapsed block.
 
-**On failure** in any step after Claim, up to opening the PR: set `amf:failed`, comment the error on
+**On failure** in any step after Claim, up to opening the PR (a failed
+merge doesn't count; see step 11): set `amf:failed`, comment the error on
 the issue, and keep the worktree and logs for inspection. This also happens if
 the run is interrupted — except that a run that hit `--agent-timeout` leaves
 the worktree (removed, with its branch unpushed) and keeps only the logs and
@@ -529,7 +568,7 @@ event log opens, are not. The fields of each event, besides those:
 | `pg.retry` | debug | `attempt` (since the last success), `backoff`, `error` |
 | `pg.drop` | debug | `rows` that never reached the database, and `error` when amf gave up at exit |
 | `checkout.resolve` | debug | `how` (`checkout`, `clone` for a clone reused, `cloned`), `dir` |
-| `watch.start` | info | `repo`, `label`, `exclude_labels` (the `--exclude-label` values, `[]` when none), `interval`, `timeout`, `eval_rounds`, `draft`, `agent_flag`, `version` |
+| `watch.start` | info | `repo`, `label`, `exclude_labels` (the `--exclude-label` values, `[]` when none), `interval`, `timeout`, `eval_rounds`, `draft`, `merge` (the method, or `off`), `agent_flag`, `version`; with `--merge` the line adds `, merging each PR without review (<method>)` |
 | `watch.agents` | info | The heading line has none; one per agent with `agent`, `path`, `key` (the variable's name, never its value, or `saved login` for opencode's own), `usable`, `model`; then `picked`, or `error` (warn) when none is usable |
 | `watch.tick` | debug | `cycle` (1 for the first poll), `issues`: how many the poll returned; warn with `error` when listing failed |
 | `watch.skip` | debug | `reason`: `pr`, `closed`, `in_progress` or `status_label` (done or failed without `amf:ready`), checked first; or `excluded_label`, with `label`: the first `--exclude-label` value the issue has |
@@ -555,6 +594,7 @@ event log opens, are not. The fields of each event, besides those:
 | `agent.timeout` | warn | `agent`, `stage`, `limit`, `elapsed`, `grace`, `pgid`, `bytes` (stdout so far), `log` |
 | `issue.push` | info | `branch` |
 | `issue.pr` | info | `action` (`opened`, `updated`, or `updating` when the branch has an open PR), `number`, `url` |
+| `issue.merge` | info, warn, debug | `action`, `method`, `number`: `merging` (info) with `sha`, then `merged` (info) with `commit` (GitHub's merge commit) and `attempts`, or `failed` (warn) with `error`; `retry` (debug) with `attempt` and `error` when GitHub said not mergeable yet |
 | `issue.comment` | debug | `bytes`; warn with `error` when posting failed |
 | `issue.cleanup` | warn | `error`: a worktree that couldn't be removed or pruned |
 | `issue.done` | debug | `pr`: its number |
@@ -621,7 +661,14 @@ get without it. Other commands don't log there.
   Comments are never read.
 - A skill is instructions run the same way. Reference only skills you
   control or have reviewed, at a tag or commit, ideally with a `sha256` pin.
-  The pipeline itself changes only through a merge to the default branch.
+  The pipeline itself changes only through a merge to the default branch,
+  which `--merge` never makes for a change to the top-level `AGENTS.md`.
+- `--merge` puts what an agent wrote on the default branch with no human
+  review, and the next issue starts from it. Use it only where the issue
+  text and the agents are trusted, and let branch protection's required
+  checks and reviews stand between amf and the branch if you want them:
+  amf merges only what GitHub allows. The `.github/` refusal (step 7)
+  still applies, so no workflow change is ever pushed.
 - No agent gets `GITHUB_TOKEN`, but agents can read local files, including
   `.env` (and so `AMF_POSTGRES_URL`'s password).
 - With `AMF_POSTGRES_URL` set, everything the agents print, which can

@@ -544,7 +544,7 @@ func commitRound(ctx context.Context, wt string, k int, base string, s *Stage) e
 			return err
 		}
 	}
-	changed, err := changedPaths(ctx, wt, base)
+	changed, err := changedPaths(ctx, wt, base, "HEAD")
 	if err != nil {
 		return err
 	}

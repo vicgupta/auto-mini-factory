@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -75,8 +76,14 @@ type Runner struct {
 	// ExcludeLabels, from watch's --exclude-label, makes watch skip issues
 	// with any of these labels, leaving them as they are.
 	ExcludeLabels []string
-	HTTP          *http.Client // for downloading skills; nil means a default client
-	Log           io.Writer    // progress output
+	// Merge, from --merge, is how amf merges each PR it opens or updates:
+	// merge, squash or rebase. "" leaves the PR for review.
+	Merge string
+	// MergeRetry is how long amf waits before asking GitHub again to merge a
+	// PR it reports as not mergeable yet, in tests small. 0 means mergeRetry.
+	MergeRetry time.Duration
+	HTTP       *http.Client // for downloading skills; nil means a default client
+	Log        io.Writer    // progress output
 	// DB, when set, also gets every agent's output; Log already sends it
 	// amf's own lines.
 	DB *dbLog
@@ -160,7 +167,8 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 		return err
 	}
 	defer func() {
-		if err == nil {
+		// A PR amf couldn't merge is still open, so the issue stays done.
+		if err == nil || errors.As(err, new(*mergeError)) {
 			return
 		}
 		// Report even if ctx was cancelled (e.g. Ctrl-C), but don't hang on it.
@@ -214,13 +222,26 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 	}
 	r.event(slog.LevelInfo, "issue.pr", n, fmt.Sprintf("#%d: %s %s", n, verb, pr.HTMLURL),
 		"action", verb, "number", pr.Number, "url", pr.HTMLURL)
+	msg := fmt.Sprintf("amf %s %s for this issue.", verb, pr.HTMLURL)
+	var merr error
+	if r.Merge != "" {
+		if merr = r.mergePR(ctx, n, base, pr); merr != nil {
+			msg = fmt.Sprintf("amf %s %s for this issue, but could not merge it:\n\n```\n%s\n```\n\n"+
+				"The pull request is still open for you to review and merge.", verb, pr.HTMLURL, merr)
+		} else {
+			msg = fmt.Sprintf("amf %s %s for this issue and %s it.", verb, pr.HTMLURL, mergedVerb[r.Merge])
+		}
+	}
 	if err := r.setStatus(ctx, n, labelDone); err != nil {
 		r.event(slog.LevelWarn, "issue.status", n, fmt.Sprintf("#%d: could not set %s: %v", n, labelDone, err), "to", labelDone, "error", err)
 	} else {
 		r.statusEvent(n, labelInProgress, labelDone)
 	}
-	r.comment(ctx, n, fmt.Sprintf("amf %s %s for this issue.", verb, pr.HTMLURL))
+	r.comment(ctx, n, msg)
 	r.event(slog.LevelDebug, "issue.done", n, fmt.Sprintf("#%d: done", n), "pr", pr.Number)
+	if merr != nil {
+		return &mergeError{url: pr.HTMLURL, err: merr}
+	}
 	return nil
 }
 
@@ -307,6 +328,10 @@ func (r *Runner) process(ctx context.Context, issue Issue, base string, p *Pipel
 	if _, err := git(ctx, wt, "push", "--force", "-u", "origin", branch); err != nil {
 		return PullRequest{}, false, err
 	}
+	head, err := git(ctx, wt, "rev-parse", "HEAD")
+	if err != nil {
+		return PullRequest{}, false, err
+	}
 
 	summary = cleanSummary(summary, n)
 	if summary == "" {
@@ -331,6 +356,7 @@ func (r *Runner) process(ctx context.Context, issue Issue, base string, p *Pipel
 	if err != nil {
 		return PullRequest{}, false, err
 	}
+	pr.Head = head
 
 	if _, err := git(ctx, r.Root, "worktree", "remove", wt); err != nil {
 		r.event(slog.LevelWarn, "issue.cleanup", n, fmt.Sprintf("#%d: could not remove worktree: %v", n, err), "error", err)
@@ -397,7 +423,7 @@ func commitAll(ctx context.Context, wt, title string, n int, base, agent string)
 	}
 	// The agent may have committed on its own despite the prompt, so compare
 	// trees rather than look for amf's commit.
-	changed, err := changedPaths(ctx, wt, base)
+	changed, err := changedPaths(ctx, wt, base, "HEAD")
 	if err != nil {
 		return err
 	}
@@ -407,11 +433,11 @@ func commitAll(ctx context.Context, wt, title string, n int, base, agent string)
 	return pathRefusal(changed)
 }
 
-// changedPaths lists the paths HEAD changes relative to origin/base. -z
+// changedPaths lists the paths rev changes relative to origin/base. -z
 // keeps git from quoting unusual names, and --no-renames lists both sides
 // of a move, so neither can hide a path from pathRefusal.
-func changedPaths(ctx context.Context, wt, base string) ([]string, error) {
-	out, err := git(ctx, wt, "diff", "--name-only", "--no-renames", "-z", "origin/"+base, "HEAD")
+func changedPaths(ctx context.Context, dir, base, rev string) ([]string, error) {
+	out, err := git(ctx, dir, "diff", "--name-only", "--no-renames", "-z", "origin/"+base, rev)
 	if err != nil {
 		return nil, err
 	}
@@ -610,9 +636,13 @@ func (r *Runner) Watch(ctx context.Context, label string, interval time.Duration
 	if len(r.ExcludeLabels) > 0 {
 		except = fmt.Sprintf(", except those labeled %q", r.ExcludeLabels)
 	}
-	r.event(slog.LevelInfo, "watch.start", 0, fmt.Sprintf("watching %s for issues labeled %q%s every %s (Ctrl-C to stop)", r.Repo, label, except, interval),
+	merging := ""
+	if r.Merge != "" {
+		merging = fmt.Sprintf(", merging each PR without review (%s)", r.Merge)
+	}
+	r.event(slog.LevelInfo, "watch.start", 0, fmt.Sprintf("watching %s for issues labeled %q%s every %s%s (Ctrl-C to stop)", r.Repo, label, except, interval, merging),
 		"repo", r.Repo, "label", label, "exclude_labels", append([]string{}, r.ExcludeLabels...), "interval", interval.String(), "timeout", r.Timeout.String(),
-		"eval_rounds", r.EvalRounds, "draft", r.Draft, "agent_flag", agentName(r.Agent), "version", buildVersion())
+		"eval_rounds", r.EvalRounds, "draft", r.Draft, "merge", cmp.Or(r.Merge, "off"), "agent_flag", agentName(r.Agent), "version", buildVersion())
 	r.event(slog.LevelInfo, "watch.agents", 0, "agents for issues without a pipeline (claude and codex need a key, opencode one for a paid model):")
 	for _, st := range r.agentStatuses() {
 		r.event(slog.LevelInfo, "watch.agents", 0, "  "+st.describe(),
