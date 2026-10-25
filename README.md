@@ -170,6 +170,8 @@ amf watch --agent codex     # ...with Codex, even if Claude Code is installed
 amf watch --exclude-label blocked --exclude-label needs-human  # ...leaving issues with either label alone until it's removed
 amf run 42 --draft          # open the PR as a draft
 amf watch --draft           # ...opening each new PR as a draft
+amf run 42 --merge          # ...and merge its PR with a merge commit
+amf watch --merge=squash    # squash and merge each PR (or --merge=rebase)
 ```
 
 ### Choosing the agent
@@ -234,6 +236,13 @@ Without a pipeline (see below), amf runs one agent once. With Claude Code:
    instead, and leaves it a draft or ready for review as it was.
 6. Comments the PR link on the issue, labels it `amf:done` (a draft PR
    counts), removes the worktree.
+
+With `--merge`, amf also merges the PR before commenting, with a merge commit
+(or `--merge=squash`, `--merge=rebase`), pinned to the commit it pushed. It
+doesn't wait for checks, so with required checks or reviews GitHub refuses
+and the PR stays open; amf comments why, and `amf run` exits 1. amf never
+merges a change to the top-level `AGENTS.md`, which holds the pipeline.
+`--merge` can't be combined with `--draft`, since GitHub doesn't merge drafts.
 
 On any failure the issue gets `amf:failed` plus a comment with the reason,
 and the worktree is kept for inspection. A run that hit the agent timeout
@@ -376,6 +385,9 @@ code you're executing on your machine.
   isolation, run amf in a container or VM.
 - A pipeline's skills are instructions run the same way. Use skills you
   control or have reviewed, at a tag, ideally pinned with `#sha256=`.
+- `--merge` puts agent-written code on your default branch with no review.
+  Use it only with issues and agents you trust, and keep branch protection's
+  required checks if you want them to gate the merge.
 
 ## Spec
 

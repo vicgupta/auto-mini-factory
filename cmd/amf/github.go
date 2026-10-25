@@ -61,6 +61,9 @@ func (is Issue) HasLabel(name string) bool {
 type PullRequest struct {
 	Number  int    `json:"number"`
 	HTMLURL string `json:"html_url"`
+	// Head is the commit amf pushed, which --merge pins the merge to; amf
+	// sets it from git rather than reading GitHub's head.sha.
+	Head string `json:"-"`
 }
 
 // APIError is a non-2xx response from GitHub.
@@ -348,6 +351,21 @@ func (g *GitHub) OpenPR(ctx context.Context, head string) (pr PullRequest, ok bo
 		return PullRequest{}, false, nil
 	}
 	return prs[0], true, nil
+}
+
+// MergePR merges pull request n with method (merge, squash or rebase) and
+// returns the commit it made. With sha set, GitHub refuses (409) unless the
+// PR's head is still that commit.
+func (g *GitHub) MergePR(ctx context.Context, n int, method, sha string) (string, error) {
+	in := map[string]any{"merge_method": method}
+	if sha != "" {
+		in["sha"] = sha
+	}
+	var out struct {
+		SHA string `json:"sha"`
+	}
+	err := g.do(ctx, "PUT", g.repoPath("/pulls/%d/merge", n), in, &out)
+	return out.SHA, err
 }
 
 // UpdatePR replaces a pull request's title and body, leaving it a draft or

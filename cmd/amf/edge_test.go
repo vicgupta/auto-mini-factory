@@ -2402,3 +2402,125 @@ func TestListJSONWriteError(t *testing.T) {
 		t.Errorf("err = %v, want disk full", err)
 	}
 }
+
+// A merge GitHub refuses, such as for a required check, leaves the PR open
+// and the issue done, and run fails with why.
+func TestMergeRefusedLeavesPROpen(t *testing.T) {
+	root, _ := setupRepo(t)
+	gh, srv := newFakeGitHub(t)
+	gh.issues[1] = &Issue{Number: 1, Title: "Add feature file", State: "open", Labels: []Label{{Name: "amf:ready"}}}
+	gh.mergeErrs = []fakeError{{405, `Required status check "ci" is expected.`}}
+	r, _ := newTestRunner(t, srv, root, fakeClaude(t, `cat >/dev/null; echo hello > feature.txt; echo done`))
+	r.Merge = "merge"
+
+	err := r.Run(context.Background(), 1)
+	var me *mergeError
+	if !errors.As(err, &me) || !strings.Contains(err.Error(), "could not merge it") || !strings.Contains(err.Error(), "Required status check") {
+		t.Fatalf("Run = %v, want a merge error naming the check", err)
+	}
+	if pr := gh.prs[0]; pr["state"] != "open" || pr["merge_attempts"] != "x" {
+		t.Fatalf("PR = %v, want it open after one attempt (a required check isn't retried)", pr)
+	}
+	if got, want := gh.labels(1), []string{"amf:done"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("labels = %v, want %v", got, want)
+	}
+	if c := gh.comments[1]; len(c) != 1 || !strings.Contains(c[0], "but could not merge it") || !strings.Contains(c[0], `Required status check "ci" is expected.`) {
+		t.Fatalf("comments = %q", c)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".amf", "worktrees", "issue-1")); !os.IsNotExist(err) {
+		t.Fatalf("worktree should be removed once the PR exists, stat err = %v", err)
+	}
+}
+
+// Right after a push GitHub can call a PR not mergeable while it works out
+// whether it is; amf asks again, up to mergeAttempts times.
+func TestMergeRetriesNotMergeable(t *testing.T) {
+	for _, tc := range []struct {
+		fails    int
+		merged   bool
+		attempts string
+	}{
+		{fails: 1, merged: true, attempts: "xx"},
+		{fails: mergeAttempts, merged: false, attempts: strings.Repeat("x", mergeAttempts)},
+	} {
+		root, _ := setupRepo(t)
+		gh, srv := newFakeGitHub(t)
+		gh.issues[1] = &Issue{Number: 1, Title: "Add feature file", State: "open"}
+		for range tc.fails {
+			gh.mergeErrs = append(gh.mergeErrs, fakeError{405, "Pull Request is not mergeable"})
+		}
+		r, _ := newTestRunner(t, srv, root, fakeClaude(t, `cat >/dev/null; echo hello > feature.txt; echo done`))
+		r.Merge, r.MergeRetry = "squash", time.Millisecond
+
+		err := r.Run(context.Background(), 1)
+		if pr := gh.prs[0]; (pr["state"] == "merged") != tc.merged || pr["merge_attempts"] != tc.attempts {
+			t.Fatalf("%d failures: PR = %v, want merged %v after %d attempts", tc.fails, pr, tc.merged, len(tc.attempts))
+		}
+		if (err == nil) != tc.merged {
+			t.Fatalf("%d failures: Run = %v", tc.fails, err)
+		}
+	}
+}
+
+// --merge never merges a change to AGENTS.md: it declares the pipeline, so
+// one issue's agent could otherwise pick what runs every later issue.
+func TestMergeRefusesAgentsMD(t *testing.T) {
+	root, _ := setupRepo(t)
+	gh, srv := newFakeGitHub(t)
+	gh.issues[1] = &Issue{Number: 1, Title: "Change the pipeline", State: "open"}
+	r, _ := newTestRunner(t, srv, root, fakeClaude(t, `cat >/dev/null; echo '# agents' > AGENTS.md; echo done`))
+	r.Merge = "merge"
+
+	err := r.Run(context.Background(), 1)
+	if err == nil || !strings.Contains(err.Error(), "edits AGENTS.md") {
+		t.Fatalf("Run = %v, want the AGENTS.md refusal", err)
+	}
+	if pr := gh.prs[0]; pr["state"] != "open" || pr["merge_attempts"] != "" {
+		t.Fatalf("PR = %v, want it open with no merge attempted", pr)
+	}
+	if got, want := gh.labels(1), []string{"amf:done"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("labels = %v, want %v", got, want)
+	}
+
+	// An AGENTS.md below the top level declares no pipeline, so it merges.
+	gh.issues[2] = &Issue{Number: 2, Title: "Docs", State: "open"}
+	r.Claude = fakeClaude(t, `cat >/dev/null; mkdir -p docs; echo '# agents' > docs/AGENTS.md; echo done`)
+	if err := r.Run(context.Background(), 2); err != nil {
+		t.Fatalf("Run #2: %v", err)
+	}
+	if pr := gh.prs[1]; pr["state"] != "merged" {
+		t.Fatalf("PR #2 = %v, want it merged", pr)
+	}
+}
+
+// watch merges each PR it opens with --merge, and says so when it starts.
+func TestWatchMerges(t *testing.T) {
+	root, _ := setupRepo(t)
+	gh, srv := newFakeGitHub(t)
+	gh.issues[1] = &Issue{Number: 1, Title: "One", State: "open", Labels: []Label{{Name: "amf:ready"}}}
+	r, log := newTestRunner(t, srv, root, fakeClaude(t, `cat >/dev/null; date > out.txt; echo ok`))
+	r.Merge = "rebase"
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error)
+	go func() { done <- r.Watch(ctx, "amf:ready", 50*time.Millisecond) }()
+	deadline := time.Now().Add(10 * time.Second)
+	for !slices.Contains(gh.labels(1), "amf:done") {
+		if time.Now().After(deadline) {
+			t.Fatalf("issue 1 never processed; log:\n%s", log)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	gh.mu.Lock()
+	defer gh.mu.Unlock()
+	if pr := gh.prs[0]; pr["state"] != "merged" || pr["merge_method"] != "rebase" {
+		t.Fatalf("PR = %v, want it rebased and merged", pr)
+	}
+	if !strings.Contains(log.String(), ", merging each PR without review (rebase)") {
+		t.Fatalf("watch didn't say it merges:\n%s", log)
+	}
+}

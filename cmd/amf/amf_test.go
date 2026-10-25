@@ -203,6 +203,14 @@ type fakeGitHub struct {
 	creates    []map[string]any     // every POST /pulls body, as sent
 	updates    []map[string]any     // every PATCH /pulls/{n} body, as sent
 	repoLabels map[string]LabelSpec // the repository's labels
+	// mergeErrs are the errors the next merges get, one each, before
+	// merges succeed again.
+	mergeErrs []fakeError
+}
+
+type fakeError struct {
+	status  int
+	message string
 }
 
 func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
@@ -384,6 +392,32 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
 			}
 		}
 		writeJSON(w, 200, PullRequest{Number: n, HTMLURL: fmt.Sprintf("https://github.com/vic/demo/pull/%d", n)})
+	})
+
+	mux.HandleFunc("PUT "+repo+"/pulls/{n}/merge", func(w http.ResponseWriter, r *http.Request) {
+		var in map[string]string
+		decode(t, r, &in)
+		n, _ := strconv.Atoi(r.PathValue("n"))
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if n < 101 || n > 100+len(f.prs) {
+			writeJSON(w, 404, map[string]string{"message": "Not Found"})
+			return
+		}
+		pr := f.prs[n-101]
+		pr["merge_attempts"] += "x"
+		if len(f.mergeErrs) > 0 {
+			e := f.mergeErrs[0]
+			f.mergeErrs = f.mergeErrs[1:]
+			writeJSON(w, e.status, map[string]string{"message": e.message})
+			return
+		}
+		if pr["state"] != "open" {
+			writeJSON(w, 405, map[string]string{"message": "Pull Request is not mergeable"})
+			return
+		}
+		pr["state"], pr["merge_method"], pr["merge_sha"] = "merged", in["merge_method"], in["sha"]
+		writeJSON(w, 200, map[string]any{"sha": "f00dfeed", "merged": true, "message": "Pull Request successfully merged"})
 	})
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
