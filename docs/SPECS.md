@@ -40,6 +40,8 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened, and merged
 | `amf pr list [--state open\|closed\|merged\|all] [--limit N] [--json]` | Lists pull requests, including drafts, newest first. See [Pull requests](#pull-requests). |
 | `amf pr merge <N> [--squash \| --rebase] [--delete-branch]` | Merges a chosen PR (`42` or `#42`); no git checkout needed. See below. |
 | `amf pr view <N> [--json]` | Shows one pull request without a git checkout. See below. |
+| `amf pr close <N> [--comment text] [--delete-branch]` | Closes a chosen PR (`42` or `#42`); no git checkout needed. See below. |
+| `amf pr reopen <N>` | Reopens a chosen closed PR (`42` or `#42`); no git checkout needed. See below. |
 | `amf run <N> [--agent A] [--agent-timeout 60m] [--eval-rounds 2] [--dry-run] [--draft] [--merge[=squash\|rebase]] [--log-level L] [--log-file P]` | Processes issue N (`42` or `#42`) once. |
 | `amf watch [--agent A] [--interval 60s] [--label amf:ready] [--exclude-label L]... [--agent-timeout 60m] [--eval-rounds 2] [--draft] [--merge[=squash\|rebase]] [--log-level L] [--log-file P]` | Polls open issues with the label (every page), oldest first by issue number (GitHub's `created_at` can tie for issues opened in the same second), and processes them one at a time until interrupted, skipping any issue that has one of the `--exclude-label` labels. |
 | `amf pipeline [--fetch]` | Checks the pipeline in `AGENTS.md` of the enclosing checkout, as it is on disk. See below. |
@@ -266,6 +268,37 @@ sent them, and HTML is not escaped.
 GitHub answers 404 both for an issue number and for a number that doesn't
 exist; both fail with `#N is not a pull request in owner/name`. On any error
 nothing is written to stdout, and a failure to write stdout is an error.
+
+### `amf pr close` and `amf pr reopen`
+
+Both read `.env` and the environment and check repository access, as `amf
+list` does, and need no git checkout. Exactly one positive PR number is
+required; missing or extra arguments and unknown flags exit 2, and an
+invalid number exits 1.
+
+`amf pr close` first reads `GET /repos/{repo}/pulls/N`. A merged PR fails
+with `#N is merged; it can't be closed`, and an already-closed PR prints
+`#N is already closed` and exits 0, both without a PATCH. Otherwise it
+closes the PR with `PATCH /repos/{repo}/pulls/N` `{"state":"closed"}` and
+prints `Closed #N <url>`. With `--comment text`, the comment is posted to
+the issue first, redacted like amf's other comments. With `--delete-branch`,
+amf deletes the head branch with
+`DELETE /repos/{repo}/git/refs/heads/<branch>` only when its repository
+matches `GITHUB_REPO` (case insensitive); a fork or unavailable head
+repository prints a `Skipping branch deletion` note to stderr and succeeds.
+If deletion fails, the `Closed #N <url>` line stays on stdout and the
+command exits 1 with `closed #N but could not delete <branch>: <err>`: the
+PR is already closed.
+
+`amf pr reopen` first reads the PR. A merged PR fails with `#N is merged;
+it can't be reopened`, and an open PR prints `#N is already open` and
+exits 0, both without a PATCH. Otherwise it opens the PR with
+`PATCH /repos/{repo}/pulls/N` `{"state":"open"}` and prints `Reopened #N
+<url>`. If GitHub refuses (for example, the head branch was deleted), the
+command fails with GitHub's message and the PR stays as it was.
+
+Neither command touches the linked issue's labels; re-adding `amf:ready`
+to retry an issue is still the user's step.
 
 ### `amf init`
 

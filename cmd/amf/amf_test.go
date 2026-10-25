@@ -204,6 +204,7 @@ type fakeGitHub struct {
 	viewGets   int                    // how many GET /pulls/{n} requests arrived
 	creates    []map[string]any       // every POST /pulls body, as sent
 	updates    []map[string]any       // every PATCH /pulls/{n} body, as sent
+	deletes    []string               // every DELETE /git/refs/heads/{branch}, decoded
 	repoLabels map[string]LabelSpec   // the repository's labels
 	// mergeErrs are the errors the next merges get, one each, before
 	// merges succeed again.
@@ -398,12 +399,42 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		f.viewGets++
-		pr, ok := f.views[n]
-		if !ok {
+		if pr, ok := f.views[n]; ok {
+			writeJSON(w, 200, pr)
+			return
+		}
+		if n < 101 || n > 100+len(f.prs) {
 			writeJSON(w, 404, map[string]string{"message": "Not Found"})
 			return
 		}
-		writeJSON(w, 200, pr)
+		pr := f.prs[n-101]
+		state, merged := pr["state"], pr["state"] == "merged"
+		if merged {
+			state = "closed" // GitHub reports a merged PR as closed
+		}
+		repoName := pr["head_repo"]
+		if repoName == "" {
+			repoName = "vic/demo"
+		}
+		var repo any
+		if repoName == "deleted" {
+			repo = nil
+		} else {
+			repo = map[string]string{"full_name": repoName}
+		}
+		writeJSON(w, 200, map[string]any{
+			"number":   n,
+			"html_url": fmt.Sprintf("https://github.com/vic/demo/pull/%d", n),
+			"state":    state,
+			"merged":   merged,
+			"head":     map[string]any{"sha": "abc123", "ref": pr["head"], "repo": repo},
+		})
+	})
+	mux.HandleFunc("DELETE "+repo+"/git/refs/heads/{branch}", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.deletes = append(f.deletes, r.PathValue("branch"))
+		w.WriteHeader(204)
 	})
 	mux.HandleFunc("PATCH "+repo+"/pulls/{n}", func(w http.ResponseWriter, r *http.Request) {
 		var in map[string]any
