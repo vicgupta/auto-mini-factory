@@ -2534,3 +2534,62 @@ func TestWatchMerges(t *testing.T) {
 		t.Fatalf("watch didn't say it merges:\n%s", log)
 	}
 }
+
+// Only canonical amf branches from this repository identify an issue.
+func TestPRListIssueBranches(t *testing.T) {
+	gh, srv := newFakeGitHub(t)
+	for _, head := range []string{"amf/issue-0", "amf/issue--1", "amf/issue-01", "amf/issue-+1", "amf/issue-1/extra", "amf/issue-", "feature"} {
+		gh.prs = append(gh.prs, map[string]string{"head": head, "base": "main", "state": "open"})
+	}
+	listJSONEnv(t, srv)
+	var out bytes.Buffer
+	if err := run(context.Background(), []string{"pr", "list", "--json"}, nil, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal(out.Bytes(), &rows); err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != len(gh.prs) {
+		t.Fatalf("got %d rows", len(rows))
+	}
+	for _, row := range rows {
+		if row["issue"] != nil {
+			t.Errorf("unexpected issue: %v", row)
+		}
+	}
+}
+
+// GitHub can return creation-time ties out of number order and a deleted
+// head repository as null. Neither should corrupt the public listing.
+func TestPRListUnorderedAndDeletedHeads(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/repos/vic/demo" {
+			writeJSON(w, 200, map[string]string{"default_branch": "main"})
+			return
+		}
+		if q := r.URL.Query(); q.Get("state") != "open" || q.Get("sort") != "created" || q.Get("direction") != "desc" {
+			t.Errorf("query = %s", r.URL.RawQuery)
+		}
+		writeJSON(w, 200, []map[string]any{
+			{"number": 1, "state": "open", "head": map[string]any{"ref": "amf/issue-12", "repo": nil}},
+			{"number": 2, "state": "open", "head": map[string]any{"ref": "amf/issue-13", "repo": map[string]string{"full_name": "VIC/DEMO"}}},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	listJSONEnv(t, srv)
+	var out bytes.Buffer
+	if err := run(context.Background(), []string{"pr", "list", "--json"}, nil, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	var rows []struct {
+		Number int
+		Issue  *int
+	}
+	if err := json.Unmarshal(out.Bytes(), &rows); err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 || rows[0].Number != 2 || rows[0].Issue == nil || *rows[0].Issue != 13 || rows[1].Number != 1 || rows[1].Issue != nil {
+		t.Fatalf("rows = %+v", rows)
+	}
+}

@@ -36,6 +36,8 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened, and merged
 | `amf init` | Writes `./.env` and creates the labels (see below). |
 | `amf issue "Title" [-b body \| -f file \| -f -] [--label L] [--no-label]` | Creates an issue labeled `amf:ready` (or `--label`'s label; none with `--no-label`). The body can also come from stdin when it's piped; `-b` and `-f` together are an error. Prints `#N <url>`. |
 | `amf list [--state open\|closed\|all] [--label L] [--limit N] [--json]` | Lists issues, newest first (highest number first), with every page fetched and PRs left out. Columns: `ISSUE`, `STATE` (with `--state all` only), `AMF` (the issue's `amf` and `amf:*` labels, or `-`) and `TITLE`. `--limit N` (default `0`, no limit) prints only the first N issues after filtering; a negative value errors with `--limit must be 0 or more, got N`. Tabs in a title print as spaces. `--state` takes only `open`, `closed` or `all`. Prints `No … in owner/name.` when nothing matches. `--json` (default `false`) prints instead one JSON array and a newline, with no header: one object per issue, in the same order and after the same filters and limit, with exactly `number` (integer), `title`, `state`, `url` (the issue's GitHub page) and `labels` (every label name, in GitHub's order, `[]` when none); titles are kept as GitHub sent them, tabs included. Nothing matching prints `[]`. On an error nothing is printed to stdout, and a failure to write stdout is an error. Needs no git checkout. |
+| `amf pr` | Prints the pull request command group's usage to stdout, as `amf pr help`, `amf pr -h` and `amf pr --help` do. An unknown subcommand prints that usage to stderr and exits 2. |
+| `amf pr list [--state open\|closed\|merged\|all] [--limit N] [--json]` | Lists pull requests, including drafts, newest first. See [Pull requests](#pull-requests). |
 | `amf run <N> [--agent A] [--agent-timeout 60m] [--eval-rounds 2] [--dry-run] [--draft] [--merge[=squash\|rebase]] [--log-level L] [--log-file P]` | Processes issue N (`42` or `#42`) once. |
 | `amf watch [--agent A] [--interval 60s] [--label amf:ready] [--exclude-label L]... [--agent-timeout 60m] [--eval-rounds 2] [--draft] [--merge[=squash\|rebase]] [--log-level L] [--log-file P]` | Polls open issues with the label (every page), oldest first by issue number (GitHub's `created_at` can tie for issues opened in the same second), and processes them one at a time until interrupted, skipping any issue that has one of the `--exclude-label` labels. |
 | `amf pipeline [--fetch]` | Checks the pipeline in `AGENTS.md` of the enclosing checkout, as it is on disk. See below. |
@@ -161,6 +163,35 @@ one also prints the usage to stderr). Errors print as `amf: <error>` on
 stderr. SIGINT and
 SIGTERM cancel the current step, with the run's process group killed as on
 expiry; the issue is still marked failed.
+
+### Pull requests
+
+`amf pr list` reads `.env` like `amf list`, checks that GitHub can access
+`GITHUB_REPO` first, and needs no git checkout. It fetches every page of
+`GET /repos/{repo}/pulls` with `sort=created` and `direction=desc`, then sorts
+by number descending so the highest number is first even when creation times tie.
+
+- `--state` defaults to `open`, including drafts. `merged` requests `closed`
+  from GitHub and keeps PRs whose `merged_at` is set; `closed` keeps only
+  unmerged closed PRs. `all` keeps everything. Other values fail with
+  `--state must be open, closed, merged or all, got "<value>"`.
+- Columns are `PR`, `ISSUE`, `STATE`, `TITLE`. `PR` is `#N`. `ISSUE` is `#N`
+  only for a head branch named `amf/issue-N` in this repository (a positive
+  decimal number without leading zeroes); other branches, forks and deleted
+  head repositories show `-`. `STATE` is `merged` when `merged_at` is set,
+  otherwise `closed` for a closed PR, otherwise `draft` or `open`. Tabs in
+  titles print as spaces.
+- `--limit N` defaults to `0` (no limit), and applies after filtering and
+  sorting. Negative values fail with `--limit must be 0 or more, got N`.
+- `--json` defaults to `false`. It prints one array and a newline with exactly
+  `number` (integer), `title`, `state` (as in the table), `draft` (boolean),
+  `url` (the PR's GitHub page), `head` and `base` (branch names), and `issue`
+  (the associated issue integer or `null`). Titles stay as GitHub sent them,
+  including tabs. An empty result is `[]`.
+- An empty table prints `No <state> pull requests in owner/name.`, or
+  `No pull requests in owner/name.` for `all`. Argument, configuration and API
+  errors leave stdout empty, including errors on later pages. A failure to
+  write stdout is returned as an error.
 
 ### `amf init`
 

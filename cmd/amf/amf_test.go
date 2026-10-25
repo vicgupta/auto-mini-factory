@@ -359,14 +359,37 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
 		q := r.URL.Query()
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		out := []PullRequest{}
+		out := []map[string]any{}
 		for i, pr := range f.prs {
-			if "vic:"+pr["head"] == q.Get("head") && (q.Get("state") == "all" || pr["state"] == q.Get("state")) {
+			if (q.Get("head") == "" || "vic:"+pr["head"] == q.Get("head")) && (q.Get("state") == "all" || pr["state"] == q.Get("state")) {
 				n := 101 + i
-				out = append(out, PullRequest{Number: n, HTMLURL: fmt.Sprintf("https://github.com/vic/demo/pull/%d", n)})
+				repoName := pr["head_repo"]
+				if repoName == "" {
+					repoName = "vic/demo"
+				}
+				var mergedAt any
+				if pr["merged_at"] != "" {
+					mergedAt = pr["merged_at"]
+				}
+				draft := i < len(f.drafts) && f.drafts[i]
+				out = append(out, map[string]any{"number": n, "html_url": fmt.Sprintf("https://github.com/vic/demo/pull/%d", n), "title": pr["title"], "state": pr["state"], "draft": draft, "merged_at": mergedAt, "head": map[string]any{"ref": pr["head"], "repo": map[string]string{"full_name": repoName}}, "base": map[string]string{"ref": pr["base"]}})
 			}
 		}
-		writeJSON(w, 200, out)
+		if q.Get("direction") == "desc" {
+			slices.Reverse(out)
+		}
+		perPage, _ := strconv.Atoi(q.Get("per_page"))
+		if perPage == 0 {
+			perPage = 30
+		}
+		page, _ := strconv.Atoi(q.Get("page"))
+		page = max(page, 1)
+		start, end := min((page-1)*perPage, len(out)), min(page*perPage, len(out))
+		if end < len(out) {
+			q.Set("page", strconv.Itoa(page+1))
+			w.Header().Set("Link", fmt.Sprintf(`<http://%s%s?%s>; rel="next"`, r.Host, r.URL.Path, q.Encode()))
+		}
+		writeJSON(w, 200, out[start:end])
 	})
 	mux.HandleFunc("PATCH "+repo+"/pulls/{n}", func(w http.ResponseWriter, r *http.Request) {
 		var in map[string]any
