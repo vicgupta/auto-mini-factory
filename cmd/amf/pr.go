@@ -17,6 +17,7 @@ const prUsage = `usage: amf pr <command>
 Commands:
   list [--state open|closed|merged|all] [--limit N] [--json]  list pull requests, newest first
   merge <N> [--squash | --rebase] [--delete-branch]  merge a pull request
+  view <N> [--json]  show a pull request
 `
 
 func cmdPR(ctx context.Context, args []string, stdout, stderr io.Writer) error {
@@ -32,6 +33,8 @@ func cmdPR(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return cmdPRList(ctx, args[1:], stdout, stderr)
 	case "merge":
 		return cmdPRMerge(ctx, args[1:], stdout, stderr)
+	case "view":
+		return cmdPRView(ctx, args[1:], stdout, stderr)
 	default:
 		fmt.Fprint(stderr, prUsage)
 		return errUsage
@@ -198,4 +201,169 @@ func cmdPRMerge(ctx context.Context, args []string, stdout, stderr io.Writer) er
 		}
 	}
 	return nil
+}
+
+// viewedPR is the public JSON schema of amf pr view, kept apart from
+// GitHub's response.
+type viewedPR struct {
+	Number         int    `json:"number"`
+	Title          string `json:"title"`
+	State          string `json:"state"`
+	Draft          bool   `json:"draft"`
+	URL            string `json:"url"`
+	Head           string `json:"head"`
+	Base           string `json:"base"`
+	Author         string `json:"author"`
+	Issue          *int   `json:"issue"`
+	Mergeable      *bool  `json:"mergeable"`
+	MergeableState string `json:"mergeable_state"`
+	Additions      int    `json:"additions"`
+	Deletions      int    `json:"deletions"`
+	ChangedFiles   int    `json:"changed_files"`
+	Body           string `json:"body"`
+}
+
+func cmdPRView(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("pr view", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	asJSON := fs.Bool("json", false, "print one JSON object")
+	pos, err := parseArgs(fs, args)
+	if err != nil {
+		return errUsage
+	}
+	if len(pos) != 1 {
+		fmt.Fprintln(stderr, "usage: amf pr view <number> [--json]")
+		return errUsage
+	}
+	n, err := parsePRNumber(pos[0])
+	if err != nil {
+		fmt.Fprintln(stderr, "usage: amf pr view <number> [--json]")
+		return errUsage
+	}
+	cfg, err := loadConfig(envPaths(ctx)...)
+	if err != nil {
+		return err
+	}
+	gh := newGitHub(cfg)
+	if err := checkRepo(ctx, gh, cfg.Repo); err != nil {
+		return err
+	}
+	pr, err := gh.GetPRView(ctx, n)
+	if err != nil {
+		return err
+	}
+	issue := issueFromHead(pr.Head.Ref)
+	if *asJSON {
+		out := viewedPR{
+			Number:         n,
+			Title:          pr.Title,
+			State:          jsonState(pr),
+			Draft:          pr.Draft,
+			URL:            pr.HTMLURL,
+			Head:           pr.Head.Ref,
+			Base:           pr.Base.Ref,
+			Author:         pr.User.Login,
+			Issue:          issue,
+			Mergeable:      pr.Mergeable,
+			MergeableState: pr.MergeableState,
+			Additions:      pr.Additions,
+			Deletions:      pr.Deletions,
+			ChangedFiles:   pr.ChangedFiles,
+			Body:           pr.Body,
+		}
+		enc := json.NewEncoder(stdout)
+		enc.SetEscapeHTML(false)
+		return enc.Encode(out)
+	}
+
+	issueText := "-"
+	if issue != nil {
+		issueText = fmt.Sprintf("#%d", *issue)
+	}
+	files := "files"
+	if pr.ChangedFiles == 1 {
+		files = "file"
+	}
+	if _, err := fmt.Fprintf(stdout, "#%d %s\n", n, pr.Title); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(stdout, "%-10s %s\n", "state:", textState(pr)); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(stdout, "%-10s %s → %s\n", "branch:", pr.Head.Ref, pr.Base.Ref); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(stdout, "%-10s %s\n", "author:", pr.User.Login); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(stdout, "%-10s %s\n", "issue:", issueText); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(stdout, "%-10s %s\n", "mergeable:", textMergeable(pr)); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(stdout, "%-10s +%d −%d in %d %s\n", "changes:", pr.Additions, pr.Deletions, pr.ChangedFiles, files); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(stdout, "%-10s %s\n", "url:", pr.HTMLURL); err != nil {
+		return err
+	}
+	if body := strings.TrimRight(pr.Body, "\n"); body != "" {
+		if _, err := fmt.Fprintf(stdout, "\n%s\n", body); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// issueFromHead reads the issue number from a canonical amf/issue-N branch,
+// rejecting leading zeroes and non-positive numbers.
+func issueFromHead(ref string) *int {
+	suffix, ok := strings.CutPrefix(ref, "amf/issue-")
+	if !ok {
+		return nil
+	}
+	n, err := strconv.Atoi(suffix)
+	if err != nil || n <= 0 || strconv.Itoa(n) != suffix {
+		return nil
+	}
+	return &n
+}
+
+func textState(pr prViewResponse) string {
+	if pr.MergedAt != nil {
+		return "merged"
+	}
+	if pr.State == "closed" {
+		return "closed"
+	}
+	if pr.Draft {
+		return "open (draft)"
+	}
+	return "open"
+}
+
+// jsonState is the lifecycle state without the text-only draft marker; the
+// draft field beside it says whether the pull request is a draft.
+func jsonState(pr prViewResponse) string {
+	if pr.MergedAt != nil {
+		return "merged"
+	}
+	if pr.State == "closed" {
+		return "closed"
+	}
+	return "open"
+}
+
+func textMergeable(pr prViewResponse) string {
+	switch {
+	case pr.Mergeable == nil || pr.MergeableState == "unknown":
+		return "unknown"
+	case pr.MergeableState == "dirty" || !*pr.Mergeable:
+		return "no (conflicts)"
+	case pr.MergeableState == "" || pr.MergeableState == "clean":
+		return "yes"
+	default:
+		return "blocked (" + pr.MergeableState + ")"
+	}
 }
