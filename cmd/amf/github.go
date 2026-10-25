@@ -437,3 +437,32 @@ func (g *GitHub) UpdatePR(ctx context.Context, n int, title, body string) (PullR
 	err := g.do(ctx, "PATCH", g.repoPath("/pulls/%d", n), map[string]any{"title": title, "body": body}, &pr)
 	return pr, err
 }
+
+// prDetails is GitHub's preflight metadata. It stays separate from
+// PullRequest.Head, the runner's locally pinned commit.
+type prDetails struct {
+	HTMLURL string `json:"html_url"`
+	State   string `json:"state"`
+	Draft   bool   `json:"draft"`
+	Merged  bool   `json:"merged"`
+	Head    struct {
+		SHA  string `json:"sha"`
+		Ref  string `json:"ref"`
+		Repo *struct {
+			FullName string `json:"full_name"`
+		} `json:"repo"`
+	} `json:"head"`
+}
+
+func (g *GitHub) GetPR(ctx context.Context, n int) (prDetails, error) {
+	var pr prDetails
+	err := g.do(ctx, "GET", g.repoPath("/pulls/%d", n), nil, &pr)
+	return pr, err
+}
+
+func (g *GitHub) DeleteBranch(ctx context.Context, branch string) error {
+	if branch == "" {
+		return errors.New("github did not report a head branch")
+	}
+	return g.do(ctx, "DELETE", g.repoPath("/git/refs/heads/%s", url.PathEscape(branch)), nil, nil)
+}

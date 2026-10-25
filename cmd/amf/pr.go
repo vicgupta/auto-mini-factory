@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ const prUsage = `usage: amf pr <command>
 
 Commands:
   list [--state open|closed|merged|all] [--limit N] [--json]  list pull requests, newest first
+  merge <N> [--squash | --rebase] [--delete-branch]  merge a pull request
 `
 
 func cmdPR(ctx context.Context, args []string, stdout, stderr io.Writer) error {
@@ -28,6 +30,8 @@ func cmdPR(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return err
 	case "list":
 		return cmdPRList(ctx, args[1:], stdout, stderr)
+	case "merge":
+		return cmdPRMerge(ctx, args[1:], stdout, stderr)
 	default:
 		fmt.Fprint(stderr, prUsage)
 		return errUsage
@@ -37,7 +41,7 @@ func cmdPR(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 func parsePRNumber(s string) (int, error) {
 	n, err := strconv.Atoi(strings.TrimPrefix(s, "#"))
 	if err != nil || n <= 0 {
-		return 0, fmt.Errorf("invalid pull request number %q", s)
+		return 0, fmt.Errorf("invalid pull request number %q: want a positive number", s)
 	}
 	return n, nil
 }
@@ -126,4 +130,72 @@ func cmdPRList(ctx context.Context, args []string, stdout, stderr io.Writer) err
 		fmt.Fprintf(tw, "#%d\t%s\t%s\t%s\n", pr.Number, issue, pr.State, strings.ReplaceAll(pr.Title, "\t", " "))
 	}
 	return tw.Flush()
+}
+
+func cmdPRMerge(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("pr merge", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	squash := fs.Bool("squash", false, "squash and merge")
+	rebase := fs.Bool("rebase", false, "rebase and merge")
+	deleteBranch := fs.Bool("delete-branch", false, "delete the head branch after merging, if it is in this repository")
+	pos, err := parseArgs(fs, args)
+	if err != nil {
+		return errUsage
+	}
+	if *squash && *rebase {
+		return errors.New("--squash and --rebase can't be used together")
+	}
+	if len(pos) != 1 {
+		fmt.Fprintln(stderr, "usage: amf pr merge <N> [--squash | --rebase] [--delete-branch]")
+		return errUsage
+	}
+	n, err := parsePRNumber(pos[0])
+	if err != nil {
+		return err
+	}
+	method := "merge"
+	if *squash {
+		method = "squash"
+	}
+	if *rebase {
+		method = "rebase"
+	}
+	cfg, err := loadConfig(envPaths(ctx)...)
+	if err != nil {
+		return err
+	}
+	gh := newGitHub(cfg)
+	if err := checkRepo(ctx, gh, cfg.Repo); err != nil {
+		return err
+	}
+	pr, err := gh.GetPR(ctx, n)
+	if err != nil {
+		return err
+	}
+	switch {
+	case pr.Merged:
+		return fmt.Errorf("#%d is already merged", n)
+	case pr.State == "closed":
+		return fmt.Errorf("#%d is closed", n)
+	case pr.Draft:
+		return fmt.Errorf("#%d is a draft; mark it ready for review first", n)
+	}
+	if pr.Head.SHA == "" {
+		return fmt.Errorf("github did not report a head SHA for #%d", n)
+	}
+	if _, _, err := gh.mergePRWithRetry(ctx, n, method, pr.Head.SHA, mergeRetry, nil); err != nil {
+		return err
+	}
+	verb := mergedVerb[method]
+	fmt.Fprintf(stdout, "%s%s #%d %s\n", strings.ToUpper(verb[:1]), verb[1:], n, pr.HTMLURL)
+	if *deleteBranch {
+		if pr.Head.Repo == nil || !strings.EqualFold(pr.Head.Repo.FullName, cfg.Repo) {
+			fmt.Fprintf(stderr, "Skipping branch deletion for #%d: head repository is a fork or is unavailable.\n", n)
+			return nil
+		}
+		if err := gh.DeleteBranch(ctx, pr.Head.Ref); err != nil {
+			return fmt.Errorf("merged #%d but could not delete %s: %w", n, pr.Head.Ref, err)
+		}
+	}
+	return nil
 }

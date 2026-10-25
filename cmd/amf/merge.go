@@ -103,24 +103,37 @@ func (r *Runner) tryMerge(ctx context.Context, n int, base string, pr PullReques
 	if slices.Contains(changed, "AGENTS.md") {
 		return errors.New("the change edits AGENTS.md, which declares amf's pipeline, so amf leaves it for review")
 	}
+	wait := cmp.Or(r.MergeRetry, mergeRetry)
+	commit, attempts, err := r.GH.mergePRWithRetry(ctx, pr.Number, r.Merge, pr.Head, wait, func(attempt int, err error) {
+		r.event(slog.LevelDebug, "issue.merge", n, fmt.Sprintf("#%d: %s is not mergeable yet; asking again in %s", n, pr.HTMLURL, wait),
+			"action", "retry", "method", r.Merge, "number", pr.Number, "attempt", attempt, "error", err)
+	})
+	if err == nil {
+		r.event(slog.LevelInfo, "issue.merge", n, fmt.Sprintf("#%d: %s %s", n, mergedVerb[r.Merge], pr.HTMLURL),
+			"action", "merged", "method", r.Merge, "number", pr.Number, "commit", commit, "attempts", attempts)
+	}
+	return err
+}
+
+// mergePRWithRetry retries only GitHub's temporary mergeability refusal.
+// The original head SHA is used for every attempt, including after a wait.
+func (g *GitHub) mergePRWithRetry(ctx context.Context, n int, method, sha string, wait time.Duration, retry func(int, error)) (string, int, error) {
 	for attempt := 1; ; attempt++ {
-		commit, err := r.GH.MergePR(ctx, pr.Number, r.Merge, pr.Head)
+		commit, err := g.MergePR(ctx, n, method, sha)
 		if err == nil {
-			r.event(slog.LevelInfo, "issue.merge", n, fmt.Sprintf("#%d: %s %s", n, mergedVerb[r.Merge], pr.HTMLURL),
-				"action", "merged", "method", r.Merge, "number", pr.Number, "commit", commit, "attempts", attempt)
-			return nil
+			return commit, attempt, nil
 		}
 		var apiErr *APIError
 		if attempt == mergeAttempts || !errors.As(err, &apiErr) || apiErr.Status != http.StatusMethodNotAllowed ||
 			!strings.Contains(strings.ToLower(apiErr.Message), "not mergeable") {
-			return err
+			return "", attempt, err
 		}
-		wait := cmp.Or(r.MergeRetry, mergeRetry)
-		r.event(slog.LevelDebug, "issue.merge", n, fmt.Sprintf("#%d: %s is not mergeable yet; asking again in %s", n, pr.HTMLURL, wait),
-			"action", "retry", "method", r.Merge, "number", pr.Number, "attempt", attempt, "error", err)
+		if retry != nil {
+			retry(attempt, err)
+		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return "", attempt, ctx.Err()
 		case <-time.After(wait):
 		}
 	}
