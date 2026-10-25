@@ -38,6 +38,7 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened, and merged
 | `amf list [--state open\|closed\|all] [--label L] [--limit N] [--json]` | Lists issues, newest first (highest number first), with every page fetched and PRs left out. Columns: `ISSUE`, `STATE` (with `--state all` only), `AMF` (the issue's `amf` and `amf:*` labels, or `-`) and `TITLE`. `--limit N` (default `0`, no limit) prints only the first N issues after filtering; a negative value errors with `--limit must be 0 or more, got N`. Tabs in a title print as spaces. `--state` takes only `open`, `closed` or `all`. Prints `No … in owner/name.` when nothing matches. `--json` (default `false`) prints instead one JSON array and a newline, with no header: one object per issue, in the same order and after the same filters and limit, with exactly `number` (integer), `title`, `state`, `url` (the issue's GitHub page) and `labels` (every label name, in GitHub's order, `[]` when none); titles are kept as GitHub sent them, tabs included. Nothing matching prints `[]`. On an error nothing is printed to stdout, and a failure to write stdout is an error. Needs no git checkout. |
 | `amf pr` | Prints the pull request command group's usage to stdout, as `amf pr help`, `amf pr -h` and `amf pr --help` do. An unknown subcommand prints that usage to stderr and exits 2. |
 | `amf pr list [--state open\|closed\|merged\|all] [--limit N] [--json]` | Lists pull requests, including drafts, newest first. See [Pull requests](#pull-requests). |
+| `amf pr merge <N> [--squash \| --rebase] [--delete-branch]` | Merges a chosen PR (`42` or `#42`); no git checkout needed. See below. |
 | `amf run <N> [--agent A] [--agent-timeout 60m] [--eval-rounds 2] [--dry-run] [--draft] [--merge[=squash\|rebase]] [--log-level L] [--log-file P]` | Processes issue N (`42` or `#42`) once. |
 | `amf watch [--agent A] [--interval 60s] [--label amf:ready] [--exclude-label L]... [--agent-timeout 60m] [--eval-rounds 2] [--draft] [--merge[=squash\|rebase]] [--log-level L] [--log-file P]` | Polls open issues with the label (every page), oldest first by issue number (GitHub's `created_at` can tie for issues opened in the same second), and processes them one at a time until interrupted, skipping any issue that has one of the `--exclude-label` labels. |
 | `amf pipeline [--fetch]` | Checks the pipeline in `AGENTS.md` of the enclosing checkout, as it is on disk. See below. |
@@ -192,6 +193,38 @@ by number descending so the highest number is first even when creation times tie
   `No pull requests in owner/name.` for `all`. Argument, configuration and API
   errors leave stdout empty, including errors on later pages. A failure to
   write stdout is returned as an error.
+
+### `amf pr merge`
+
+Reads `.env` and the environment and checks repository access, as `amf list`
+does. Merges with a merge commit by default; `--squash` squashes and
+`--rebase` rebases. Both flags together fail before any GitHub call with
+`--squash and --rebase can't be used together`. Exactly one positive PR
+number is required. Missing or extra arguments and unknown flags exit 2;
+invalid numbers and conflicting method flags exit 1. A bare negative
+number is parsed as an unknown flag and exits 2 (use `#-1` to pass it as
+a number, which exits 1).
+
+Preflight reads `GET /repos/{repo}/pulls/N`. A merged PR fails with
+`#N is already merged`, a closed PR with `#N is closed`, and a draft with
+`#N is a draft; mark it ready for review first`, without a merge request.
+The merge is pinned to preflight's `head.sha` on every attempt; a missing
+SHA fails rather than attempting an unpinned merge. If the branch changes,
+GitHub's 409 refusal is reported. Only a 405 whose message contains
+`not mergeable` (case insensitive) is retried: three attempts, five seconds
+apart, stopping on Ctrl-C. Other errors, including conflicts, required
+checks or reviews, and disallowed merge methods, fail immediately with
+GitHub's message. These failures exit 1 and leave the PR open.
+
+On success, stdout is `Merged #N <url>`, `Squashed and merged #N <url>` or
+`Rebased and merged #N <url>`. `--delete-branch` then deletes the head using
+`DELETE /repos/{repo}/git/refs/heads/<branch>`, only when its repository
+matches `GITHUB_REPO` (case insensitive). A fork or unavailable head
+repository prints a `Skipping branch deletion` note to stderr and succeeds.
+If deletion fails, the success line remains on stdout, and the command
+exits 1 with `merged #N but could not delete <branch>: <err>`: the merge
+has already happened. Otherwise success exits 0. Labels and comments are
+left alone. The PR's closing references close issues as usual.
 
 ### `amf init`
 
@@ -753,6 +786,9 @@ get without it. Other commands don't log there.
   checks and reviews stand between amf and the branch if you want them:
   amf merges only what GitHub allows. The `.github/` refusal (step 7)
   still applies, so no workflow change is ever pushed.
+- `amf pr merge` is a person explicitly choosing a PR to merge. It allows
+  changes to `AGENTS.md` and uses GitHub's branch protection rules; the
+  unattended `run`/`watch --merge` refusal still applies.
 - No agent gets `GITHUB_TOKEN`, and each agent's environment holds only
   its own key (step 6), but agents can read local files, including `.env`
   (and so every key in it, and `AMF_POSTGRES_URL`'s password).
@@ -789,7 +825,7 @@ get without it. Other commands don't log there.
 ## Non-goals
 
 - Running issues in parallel. `watch` processes one at a time.
-- Reviewing PRs, or retrying failed ones. People do that. amf merges only
-  with `--merge`, and only what GitHub allows.
+- Reviewing PRs, or retrying failed ones. People do that. amf merges with
+  `--merge` or an explicit `amf pr merge`, and only what GitHub allows.
 - Sandboxing agents.
 - Skills that need authentication to download.
