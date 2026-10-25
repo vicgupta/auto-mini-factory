@@ -13,9 +13,10 @@ package main
 //
 //	AMF_LIVE_GITHUB_TOKEN     use this token instead of the one in .env
 //	AMF_LIVE_MODEL            Claude model for every claude run (default haiku)
-//	AMF_LIVE_PIPELINE=1       also test pipelines; this commits an AGENTS.md
-//	                          with an ## amf table to the default branch, and
-//	                          removes it again with a second commit
+//	AMF_LIVE_PIPELINE=1       also test pipelines; this commits an ## amf table
+//	                          to the default branch, at the end of its AGENTS.md
+//	                          (created if missing), and reverts that with a
+//	                          second commit
 //	AMF_LIVE_OPENCODE_MODEL   opencode model for the pipeline's code stage
 //	                          (default opencode/deepseek-v4.1-flash-free)
 //	AMF_LIVE_SKILLS           base URL of the skills (default: this repo's
@@ -377,9 +378,24 @@ func TestLive(t *testing.T) {
 		if code != 0 {
 			t.Errorf("amf doctor: exit %d", code)
 		}
-		for _, want := range []string{"github", "repo", "labels", "checkout", "git push", "pipeline"} {
+		for _, want := range []string{"github", "repo", "labels"} {
 			if !regexp.MustCompile(`(?m)^ok +` + want + ` `).MatchString(out) {
 				t.Errorf("doctor: %s isn't ok:\n%s", want, out)
+			}
+		}
+		// Before the first run in a fresh AMF_LIVE_DIR there is no clone yet,
+		// which doctor reports as such; with one, the checks run and pass.
+		checks := map[string]string{"checkout": "ok +checkout ", "git push": "ok +git push ", "pipeline": "ok +pipeline "}
+		if _, err := os.Stat(clone); os.IsNotExist(err) {
+			checks = map[string]string{
+				"checkout": "warn +checkout +not in a git checkout; run and watch will clone " + regexp.QuoteMeta(l.repo),
+				"git push": "skip +git push +no checkout yet",
+				"pipeline": "skip +pipeline +needs a checkout",
+			}
+		}
+		for name, want := range checks {
+			if !regexp.MustCompile(`(?m)^` + want).MatchString(out) {
+				t.Errorf("doctor: %s doesn't match %q:\n%s", name, want, out)
 			}
 		}
 		// claude must be installed. Without a key in .env, amf won't pick it
@@ -565,7 +581,7 @@ func (l *live) testPipeline(t *testing.T, clone string) {
 	ctx := context.Background()
 	skills := envOr("AMF_LIVE_SKILLS", "https://raw.githubusercontent.com/vicgupta/auto-mini-factory/v0.2.0/skills")
 	ocModel := envOr("AMF_LIVE_OPENCODE_MODEL", "opencode/deepseek-v4.1-flash-free")
-	table := fmt.Sprintf("# Agents\n\n## amf\n\n| Stage | Skill | Agent | Model |\n|---|---|---|---|\n"+
+	table := fmt.Sprintf("## amf\n\n| Stage | Skill | Agent | Model |\n|---|---|---|---|\n"+
 		"| plan | %[1]s/plan/SKILL.md | claudecode | %[2]s |\n"+
 		"| code | %[1]s/code/SKILL.md | opencode | %[3]s |\n"+
 		"| eval | %[1]s/eval/SKILL.md | claudecode | %[2]s |\n", skills, l.model, ocModel)
@@ -582,22 +598,39 @@ func (l *live) testPipeline(t *testing.T, clone string) {
 		return out
 	}
 	mustGitLive(filepath.Dir(work), "clone", "-q", "--branch", l.base, cloneURL, work)
-	if _, err := os.Stat(filepath.Join(work, "AGENTS.md")); err == nil {
-		t.Fatalf("%s already has an AGENTS.md; not overwriting it", l.repo)
+	// A repo's own AGENTS.md (such as amf's) keeps its text; the table goes
+	// at the end, under its own heading.
+	agents := filepath.Join(work, "AGENTS.md")
+	old, err := os.ReadFile(agents)
+	switch {
+	case os.IsNotExist(err):
+		table = "# Agents\n\n" + table
+	case err != nil:
+		t.Fatal(err)
+	case regexp.MustCompile(`(?m)^\s*##\s+amf\s*$`).Match(old):
+		t.Fatalf("%s's AGENTS.md already has an ## amf section; not changing it", l.repo)
+	default:
+		table = strings.TrimRight(string(old), "\n") + "\n\n" + table
 	}
-	os.WriteFile(filepath.Join(work, "AGENTS.md"), []byte(table), 0o644)
+	os.WriteFile(agents, []byte(table), 0o644)
 	mustGitLive(work, "add", "AGENTS.md")
 	mustGitLive(work, "commit", "-qm", "amf live test: add a pipeline")
+	added := mustGitLive(work, "rev-parse", "HEAD")
 	mustGitLive(work, "push", "-q", "origin", l.base)
 	t.Cleanup(func() {
 		if os.Getenv("AMF_LIVE_KEEP") != "" {
 			return
 		}
+		// Reverting puts AGENTS.md back as it was (or removes it), keeping
+		// whatever else reached the branch meanwhile.
 		git(ctx, work, "pull", "-q", "--rebase", "origin", l.base)
-		git(ctx, work, "rm", "-q", "AGENTS.md")
+		if _, err := git(ctx, work, "revert", "--no-commit", added); err != nil {
+			t.Errorf("could not revert the pipeline commit: %v", err)
+			return
+		}
 		git(ctx, work, "commit", "-qm", "amf live test: remove the pipeline")
 		if _, err := git(ctx, work, "push", "-q", "origin", l.base); err != nil {
-			t.Errorf("could not remove AGENTS.md from %s: %v", l.base, err)
+			t.Errorf("could not remove the pipeline from %s: %v", l.base, err)
 		}
 	})
 
