@@ -498,6 +498,12 @@ func (g *GitHub) GetPR(ctx context.Context, n int) (prDetails, error) {
 	return pr, err
 }
 
+// SetPRState opens or closes pull request n. The caller already has the PR's
+// details from GetPR, so the response is not needed.
+func (g *GitHub) SetPRState(ctx context.Context, n int, state string) error {
+	return g.do(ctx, "PATCH", g.repoPath("/pulls/%d", n), map[string]any{"state": state}, nil)
+}
+
 func (g *GitHub) DeleteBranch(ctx context.Context, branch string) error {
 	if branch == "" {
 		return errors.New("github did not report a head branch")

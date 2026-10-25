@@ -18,6 +18,8 @@ Commands:
   list [--state open|closed|merged|all] [--limit N] [--json]  list pull requests, newest first
   merge <N> [--squash | --rebase] [--delete-branch]  merge a pull request
   view <N> [--json]  show a pull request
+  close <N> [--comment text] [--delete-branch]  close a pull request
+  reopen <N>                                      reopen a pull request
 `
 
 func cmdPR(ctx context.Context, args []string, stdout, stderr io.Writer) error {
@@ -35,12 +37,17 @@ func cmdPR(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return cmdPRMerge(ctx, args[1:], stdout, stderr)
 	case "view":
 		return cmdPRView(ctx, args[1:], stdout, stderr)
+	case "close":
+		return cmdPRClose(ctx, args[1:], stdout, stderr)
+	case "reopen":
+		return cmdPRReopen(ctx, args[1:], stdout, stderr)
 	default:
 		fmt.Fprint(stderr, prUsage)
 		return errUsage
 	}
 }
 
+// parsePRNumber accepts a pull request number as "42" or "#42".
 func parsePRNumber(s string) (int, error) {
 	n, err := strconv.Atoi(strings.TrimPrefix(s, "#"))
 	if err != nil || n <= 0 {
@@ -366,4 +373,106 @@ func textMergeable(pr prViewResponse) string {
 	default:
 		return "blocked (" + pr.MergeableState + ")"
 	}
+}
+
+// cmdPRClose closes pull request n, optionally commenting first and deleting
+// its head branch after. It never touches the linked issue's labels.
+func cmdPRClose(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("pr close", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	comment := fs.String("comment", "", "post a comment on the issue before closing")
+	deleteBranch := fs.Bool("delete-branch", false, "delete the head branch after closing, if it is in this repository")
+	pos, err := parseArgs(fs, args)
+	if err != nil {
+		return errUsage
+	}
+	if len(pos) != 1 {
+		fmt.Fprintln(stderr, "usage: amf pr close <N> [--comment text] [--delete-branch]")
+		return errUsage
+	}
+	n, err := parsePRNumber(pos[0])
+	if err != nil {
+		return err
+	}
+	cfg, err := loadConfig(envPaths(ctx)...)
+	if err != nil {
+		return err
+	}
+	gh := newGitHub(cfg)
+	if err := checkRepo(ctx, gh, cfg.Repo); err != nil {
+		return err
+	}
+	pr, err := gh.GetPR(ctx, n)
+	if err != nil {
+		return err
+	}
+	if pr.Merged {
+		return fmt.Errorf("#%d is merged; it can't be closed", n)
+	}
+	if pr.State == "closed" {
+		fmt.Fprintf(stdout, "#%d is already closed\n", n)
+		return nil
+	}
+	if *comment != "" {
+		if err := gh.Comment(ctx, n, configRedactor(cfg).Redact(*comment)); err != nil {
+			return err
+		}
+	}
+	if err := gh.SetPRState(ctx, n, "closed"); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "Closed #%d %s\n", n, pr.HTMLURL)
+	if *deleteBranch {
+		if pr.Head.Repo == nil || !strings.EqualFold(pr.Head.Repo.FullName, cfg.Repo) {
+			fmt.Fprintf(stderr, "Skipping branch deletion for #%d: head repository is a fork or is unavailable.\n", n)
+			return nil
+		}
+		if err := gh.DeleteBranch(ctx, pr.Head.Ref); err != nil {
+			return fmt.Errorf("closed #%d but could not delete %s: %w", n, pr.Head.Ref, err)
+		}
+	}
+	return nil
+}
+
+// cmdPRReopen reopens a closed pull request n. It never touches the linked
+// issue's labels.
+func cmdPRReopen(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("pr reopen", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	pos, err := parseArgs(fs, args)
+	if err != nil {
+		return errUsage
+	}
+	if len(pos) != 1 {
+		fmt.Fprintln(stderr, "usage: amf pr reopen <N>")
+		return errUsage
+	}
+	n, err := parsePRNumber(pos[0])
+	if err != nil {
+		return err
+	}
+	cfg, err := loadConfig(envPaths(ctx)...)
+	if err != nil {
+		return err
+	}
+	gh := newGitHub(cfg)
+	if err := checkRepo(ctx, gh, cfg.Repo); err != nil {
+		return err
+	}
+	pr, err := gh.GetPR(ctx, n)
+	if err != nil {
+		return err
+	}
+	if pr.Merged {
+		return fmt.Errorf("#%d is merged; it can't be reopened", n)
+	}
+	if pr.State == "open" {
+		fmt.Fprintf(stdout, "#%d is already open\n", n)
+		return nil
+	}
+	if err := gh.SetPRState(ctx, n, "open"); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "Reopened #%d %s\n", n, pr.HTMLURL)
+	return nil
 }
