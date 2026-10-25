@@ -39,6 +39,7 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened, and merged
 | `amf pr` | Prints the pull request command group's usage to stdout, as `amf pr help`, `amf pr -h` and `amf pr --help` do. An unknown subcommand prints that usage to stderr and exits 2. |
 | `amf pr list [--state open\|closed\|merged\|all] [--limit N] [--json]` | Lists pull requests, including drafts, newest first. See [Pull requests](#pull-requests). |
 | `amf pr merge <N> [--squash \| --rebase] [--delete-branch]` | Merges a chosen PR (`42` or `#42`); no git checkout needed. See below. |
+| `amf pr view <N> [--json]` | Shows one pull request without a git checkout. See below. |
 | `amf run <N> [--agent A] [--agent-timeout 60m] [--eval-rounds 2] [--dry-run] [--draft] [--merge[=squash\|rebase]] [--log-level L] [--log-file P]` | Processes issue N (`42` or `#42`) once. |
 | `amf watch [--agent A] [--interval 60s] [--label amf:ready] [--exclude-label L]... [--agent-timeout 60m] [--eval-rounds 2] [--draft] [--merge[=squash\|rebase]] [--log-level L] [--log-file P]` | Polls open issues with the label (every page), oldest first by issue number (GitHub's `created_at` can tie for issues opened in the same second), and processes them one at a time until interrupted, skipping any issue that has one of the `--exclude-label` labels. |
 | `amf pipeline [--fetch]` | Checks the pipeline in `AGENTS.md` of the enclosing checkout, as it is on disk. See below. |
@@ -225,6 +226,46 @@ If deletion fails, the success line remains on stdout, and the command
 exits 1 with `merged #N but could not delete <branch>: <err>`: the merge
 has already happened. Otherwise success exits 0. Labels and comments are
 left alone. The PR's closing references close issues as usual.
+
+### `amf pr view`
+
+`amf pr view <N> [--json]` reads `.env` like `amf list`, checks that GitHub can
+access `GITHUB_REPO` first, fetches `GET /repos/{repo}/pulls/N`, and needs no
+git checkout. `N` may be `57` or `#57` and must be positive. Missing, extra or
+non-number arguments print `usage: amf pr view <number> [--json]` to stderr
+and exit 2, before reading configuration or GitHub.
+
+The first line is `#N <title>`, followed by fields aligned at column 12:
+
+- `state:` is `merged` when `merged_at` is set, otherwise `closed` for a
+  closed PR, otherwise `open (draft)` for a draft, otherwise `open`.
+- `branch:` is the head branch, ` → ` and the base branch.
+- `author:` is the login of the user who opened the PR.
+- `issue:` is `#N` for a head branch named exactly `amf/issue-N` with a
+  positive decimal number without leading zeroes; any other branch is `-`.
+- `mergeable:` is `unknown` when GitHub's `mergeable` is `null` (or
+  `mergeable_state` is `unknown`), and the command does not retry. It is
+  `no (conflicts)` when `mergeable` is false or `mergeable_state` is `dirty`,
+  `yes` when it is true with a `clean` or empty state, and `blocked (<state>)`
+  for any other state, such as `blocked`, `unstable` or `behind`.
+- `changes:` is `+<additions> −<deletions> in N file` (`files` unless N is 1),
+  using a Unicode minus sign.
+- `url:` is the PR's GitHub page.
+
+When the body is not empty, a blank line and the body follow, with trailing
+newlines removed and one final newline added; an empty body adds nothing.
+
+`--json` prints one object and a newline instead, with exactly `number`
+(integer), `title`, `state` (`merged`, `closed` or `open`; drafts stay `open`),
+`draft` (boolean), `url`, `head` and `base` (branch names), `author`, `issue`
+(the associated issue integer or `null`), `mergeable` (boolean or `null`),
+`mergeable_state` (GitHub's value, `""` when absent), `additions`,
+`deletions`, `changed_files` and `body`. The body and title are kept as GitHub
+sent them, and HTML is not escaped.
+
+GitHub answers 404 both for an issue number and for a number that doesn't
+exist; both fail with `#N is not a pull request in owner/name`. On any error
+nothing is written to stdout, and a failure to write stdout is an error.
 
 ### `amf init`
 

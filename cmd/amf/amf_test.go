@@ -198,11 +198,13 @@ type fakeGitHub struct {
 	mu         sync.Mutex
 	issues     map[int]*Issue
 	comments   map[int][]string
-	prs        []map[string]string  // each PR's string fields, and its state
-	drafts     []bool               // whether prs[i] is a draft
-	creates    []map[string]any     // every POST /pulls body, as sent
-	updates    []map[string]any     // every PATCH /pulls/{n} body, as sent
-	repoLabels map[string]LabelSpec // the repository's labels
+	prs        []map[string]string    // each PR's string fields, and its state
+	drafts     []bool                 // whether prs[i] is a draft
+	views      map[int]prViewResponse // GET /pulls/{n} responses
+	viewGets   int                    // how many GET /pulls/{n} requests arrived
+	creates    []map[string]any       // every POST /pulls body, as sent
+	updates    []map[string]any       // every PATCH /pulls/{n} body, as sent
+	repoLabels map[string]LabelSpec   // the repository's labels
 	// mergeErrs are the errors the next merges get, one each, before
 	// merges succeed again.
 	mergeErrs []fakeError
@@ -216,7 +218,7 @@ type fakeError struct {
 }
 
 func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
-	f := &fakeGitHub{t: t, issues: map[int]*Issue{}, comments: map[int][]string{}, repoLabels: map[string]LabelSpec{}}
+	f := &fakeGitHub{t: t, issues: map[int]*Issue{}, comments: map[int][]string{}, repoLabels: map[string]LabelSpec{}, views: map[int]prViewResponse{}}
 	mux := http.NewServeMux()
 	const repo = "/repos/vic/demo"
 	mux.HandleFunc("GET "+repo, func(w http.ResponseWriter, r *http.Request) {
@@ -390,6 +392,18 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
 			w.Header().Set("Link", fmt.Sprintf(`<http://%s%s?%s>; rel="next"`, r.Host, r.URL.Path, q.Encode()))
 		}
 		writeJSON(w, 200, out[start:end])
+	})
+	mux.HandleFunc("GET "+repo+"/pulls/{n}", func(w http.ResponseWriter, r *http.Request) {
+		n, _ := strconv.Atoi(r.PathValue("n"))
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.viewGets++
+		pr, ok := f.views[n]
+		if !ok {
+			writeJSON(w, 404, map[string]string{"message": "Not Found"})
+			return
+		}
+		writeJSON(w, 200, pr)
 	})
 	mux.HandleFunc("PATCH "+repo+"/pulls/{n}", func(w http.ResponseWriter, r *http.Request) {
 		var in map[string]any

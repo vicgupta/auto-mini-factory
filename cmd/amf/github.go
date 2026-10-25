@@ -86,6 +86,32 @@ type PRDetails struct {
 	} `json:"base"`
 }
 
+// prViewResponse is GitHub's pull request response for amf pr view. It stays
+// separate from PullRequest.Head, the runner's locally pinned commit.
+type prViewResponse struct {
+	Number         int     `json:"number"`
+	Title          string  `json:"title"`
+	State          string  `json:"state"`
+	Draft          bool    `json:"draft"`
+	MergedAt       *string `json:"merged_at"`
+	Mergeable      *bool   `json:"mergeable"`
+	MergeableState string  `json:"mergeable_state"`
+	HTMLURL        string  `json:"html_url"`
+	Additions      int     `json:"additions"`
+	Deletions      int     `json:"deletions"`
+	ChangedFiles   int     `json:"changed_files"`
+	Body           string  `json:"body"`
+	User           struct {
+		Login string `json:"login"`
+	} `json:"user"`
+	Head struct {
+		Ref string `json:"ref"`
+	} `json:"head"`
+	Base struct {
+		Ref string `json:"ref"`
+	} `json:"base"`
+}
+
 func (pr PRDetails) displayState() string {
 	if pr.MergedAt != nil {
 		return "merged"
@@ -126,6 +152,18 @@ func (g *GitHub) ListPRs(ctx context.Context, state string) ([]PRDetails, error)
 	}
 	slices.SortStableFunc(prs, func(a, b PRDetails) int { return b.Number - a.Number })
 	return prs, nil
+}
+
+// GetPRView fetches one pull request. GitHub answers 404 both for a number
+// that is an issue and for one that doesn't exist, so both get the same
+// message.
+func (g *GitHub) GetPRView(ctx context.Context, n int) (prViewResponse, error) {
+	var pr prViewResponse
+	err := g.do(ctx, "GET", g.repoPath("/pulls/%d", n), nil, &pr)
+	if isStatus(err, http.StatusNotFound) {
+		return pr, fmt.Errorf("#%d is not a pull request in %s", n, g.repo)
+	}
+	return pr, err
 }
 
 // APIError is a non-2xx response from GitHub.
