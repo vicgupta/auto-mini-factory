@@ -94,6 +94,7 @@ type prViewResponse struct {
 	State          string  `json:"state"`
 	Draft          bool    `json:"draft"`
 	MergedAt       *string `json:"merged_at"`
+	NodeID         string  `json:"node_id"`
 	Mergeable      *bool   `json:"mergeable"`
 	MergeableState string  `json:"mergeable_state"`
 	HTMLURL        string  `json:"html_url"`
@@ -509,4 +510,43 @@ func (g *GitHub) DeleteBranch(ctx context.Context, branch string) error {
 		return errors.New("github did not report a head branch")
 	}
 	return g.do(ctx, "DELETE", g.repoPath("/git/refs/heads/%s", url.PathEscape(branch)), nil, nil)
+}
+
+// graphqlEndpoint maps an API base URL to its GraphQL endpoint. The REST
+// base https://api.github.com becomes https://api.github.com/graphql, and a
+// GitHub Enterprise Server base https://host/api/v3 becomes
+// https://host/api/graphql.
+func graphqlEndpoint(base string) string {
+	return strings.TrimSuffix(base, "/v3") + "/graphql"
+}
+
+// graphql posts a GraphQL query and decodes the response's data field into
+// out. It reuses send's auth, user agent, call counting and rate-limit
+// tracking, and turns a non-empty errors array in a 200 response into an
+// error carrying the first message.
+func (g *GitHub) graphql(ctx context.Context, query string, vars map[string]any, out any) error {
+	var resp struct {
+		Data   json.RawMessage `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	in := map[string]any{"query": query}
+	if vars != nil {
+		in["variables"] = vars
+	}
+	base := g.base
+	g.base = graphqlEndpoint(base)
+	_, err := g.send(ctx, "POST", "", in, &resp)
+	g.base = base
+	if err != nil {
+		return err
+	}
+	if len(resp.Errors) > 0 {
+		return errors.New(resp.Errors[0].Message)
+	}
+	if out == nil || len(resp.Data) == 0 || string(resp.Data) == "null" {
+		return nil
+	}
+	return json.Unmarshal(resp.Data, out)
 }

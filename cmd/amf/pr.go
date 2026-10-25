@@ -20,6 +20,8 @@ Commands:
   view <N> [--json]  show a pull request
   close <N> [--comment text] [--delete-branch]  close a pull request
   reopen <N>                                      reopen a pull request
+  ready <N>                                       mark a draft pull request ready for review
+  draft <N>                                       convert a pull request to a draft
 `
 
 func cmdPR(ctx context.Context, args []string, stdout, stderr io.Writer) error {
@@ -41,6 +43,10 @@ func cmdPR(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return cmdPRClose(ctx, args[1:], stdout, stderr)
 	case "reopen":
 		return cmdPRReopen(ctx, args[1:], stdout, stderr)
+	case "ready":
+		return cmdPRReady(ctx, args[1:], stdout, stderr)
+	case "draft":
+		return cmdPRDraft(ctx, args[1:], stdout, stderr)
 	default:
 		fmt.Fprint(stderr, prUsage)
 		return errUsage
@@ -474,5 +480,89 @@ func cmdPRReopen(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		return err
 	}
 	fmt.Fprintf(stdout, "Reopened #%d %s\n", n, pr.HTMLURL)
+	return nil
+}
+
+// The GraphQL mutations that change a pull request's draft state. The REST
+// API can't do this: PATCH /pulls ignores a "draft" field.
+const (
+	readyMutation = `mutation($id: ID!) { markPullRequestReadyForReview(input: {pullRequestId: $id}) { pullRequest { isDraft } } }`
+	draftMutation = `mutation($id: ID!) { convertPullRequestToDraft(input: {pullRequestId: $id}) { pullRequest { isDraft } } }`
+)
+
+// cmdPRReady marks a draft pull request ready for review.
+func cmdPRReady(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	return cmdPRDraftState(ctx, args, stdout, stderr, true)
+}
+
+// cmdPRDraft converts a pull request that is ready for review into a draft.
+func cmdPRDraft(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	return cmdPRDraftState(ctx, args, stdout, stderr, false)
+}
+
+// cmdPRDraftState implements amf pr ready and amf pr draft. It reads the PR
+// with GET /pulls/N for its node_id, draft and state, then applies the
+// matching GraphQL mutation. The no-op and closed/merged cases send nothing.
+func cmdPRDraftState(ctx context.Context, args []string, stdout, stderr io.Writer, ready bool) error {
+	name := "draft"
+	if ready {
+		name = "ready"
+	}
+	fs := flag.NewFlagSet("pr "+name, flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	pos, err := parseArgs(fs, args)
+	if err != nil {
+		return errUsage
+	}
+	if len(pos) != 1 {
+		fmt.Fprintf(stderr, "usage: amf pr %s <N>\n", name)
+		return errUsage
+	}
+	n, err := parsePRNumber(pos[0])
+	if err != nil {
+		fmt.Fprintf(stderr, "usage: amf pr %s <N>\n", name)
+		return errUsage
+	}
+	cfg, err := loadConfig(envPaths(ctx)...)
+	if err != nil {
+		return err
+	}
+	gh := newGitHub(cfg)
+	if err := checkRepo(ctx, gh, cfg.Repo); err != nil {
+		return err
+	}
+	pr, err := gh.GetPRView(ctx, n)
+	if err != nil {
+		return err
+	}
+	switch {
+	case pr.MergedAt != nil:
+		return fmt.Errorf("#%d is merged", n)
+	case pr.State == "closed":
+		return fmt.Errorf("#%d is closed", n)
+	}
+	if ready && !pr.Draft {
+		fmt.Fprintf(stdout, "#%d is already ready for review\n", n)
+		return nil
+	}
+	if !ready && pr.Draft {
+		fmt.Fprintf(stdout, "#%d is already a draft\n", n)
+		return nil
+	}
+	if pr.NodeID == "" {
+		return fmt.Errorf("github did not report a node ID for #%d", n)
+	}
+	query := draftMutation
+	if ready {
+		query = readyMutation
+	}
+	if err := gh.graphql(ctx, query, map[string]any{"id": pr.NodeID}, nil); err != nil {
+		return err
+	}
+	if ready {
+		fmt.Fprintf(stdout, "#%d is ready for review %s\n", n, pr.HTMLURL)
+	} else {
+		fmt.Fprintf(stdout, "#%d is now a draft %s\n", n, pr.HTMLURL)
+	}
 	return nil
 }
