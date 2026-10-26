@@ -68,6 +68,11 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened, and merged
   same way. On Windows, amf instead ends the run's whole process tree at once
   with `taskkill /T /F`, with no grace period. `--interval` also must be
   positive.
+- `--label L` (`watch` only, default `amf:ready`) is the label `watch` polls
+  for: each poll lists open issues with that exact label. An empty value
+  (`amf watch --label ""`, such as an unset shell variable) fails `watch` at
+  startup with `--label must not be empty`, before anything is read or
+  fetched, so a typo can't silently widen the poll to every open issue.
 - `--exclude-label L` (`watch` only; repeatable, none by default) holds
   issues in the queue: each poll, an issue that `watch` would otherwise work
   on but that has any of these labels (by exact name, as amf matches its own
