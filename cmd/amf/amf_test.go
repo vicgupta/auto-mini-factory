@@ -194,18 +194,22 @@ func TestNeedsWork(t *testing.T) {
 
 // fakeGitHub is an in-memory stand-in for the parts of the GitHub API amf uses.
 type fakeGitHub struct {
-	t          *testing.T
-	mu         sync.Mutex
-	issues     map[int]*Issue
-	comments   map[int][]string
-	prs        []map[string]string    // each PR's string fields, and its state
-	drafts     []bool                 // whether prs[i] is a draft
-	views      map[int]prViewResponse // GET /pulls/{n} responses
-	viewGets   int                    // how many GET /pulls/{n} requests arrived
-	creates    []map[string]any       // every POST /pulls body, as sent
-	updates    []map[string]any       // every PATCH /pulls/{n} body, as sent
-	deletes    []string               // every DELETE /git/refs/heads/{branch}, decoded
-	repoLabels map[string]LabelSpec   // the repository's labels
+	t           *testing.T
+	mu          sync.Mutex
+	issues      map[int]*Issue
+	comments    map[int][]string
+	prs         []map[string]string    // each PR's string fields, and its state
+	drafts      []bool                 // whether prs[i] is a draft
+	views       map[int]prViewResponse // GET /pulls/{n} responses
+	viewGets    int                    // how many GET /pulls/{n} requests arrived
+	diffs       map[int]string         // GET /pulls/{n} diff bodies (Accept: application/vnd.github.diff)
+	files       map[int][]prFile       // GET /pulls/{n}/files responses
+	diffAccepts []string               // Accept header of each diff request, in order
+	fileAccepts []string               // Accept header of each files request, in order
+	creates     []map[string]any       // every POST /pulls body, as sent
+	updates     []map[string]any       // every PATCH /pulls/{n} body, as sent
+	deletes     []string               // every DELETE /git/refs/heads/{branch}, decoded
+	repoLabels  map[string]LabelSpec   // the repository's labels
 	// graphqlCalls are every POST /graphql body, as sent; graphqlErr, when
 	// set, is the message POST /graphql returns in an errors array instead
 	// of applying the mutation.
@@ -224,7 +228,7 @@ type fakeError struct {
 }
 
 func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
-	f := &fakeGitHub{t: t, issues: map[int]*Issue{}, comments: map[int][]string{}, repoLabels: map[string]LabelSpec{}, views: map[int]prViewResponse{}}
+	f := &fakeGitHub{t: t, issues: map[int]*Issue{}, comments: map[int][]string{}, repoLabels: map[string]LabelSpec{}, views: map[int]prViewResponse{}, diffs: map[int]string{}, files: map[int][]prFile{}}
 	mux := http.NewServeMux()
 	const repo = "/repos/vic/demo"
 	mux.HandleFunc("GET "+repo, func(w http.ResponseWriter, r *http.Request) {
@@ -401,6 +405,19 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
 	})
 	mux.HandleFunc("GET "+repo+"/pulls/{n}", func(w http.ResponseWriter, r *http.Request) {
 		n, _ := strconv.Atoi(r.PathValue("n"))
+		if r.Header.Get("Accept") == "application/vnd.github.diff" {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			f.diffAccepts = append(f.diffAccepts, r.Header.Get("Accept"))
+			if diff, ok := f.diffs[n]; ok {
+				w.Header().Set("Content-Type", "application/vnd.github.diff")
+				w.WriteHeader(200)
+				io.WriteString(w, diff)
+				return
+			}
+			writeJSON(w, 404, map[string]string{"message": "Not Found"})
+			return
+		}
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		f.viewGets++
@@ -434,6 +451,35 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
 			"merged":   merged,
 			"head":     map[string]any{"sha": "abc123", "ref": pr["head"], "repo": repo},
 		})
+	})
+	mux.HandleFunc("GET "+repo+"/pulls/{n}/files", func(w http.ResponseWriter, r *http.Request) {
+		n, _ := strconv.Atoi(r.PathValue("n"))
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.fileAccepts = append(f.fileAccepts, r.Header.Get("Accept"))
+		files, ok := f.files[n]
+		if !ok {
+			// A PR without recorded files lists nothing; a non-PR is 404.
+			if _, inViews := f.views[n]; !inViews && (n < 101 || n > 100+len(f.prs)) {
+				writeJSON(w, 404, map[string]string{"message": "Not Found"})
+				return
+			}
+			writeJSON(w, 200, []prFile{})
+			return
+		}
+		q := r.URL.Query()
+		perPage, _ := strconv.Atoi(q.Get("per_page"))
+		if perPage == 0 {
+			perPage = 30
+		}
+		page, _ := strconv.Atoi(q.Get("page"))
+		page = max(page, 1)
+		start, end := min((page-1)*perPage, len(files)), min(page*perPage, len(files))
+		if end < len(files) {
+			q.Set("page", strconv.Itoa(page+1))
+			w.Header().Set("Link", fmt.Sprintf(`<http://%s%s?%s>; rel="next"`, r.Host, r.URL.Path, q.Encode()))
+		}
+		writeJSON(w, 200, files[start:end])
 	})
 	mux.HandleFunc("DELETE "+repo+"/git/refs/heads/{branch}", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()

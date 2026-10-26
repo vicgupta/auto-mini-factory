@@ -167,6 +167,63 @@ func (g *GitHub) GetPRView(ctx context.Context, n int) (prViewResponse, error) {
 	return pr, err
 }
 
+// prFile is one file changed by a pull request, from GET /pulls/{n}/files.
+// Only the new filename is needed: a rename reports its new name here.
+type prFile struct {
+	Filename string `json:"filename"`
+}
+
+// PRDiff fetches a pull request's unified diff exactly as GitHub serves it.
+func (g *GitHub) PRDiff(ctx context.Context, n int) ([]byte, error) {
+	body, err := g.raw(ctx, g.repoPath("/pulls/%d", n), "application/vnd.github.diff")
+	if err != nil {
+		if isStatus(err, http.StatusNotFound) {
+			return nil, fmt.Errorf("#%d is not a pull request in %s", n, g.repo)
+		}
+		if isTooLargeDiff(err) {
+			return nil, fmt.Errorf("the diff of #%d is too large for GitHub to send; try --name-only, or git fetch origin pull/%d/head", n, n)
+		}
+		return nil, err
+	}
+	return body, nil
+}
+
+// PRFiles lists a pull request's changed paths, following every page. It
+// returns the new name for a rename, which is what GitHub's filename holds.
+func (g *GitHub) PRFiles(ctx context.Context, n int) ([]string, error) {
+	var files []string
+	for path := g.repoPath("/pulls/%d/files?per_page=100", n); path != ""; {
+		var page []prFile
+		header, err := g.send(ctx, "GET", path, nil, &page)
+		if err != nil {
+			if isStatus(err, http.StatusNotFound) {
+				return nil, fmt.Errorf("#%d is not a pull request in %s", n, g.repo)
+			}
+			return nil, err
+		}
+		for _, f := range page {
+			files = append(files, f.Filename)
+		}
+		if path, err = g.nextPage(header); err != nil {
+			return nil, err
+		}
+	}
+	return files, nil
+}
+
+// isTooLargeDiff reports whether err is GitHub refusing a pull request diff
+// that is too large to send.
+func isTooLargeDiff(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	if apiErr.Status != http.StatusNotAcceptable && apiErr.Status != http.StatusUnprocessableEntity {
+		return false
+	}
+	return strings.Contains(strings.ToLower(apiErr.Message), "too large")
+}
+
 // APIError is a non-2xx response from GitHub.
 type APIError struct {
 	Method, Path string
@@ -259,6 +316,50 @@ func (g *GitHub) send(ctx context.Context, method, path string, in, out any) (h 
 		return resp.Header, nil
 	}
 	return resp.Header, json.NewDecoder(counted).Decode(out)
+}
+
+// raw sends a GET request for path with the given Accept header and returns
+// the response body unchanged. It is for endpoints that don't answer JSON,
+// such as a pull request's diff. Non-2xx responses are APIError, as in send.
+func (g *GitHub) raw(ctx context.Context, path, accept string) ([]byte, error) {
+	begin := time.Now()
+	req, err := http.NewRequestWithContext(ctx, "GET", g.base+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+g.token)
+	req.Header.Set("Accept", accept)
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	resp, err := g.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	counted := &countingReader{r: resp.Body}
+	tmpl, _ := templatePath(path, g.repo)
+	attrs := []any{"method", "GET", "path", tmpl, "duration_ms", ms(time.Since(begin)),
+		"status", resp.StatusCode, "ratelimit_remaining", resp.Header.Get("X-RateLimit-Remaining"),
+		"ratelimit_reset", resp.Header.Get("X-RateLimit-Reset"), "request_id", resp.Header.Get("X-GitHub-Request-Id")}
+	if resp.StatusCode >= 300 {
+		raw, _ := io.ReadAll(io.LimitReader(counted, 8<<10))
+		msg := string(raw)
+		var parsed struct {
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(raw, &parsed) == nil && parsed.Message != "" {
+			msg = parsed.Message
+		}
+		callEvent(ctx, "github.call", fmt.Sprintf("github GET %s: %d", tmpl, resp.StatusCode),
+			append(attrs, "bytes_in", counted.n, "error_body", excerpt(msg))...)
+		return nil, &APIError{Method: "GET", Path: path, Status: resp.StatusCode, Message: msg}
+	}
+	body, err := io.ReadAll(counted)
+	if err != nil {
+		return nil, err
+	}
+	callEvent(ctx, "github.call", fmt.Sprintf("github GET %s: %d", tmpl, resp.StatusCode),
+		append(attrs, "bytes_in", counted.n)...)
+	return body, nil
 }
 
 // countingReader counts the bytes read through it.

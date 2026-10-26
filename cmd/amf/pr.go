@@ -18,6 +18,7 @@ Commands:
   list [--state open|closed|merged|all] [--limit N] [--json]  list pull requests, newest first
   merge <N> [--squash | --rebase] [--delete-branch]  merge a pull request
   view <N> [--json]  show a pull request
+  diff <N> [--name-only]  show a pull request's diff, or one changed path per line
   close <N> [--comment text] [--delete-branch]  close a pull request
   reopen <N>                                      reopen a pull request
   ready <N>                                       mark a draft pull request ready for review
@@ -39,6 +40,8 @@ func cmdPR(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return cmdPRMerge(ctx, args[1:], stdout, stderr)
 	case "view":
 		return cmdPRView(ctx, args[1:], stdout, stderr)
+	case "diff":
+		return cmdPRDiff(ctx, args[1:], stdout, stderr)
 	case "close":
 		return cmdPRClose(ctx, args[1:], stdout, stderr)
 	case "reopen":
@@ -327,6 +330,53 @@ func cmdPRView(ctx context.Context, args []string, stdout, stderr io.Writer) err
 		}
 	}
 	return nil
+}
+
+// cmdPRDiff prints a pull request's unified diff, or one changed path per
+// line with --name-only.
+func cmdPRDiff(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("pr diff", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	nameOnly := fs.Bool("name-only", false, "print one changed path per line instead of the diff")
+	pos, err := parseArgs(fs, args)
+	if err != nil {
+		return errUsage
+	}
+	if len(pos) != 1 {
+		fmt.Fprintln(stderr, "usage: amf pr diff <N> [--name-only]")
+		return errUsage
+	}
+	n, err := parsePRNumber(pos[0])
+	if err != nil {
+		fmt.Fprintln(stderr, "usage: amf pr diff <N> [--name-only]")
+		return errUsage
+	}
+	cfg, err := loadConfig(envPaths(ctx)...)
+	if err != nil {
+		return err
+	}
+	gh := newGitHub(cfg)
+	if err := checkRepo(ctx, gh, cfg.Repo); err != nil {
+		return err
+	}
+	if *nameOnly {
+		files, err := gh.PRFiles(ctx, n)
+		if err != nil {
+			return err
+		}
+		for _, f := range files {
+			if _, err := fmt.Fprintln(stdout, f); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	diff, err := gh.PRDiff(ctx, n)
+	if err != nil {
+		return err
+	}
+	_, err = stdout.Write(diff)
+	return err
 }
 
 // issueFromHead reads the issue number from a canonical amf/issue-N branch,

@@ -40,6 +40,7 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened, and merged
 | `amf pr list [--state open\|closed\|merged\|all] [--limit N] [--json]` | Lists pull requests, including drafts, newest first. See [Pull requests](#pull-requests). |
 | `amf pr merge <N> [--squash \| --rebase] [--delete-branch]` | Merges a chosen PR (`42` or `#42`); no git checkout needed. See below. |
 | `amf pr view <N> [--json]` | Shows one pull request without a git checkout. See below. |
+| `amf pr diff <N> [--name-only]` | Prints a pull request's unified diff, or one changed path per line with `--name-only`; no git checkout needed. See below. |
 | `amf pr close <N> [--comment text] [--delete-branch]` | Closes a chosen PR (`42` or `#42`); no git checkout needed. See below. |
 | `amf pr reopen <N>` | Reopens a chosen closed PR (`42` or `#42`); no git checkout needed. See below. |
 | `amf pr ready <N>` | Marks a draft pull request ready for review; no git checkout needed. See below. |
@@ -270,6 +271,30 @@ sent them, and HTML is not escaped.
 GitHub answers 404 both for an issue number and for a number that doesn't
 exist; both fail with `#N is not a pull request in owner/name`. On any error
 nothing is written to stdout, and a failure to write stdout is an error.
+
+### `amf pr diff`
+
+`amf pr diff <N> [--name-only]` reads `.env` like `amf list`, checks that
+GitHub can access `GITHUB_REPO` first, and needs no git checkout. `N` may be
+`57` or `#57` and must be positive. Missing, extra or non-number arguments
+print `usage: amf pr diff <N> [--name-only]` to stderr and exit 2, before
+reading configuration or GitHub.
+
+Without `--name-only`, amf requests `GET /repos/{repo}/pulls/N` with
+`Accept: application/vnd.github.diff` and writes GitHub's unified diff to
+stdout byte for byte, adding no trailing newline. With `--name-only`, it
+requests `GET /repos/{repo}/pulls/N/files`, follows every page, and prints one
+changed path per line; a rename prints its new name (`filename`). A number
+that isn't a pull request fails with `#N is not a pull request in owner/name`,
+as `amf pr view` does.
+
+A diff GitHub refuses as too large (a 406 or 422 whose message contains
+`too large`, case insensitive) fails with
+`the diff of #N is too large for GitHub to send; try --name-only, or git fetch origin pull/N/head`.
+
+The other GitHub calls are unchanged: they still send
+`Accept: application/vnd.github+json`. On any error nothing is written to
+stdout, and a failure to write stdout is an error.
 
 ### `amf pr close` and `amf pr reopen`
 
