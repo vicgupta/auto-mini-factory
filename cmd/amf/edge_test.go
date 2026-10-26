@@ -359,6 +359,7 @@ func TestCommandLineErrors(t *testing.T) {
 		{[]string{"watch", "--eval-rounds", "-2"}, "can't be negative"},
 		{[]string{"watch", "--exclude-label", ""}, "--exclude-label can't be empty"},
 		{[]string{"watch", "--exclude-label", "blocked", "--exclude-label", " \t"}, "--exclude-label can't be empty"},
+		{[]string{"watch", "--label", ""}, "--label must not be empty"},
 		{[]string{"run", "1", "--exclude-label", "blocked"}, "usage"},
 		{[]string{"list", "extra"}, "usage"},
 		{[]string{"list", "--state", "bogus"}, "--state must be"},

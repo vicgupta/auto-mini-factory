@@ -278,6 +278,9 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 	if slices.Contains(exclude, "") {
 		return errors.New("--exclude-label can't be empty")
 	}
+	if *label == "" {
+		return errors.New("--label must not be empty")
+	}
 	timeout, err := timeoutFlag(fs, at, alias)
 	if err != nil {
 		return err
