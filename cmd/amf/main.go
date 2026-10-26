@@ -164,6 +164,20 @@ func cmdIssue(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 		return errUsage
 	}
 
+	// --no-label wins over an explicit --label today, silently dropping the
+	// label. Reject the pair, so a script or typo gets a clear error instead
+	// of an unlabeled issue with no hint. fs.Visit tells an explicit --label
+	// apart from its amf:ready default, so plain --no-label keeps working.
+	var labelSet bool
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "label" {
+			labelSet = true
+		}
+	})
+	if *noLabel && labelSet {
+		return errors.New("--label and --no-label can't be used together")
+	}
+
 	text := *body
 	switch {
 	case *body != "" && *file != "":
