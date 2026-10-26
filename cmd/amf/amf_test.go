@@ -835,6 +835,26 @@ func TestIssueCommand(t *testing.T) {
 	}
 }
 
+func TestIssueRejectsLabelWithNoLabel(t *testing.T) {
+	gh, srv := newFakeGitHub(t)
+	t.Chdir(t.TempDir())
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	t.Setenv("GITHUB_REPO", "vic/demo")
+	t.Setenv("AMF_API_URL", srv.URL)
+
+	var stdout, stderr bytes.Buffer
+	err := run(context.Background(), []string{"issue", "T", "--label", "amf:ready", "--no-label"}, strings.NewReader(""), &stdout, &stderr)
+	if err == nil {
+		t.Fatalf("--label with --no-label should fail; stdout = %q", stdout.String())
+	}
+	if !strings.Contains(err.Error(), "--label") || !strings.Contains(err.Error(), "--no-label") {
+		t.Fatalf("error %q should name both --label and --no-label", err)
+	}
+	if len(gh.issues) != 0 {
+		t.Fatalf("rejected combination still created issues: %+v", gh.issues)
+	}
+}
+
 func TestExcludeAMFDir(t *testing.T) {
 	root, _ := setupRepo(t)
 	ctx := context.Background()
