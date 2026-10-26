@@ -206,6 +206,11 @@ type fakeGitHub struct {
 	updates    []map[string]any       // every PATCH /pulls/{n} body, as sent
 	deletes    []string               // every DELETE /git/refs/heads/{branch}, decoded
 	repoLabels map[string]LabelSpec   // the repository's labels
+	// graphqlCalls are every POST /graphql body, as sent; graphqlErr, when
+	// set, is the message POST /graphql returns in an errors array instead
+	// of applying the mutation.
+	graphqlCalls []map[string]any
+	graphqlErr   string
 	// mergeErrs are the errors the next merges get, one each, before
 	// merges succeed again.
 	mergeErrs []fakeError
@@ -488,6 +493,30 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
 		}
 		pr["state"], pr["merge_method"], pr["merge_sha"] = "merged", in["merge_method"], in["sha"]
 		writeJSON(w, 200, map[string]any{"sha": "f00dfeed", "merged": true, "message": "Pull Request successfully merged"})
+	})
+
+	mux.HandleFunc("POST /graphql", func(w http.ResponseWriter, r *http.Request) {
+		var in map[string]any
+		decode(t, r, &in)
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.graphqlCalls = append(f.graphqlCalls, in)
+		if f.graphqlErr != "" {
+			writeJSON(w, 200, map[string]any{"errors": []map[string]string{{"message": f.graphqlErr}}})
+			return
+		}
+		vars, _ := in["variables"].(map[string]any)
+		id, _ := vars["id"].(string)
+		for n, v := range f.views {
+			if v.NodeID == id {
+				query, _ := in["query"].(string)
+				v.Draft = !strings.Contains(query, "convertPullRequestToDraft")
+				f.views[n] = v
+				writeJSON(w, 200, map[string]any{"data": map[string]any{"pullRequest": map[string]any{"isDraft": v.Draft}}})
+				return
+			}
+		}
+		writeJSON(w, 200, map[string]any{"errors": []map[string]string{{"message": "Could not resolve to a PullRequest with the id of '" + id + "'"}}})
 	})
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

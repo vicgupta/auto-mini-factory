@@ -42,6 +42,8 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened, and merged
 | `amf pr view <N> [--json]` | Shows one pull request without a git checkout. See below. |
 | `amf pr close <N> [--comment text] [--delete-branch]` | Closes a chosen PR (`42` or `#42`); no git checkout needed. See below. |
 | `amf pr reopen <N>` | Reopens a chosen closed PR (`42` or `#42`); no git checkout needed. See below. |
+| `amf pr ready <N>` | Marks a draft pull request ready for review; no git checkout needed. See below. |
+| `amf pr draft <N>` | Converts a ready pull request back to a draft; no git checkout needed. See below. |
 | `amf run <N> [--agent A] [--agent-timeout 60m] [--eval-rounds 2] [--dry-run] [--draft] [--merge[=squash\|rebase]] [--log-level L] [--log-file P]` | Processes issue N (`42` or `#42`) once. |
 | `amf watch [--agent A] [--interval 60s] [--label amf:ready] [--exclude-label L]... [--agent-timeout 60m] [--eval-rounds 2] [--draft] [--merge[=squash\|rebase]] [--log-level L] [--log-file P]` | Polls open issues with the label (every page), oldest first by issue number (GitHub's `created_at` can tie for issues opened in the same second), and processes them one at a time until interrupted, skipping any issue that has one of the `--exclude-label` labels. |
 | `amf pipeline [--fetch]` | Checks the pipeline in `AGENTS.md` of the enclosing checkout, as it is on disk. See below. |
@@ -85,7 +87,7 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened, and merged
   opens each PR that `run` or `watch` creates as a draft, with or without a
   pipeline. A retry that updates the branch's open PR leaves it a draft or
   ready for review as it was, whatever the flag says; amf never converts a
-  PR either way, and marking a draft ready for review is up to you.
+  PR either way; mark a draft ready for review with `amf pr ready`.
 - `--merge` makes `run` and `watch` merge each PR they open or update (step
   11 below), without review. Off by default. Bare `--merge` (or
   `--merge=true`, or `--merge=merge`) makes a merge commit; `--merge=squash`
@@ -300,6 +302,33 @@ command fails with GitHub's message and the PR stays as it was.
 Neither command touches the linked issue's labels; re-adding `amf:ready`
 to retry an issue is still the user's step.
 
+### `amf pr ready` and `amf pr draft`
+
+Both read `.env` and the environment and check repository access, as `amf
+list` does, and need no git checkout. Exactly one positive PR number is
+required; missing, extra or non-number arguments print
+`usage: amf pr <ready|draft> <N>` to stderr and exit 2, before reading
+configuration or GitHub.
+
+GitHub's REST API can't change a PR's draft state (`PATCH /pulls` ignores
+`draft`), so both commands read `GET /repos/{repo}/pulls/N` for the PR's
+`node_id`, `draft`, `state` and `merged_at`, then apply a GraphQL mutation.
+A merged PR fails with `#N is merged` and a closed one with `#N is closed`,
+without a mutation.
+
+`amf pr ready` sends `markPullRequestReadyForReview` with the PR's
+`node_id`, then prints `#N is ready for review <url>`. A PR that is already
+ready prints `#N is already ready for review` and exits 0. `amf pr draft`
+sends `convertPullRequestToDraft` and prints `#N is now a draft <url>`; a
+PR that is already a draft prints `#N is already a draft` and exits 0.
+Either no-op sends no mutation.
+
+The GraphQL endpoint is derived from `AMF_API_URL`: `https://api.github.com`
+maps to `https://api.github.com/graphql`, and a GitHub Enterprise Server
+base `https://host/api/v3` maps to `https://host/api/graphql`. A GraphQL
+response whose `errors` array is non-empty (for example, a token without
+permission) fails with its first message and leaves the PR as it was.
+
 ### `amf init`
 
 1. Builds `.env` from a template of `GITHUB_TOKEN`, `GITHUB_REPO`,
@@ -405,7 +434,7 @@ space, a trailing comment. A leading byte order mark is ignored.
 | `AMF_LOG_LEVEL` | `info` (terminal), `debug` (event log) | `debug`, `info`, `warn` or `error`, for both the terminal and the event log of `run` and `watch`; `--log-level` overrides it |
 | `AMF_CODEX` | `codex` | Path to the Codex CLI |
 | `AMF_OPENCODE` | `opencode` | Path to the opencode CLI |
-| `AMF_API_URL` | `https://api.github.com` | GitHub API base URL |
+| `AMF_API_URL` | `https://api.github.com` | GitHub API base URL. `amf pr ready` and `amf pr draft` derive their GraphQL endpoint from it: `…/graphql` appended, or a GitHub Enterprise Server `…/api/v3` becomes `…/api/graphql` |
 | `AMF_CLONE_URL` | `https://github.com/<repo>.git` | Where to clone the repo from |
 
 ## Pipelines (`AGENTS.md`)
