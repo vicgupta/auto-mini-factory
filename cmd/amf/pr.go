@@ -254,6 +254,7 @@ func cmdPRView(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	n, err := parsePRNumber(pos[0])
 	if err != nil {
 		fmt.Fprintln(stderr, "usage: amf pr view <number> [--json]")
+		fmt.Fprintln(stderr, err)
 		return errUsage
 	}
 	cfg, err := loadConfig(envPaths(ctx)...)
