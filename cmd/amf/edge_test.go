@@ -411,6 +411,33 @@ func TestIssueTrimsLabel(t *testing.T) {
 	}
 }
 
+func TestIssueTrimsTitle(t *testing.T) {
+	gh, srv := newFakeGitHub(t)
+	t.Chdir(t.TempDir())
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	t.Setenv("GITHUB_REPO", "vic/demo")
+	t.Setenv("AMF_API_URL", srv.URL)
+
+	var stdout, stderr bytes.Buffer
+	err := run(context.Background(), []string{"issue", "  Fix login bug  "}, strings.NewReader(""), &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("%v: %s", err, stderr.String())
+	}
+	if is := gh.issues[1]; is.Title != "Fix login bug" {
+		t.Fatalf("issue title = %q, want %q", is.Title, "Fix login bug")
+	}
+
+	// An already-trimmed title is unchanged.
+	stdout.Reset()
+	err = run(context.Background(), []string{"issue", "Fix login bug"}, strings.NewReader(""), &stdout, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if is := gh.issues[2]; is.Title != "Fix login bug" {
+		t.Fatalf("issue title = %q, want %q", is.Title, "Fix login bug")
+	}
+}
+
 func TestPipelineCommandEdgeCases(t *testing.T) {
 	ctx := context.Background()
 	t.Chdir(t.TempDir())

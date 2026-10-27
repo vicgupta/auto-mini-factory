@@ -206,7 +206,7 @@ func cmdIssue(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 	if !*noLabel {
 		labels = []string{strings.TrimSpace(*label)}
 	}
-	is, err := newGitHub(cfg).CreateIssue(ctx, pos[0], text, labels)
+	is, err := newGitHub(cfg).CreateIssue(ctx, strings.TrimSpace(pos[0]), text, labels)
 	if err != nil {
 		return err
 	}
