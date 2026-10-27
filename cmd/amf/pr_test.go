@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -98,6 +99,103 @@ func TestPRList(t *testing.T) {
 	}
 }
 
+func TestPRListIssueFilter(t *testing.T) {
+	gh, srv := newFakeGitHub(t)
+	gh.prs = []map[string]string{
+		{"head": "amf/issue-12", "base": "main", "state": "closed", "title": "Merged", "merged_at": "2026-10-25T00:00:00Z"},
+		{"head": "feature", "base": "main", "state": "open", "title": "Feature"},
+		{"head": "amf/issue-12", "base": "main", "state": "open", "title": "Open fix"},
+		{"head": "amf/issue-12", "base": "main", "state": "open", "title": "Fork fix", "head_repo": "other/demo"},
+		{"head": "amf/issue-13", "base": "main", "state": "open", "title": "Other issue"},
+	}
+	listJSONEnv(t, srv)
+
+	// --issue keeps only the amf/issue-N branches in this repository (the
+	// fork branch's issue is nil), newest first, before --limit applies.
+	for _, tc := range []struct {
+		name    string
+		args    []string
+		numbers []int
+	}{
+		{"issue 12 all", []string{"--issue", "12", "--state", "all"}, []int{103, 101}},
+		{"issue 12 open", []string{"--issue", "12"}, []int{103}},
+		{"issue 12 limit 1", []string{"--issue", "12", "--state", "all", "--limit", "1"}, []int{103}},
+		{"issue 13 all", []string{"--issue", "13", "--state", "all"}, []int{105}},
+		{"no match", []string{"--issue", "99", "--state", "all"}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			err := run(context.Background(), append([]string{"pr", "list", "--json"}, tc.args...), nil, &out, io.Discard)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var rows []struct {
+				Number int
+				Issue  *int
+			}
+			if err := json.Unmarshal(out.Bytes(), &rows); err != nil {
+				t.Fatal(err)
+			}
+			if len(rows) != len(tc.numbers) {
+				t.Fatalf("rows = %s", &out)
+			}
+			for i, row := range rows {
+				if row.Number != tc.numbers[i] {
+					t.Errorf("row %d number = %d, want %d", i, row.Number, tc.numbers[i])
+				}
+				if row.Issue == nil {
+					t.Errorf("row %d issue = nil", i)
+				}
+			}
+		})
+	}
+
+	// Filtered table output.
+	var out bytes.Buffer
+	if err := run(context.Background(), []string{"pr", "list", "--issue", "12"}, nil, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if want := "PR    ISSUE  STATE  TITLE\n#103  #12    open   Open fix\n"; out.String() != want {
+		t.Errorf("table got %q, want %q", out.String(), want)
+	}
+
+	// Empty-match messages drop the state word for --state all, as the
+	// unfiltered empty message does; --json prints [].
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--issue", "99"}, "No open pull requests for issue #99 in vic/demo.\n"},
+		{[]string{"--issue", "99", "--state", "all"}, "No pull requests for issue #99 in vic/demo.\n"},
+		{[]string{"--issue", "99", "--json"}, "[]\n"},
+	} {
+		var out bytes.Buffer
+		if err := run(context.Background(), append([]string{"pr", "list"}, tc.args...), nil, &out, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		if out.String() != tc.want {
+			t.Errorf("%v: got %q, want %q", tc.args, out.String(), tc.want)
+		}
+	}
+}
+
+func TestPRListIssueNegativeMakesNoGitHubCall(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+	}))
+	t.Cleanup(srv.Close)
+	listJSONEnv(t, srv)
+	var out bytes.Buffer
+	err := run(context.Background(), []string{"pr", "list", "--issue", "-1"}, nil, &out, io.Discard)
+	if err == nil || err.Error() != "--issue must be 0 or more, got -1" || out.Len() != 0 {
+		t.Fatalf("err %v, stdout %q", err, &out)
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("made %d GitHub calls", calls.Load())
+	}
+}
+
 func TestPRListPaginationAndLimit(t *testing.T) {
 	gh, srv := newFakeGitHub(t)
 	for i := 0; i < 205; i++ {
@@ -170,6 +268,7 @@ func TestPRListEmptyAndErrors(t *testing.T) {
 	}{
 		{[]string{"--state", "bad"}, `--state must be open, closed, merged or all, got "bad"`},
 		{[]string{"--limit", "-1"}, "--limit must be 0 or more, got -1"},
+		{[]string{"--issue", "-1"}, "--issue must be 0 or more, got -1"},
 		{[]string{"--limit", "bad"}, "usage"},
 		{[]string{"--unknown"}, "usage"},
 		{[]string{"extra"}, "usage"},

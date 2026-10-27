@@ -15,7 +15,7 @@ import (
 const prUsage = `usage: amf pr <command>
 
 Commands:
-  list [--state open|closed|merged|all] [--limit N] [--json]  list pull requests, newest first
+  list [--state open|closed|merged|all] [--limit N] [--issue N] [--json]  list pull requests, newest first
   merge <N> [--squash | --rebase] [--delete-branch]  merge a pull request
   view <N> [--json]  show a pull request
   diff <N> [--name-only]  show a pull request's diff, or one changed path per line
@@ -82,17 +82,21 @@ func cmdPRList(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	fs.SetOutput(stderr)
 	state := fs.String("state", "open", "open, closed, merged or all")
 	limit := fs.Int("limit", 0, "print at most N pull requests, 0 means no limit")
+	issue := fs.Int("issue", 0, "only pull requests opened for issue N, 0 means no filter")
 	asJSON := fs.Bool("json", false, "print a JSON array of number, title, state, draft, url, head, base and issue")
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return errUsage
 	}
 	if len(pos) != 0 {
-		fmt.Fprintln(stderr, "usage: amf pr list [--state open|closed|merged|all] [--limit N] [--json]")
+		fmt.Fprintln(stderr, "usage: amf pr list [--state open|closed|merged|all] [--limit N] [--issue N] [--json]")
 		return errUsage
 	}
 	if *limit < 0 {
 		return fmt.Errorf("--limit must be 0 or more, got %d", *limit)
+	}
+	if *issue < 0 {
+		return fmt.Errorf("--issue must be 0 or more, got %d", *issue)
 	}
 	switch *state {
 	case "open", "closed", "merged", "all":
@@ -111,9 +115,6 @@ func cmdPRList(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	if err != nil {
 		return err
 	}
-	if *limit > 0 && len(prs) > *limit {
-		prs = prs[:*limit]
-	}
 	out := make([]listedPR, 0, len(prs))
 	for _, pr := range prs {
 		row := listedPR{Number: pr.Number, Title: pr.Title, State: pr.displayState(), Draft: pr.Draft, URL: pr.HTMLURL, Head: pr.Head.Ref, Base: pr.Base.Ref}
@@ -126,6 +127,18 @@ func cmdPRList(ctx context.Context, args []string, stdout, stderr io.Writer) err
 		}
 		out = append(out, row)
 	}
+	if *issue != 0 {
+		kept := out[:0]
+		for _, row := range out {
+			if row.Issue != nil && *row.Issue == *issue {
+				kept = append(kept, row)
+			}
+		}
+		out = kept
+	}
+	if *limit > 0 && len(out) > *limit {
+		out = out[:*limit]
+	}
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
 		enc.SetEscapeHTML(false)
@@ -135,6 +148,10 @@ func cmdPRList(ctx context.Context, args []string, stdout, stderr io.Writer) err
 		which := *state + " pull requests"
 		if *state == "all" {
 			which = "pull requests"
+		}
+		if *issue != 0 {
+			_, err := fmt.Fprintf(stdout, "No %s for issue #%d in %s.\n", which, *issue, cfg.Repo)
+			return err
 		}
 		_, err := fmt.Fprintf(stdout, "No %s in %s.\n", which, cfg.Repo)
 		return err

@@ -37,7 +37,7 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened, and merged
 | `amf issue "Title" [-b body \| -f file \| -f -] [--label L] [--no-label]` | Creates an issue labeled `amf:ready` (or `--label`'s label; none with `--no-label`). The title's and the label's surrounding whitespace are trimmed before posting. The body can also come from stdin when it's piped; `-b` and `-f` together are an error, and so is an explicit `--label` with `--no-label`. An empty or whitespace-only `--label` (without `--no-label`) fails with `--label can't be empty`, before anything is read or fetched. Prints `#N <url>`. |
 | `amf list [--state open\|closed\|all] [--label L] [--limit N] [--json]` | Lists issues, newest first (highest number first), with every page fetched and PRs left out. Columns: `ISSUE`, `STATE` (with `--state all` only), `AMF` (the issue's `amf` and `amf:*` labels, or `-`) and `TITLE`. `--limit N` (default `0`, no limit) prints only the first N issues after filtering; a negative value errors with `--limit must be 0 or more, got N`. Tabs in a title print as spaces. `--state` takes only `open`, `closed` or `all`. Prints `No … in owner/name.` when nothing matches. `--json` (default `false`) prints instead one JSON array and a newline, with no header: one object per issue, in the same order and after the same filters and limit, with exactly `number` (integer), `title`, `state`, `url` (the issue's GitHub page) and `labels` (every label name, in GitHub's order, `[]` when none); titles are kept as GitHub sent them, tabs included. Nothing matching prints `[]`. On an error nothing is printed to stdout, and a failure to write stdout is an error. Needs no git checkout. |
 | `amf pr` | Prints the pull request command group's usage to stdout, as `amf pr help`, `amf pr -h` and `amf pr --help` do. An unknown subcommand prints that usage to stderr and exits 2. |
-| `amf pr list [--state open\|closed\|merged\|all] [--limit N] [--json]` | Lists pull requests, including drafts, newest first. See [Pull requests](#pull-requests). |
+| `amf pr list [--state open\|closed\|merged\|all] [--limit N] [--issue N] [--json]` | Lists pull requests, including drafts, newest first. See [Pull requests](#pull-requests). |
 | `amf pr merge <N> [--squash \| --rebase] [--delete-branch]` | Merges a chosen PR (`42` or `#42`); no git checkout needed. See below. |
 | `amf pr view <N> [--json]` | Shows one pull request without a git checkout. See below. |
 | `amf pr diff <N> [--name-only]` | Prints a pull request's unified diff, or one changed path per line with `--name-only`; no git checkout needed. See below. |
@@ -199,6 +199,14 @@ by number descending so the highest number is first even when creation times tie
   titles print as spaces.
 - `--limit N` defaults to `0` (no limit), and applies after filtering and
   sorting. Negative values fail with `--limit must be 0 or more, got N`.
+- `--issue N` defaults to `0` (no filter). When set, only pull requests whose
+  `ISSUE` column is `#N` are kept — that is, a head branch named `amf/issue-N`
+  in this repository, so forks and deleted head repositories never match. The
+  filter applies before `--limit`, so `--issue 42 --limit 1` is the newest PR
+  for issue 42. Negative values fail with `--issue must be 0 or more, got N`
+  before anything is read or fetched. A filter that leaves nothing prints
+  `No <state> pull requests for issue #N in owner/name.` (`No pull requests
+  for issue #N in owner/name.` for `--state all`), and `--json` prints `[]`.
 - `--json` defaults to `false`. It prints one array and a newline with exactly
   `number` (integer), `title`, `state` (as in the table), `draft` (boolean),
   `url` (the PR's GitHub page), `head` and `base` (branch names), and `issue`
