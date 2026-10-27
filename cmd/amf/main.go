@@ -292,6 +292,11 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 	if slices.Contains(exclude, "") {
 		return errors.New("--exclude-label can't be empty")
 	}
+	for _, x := range exclude {
+		if strings.EqualFold(x, strings.TrimSpace(*label)) {
+			return fmt.Errorf("--exclude-label %q is the label watch is processing, so every issue would be skipped", x)
+		}
+	}
 	if *label == "" {
 		return errors.New("--label must not be empty")
 	}
