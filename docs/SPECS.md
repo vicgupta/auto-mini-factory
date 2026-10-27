@@ -84,7 +84,11 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened, and merged
   an issue already running isn't stopped. Each value is trimmed of
   surrounding whitespace, duplicates count once, and an empty or blank value
   fails `watch` at startup with `--exclude-label can't be empty`, before
-  anything is read or fetched. A label the repository doesn't have matches
+  anything is read or fetched. A value equal to the watched `--label`
+  (compared ignoring case, on the trimmed values) would skip every issue, so
+  `watch` fails at startup with `--exclude-label "…" is the label watch is
+  processing, so every issue would be skipped`, before anything is read or
+  fetched. A label the repository doesn't have matches
   nothing, and amf never creates one. `amf run N` doesn't take the flag and
   runs a held issue.
 - `--eval-rounds` is how many times a pipeline's eval stage may send the
