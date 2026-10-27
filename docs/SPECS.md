@@ -245,9 +245,12 @@ left alone. The PR's closing references close issues as usual.
 
 `amf pr view <N> [--json]` reads `.env` like `amf list`, checks that GitHub can
 access `GITHUB_REPO` first, fetches `GET /repos/{repo}/pulls/N`, and needs no
-git checkout. `N` may be `57` or `#57` and must be positive. Missing, extra or
-non-number arguments print `usage: amf pr view <number> [--json]` to stderr
-and exit 2, before reading configuration or GitHub.
+git checkout. `N` may be `57` or `#57` and must be positive. Missing or extra
+arguments print `usage: amf pr view <number> [--json]` to stderr and exit 2,
+before reading configuration or GitHub. A non-number or non-positive argument
+prints that same usage line plus `invalid pull request number "<N>": want a
+positive number` (with the argument as typed) to stderr, and exits 2, still
+before reading configuration or GitHub.
 
 The first line is `#N <title>`, followed by fields aligned at column 12:
 

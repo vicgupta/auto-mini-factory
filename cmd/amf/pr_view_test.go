@@ -249,25 +249,37 @@ func TestPRViewNotFound(t *testing.T) {
 
 func TestPRViewBadArgs(t *testing.T) {
 	t.Chdir(t.TempDir())
-	for _, args := range [][]string{
-		{"pr", "view"},
-		{"pr", "view", "--json"},
-		{"pr", "view", "1", "2"},
-		{"pr", "view", "abc"},
-		{"pr", "view", "#abc"},
-		{"pr", "view", "0"},
-		{"pr", "view", "#0"},
+	for _, tc := range []struct {
+		args   []string
+		reason string // expected parse-error text; "" when the case must print usage only
+	}{
+		{[]string{"pr", "view"}, ""},
+		{[]string{"pr", "view", "--json"}, ""},
+		{[]string{"pr", "view", "1", "2"}, ""},
+		{[]string{"pr", "view", "abc"}, `invalid pull request number "abc": want a positive number`},
+		{[]string{"pr", "view", "#abc"}, `invalid pull request number "#abc": want a positive number`},
+		{[]string{"pr", "view", "0"}, `invalid pull request number "0": want a positive number`},
+		{[]string{"pr", "view", "#0"}, `invalid pull request number "#0": want a positive number`},
 	} {
 		var out, stderr bytes.Buffer
-		err := run(context.Background(), args, nil, &out, &stderr)
+		err := run(context.Background(), tc.args, nil, &out, &stderr)
 		if !errors.Is(err, errUsage) {
-			t.Errorf("%v: %v", args, err)
+			t.Errorf("%v: %v", tc.args, err)
 		}
 		if out.Len() != 0 {
-			t.Errorf("%v: stdout %q", args, &out)
+			t.Errorf("%v: stdout %q", tc.args, &out)
 		}
 		if !strings.Contains(stderr.String(), "usage: amf pr view <number> [--json]") {
-			t.Errorf("%v: stderr %q", args, &stderr)
+			t.Errorf("%v: stderr %q", tc.args, &stderr)
+		}
+		if tc.reason == "" {
+			if strings.Contains(stderr.String(), "invalid pull request number") {
+				t.Errorf("%v: stderr %q, want usage only", tc.args, &stderr)
+			}
+			continue
+		}
+		if !strings.Contains(stderr.String(), tc.reason) {
+			t.Errorf("%v: stderr %q, want it to contain %q", tc.args, &stderr, tc.reason)
 		}
 	}
 }
