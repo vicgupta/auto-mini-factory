@@ -371,6 +371,8 @@ func TestCommandLineErrors(t *testing.T) {
 		{[]string{"issue", "A", "B"}, "usage"},
 		{[]string{"issue", "T", "-b", "x", "-f", "y.md"}, "use -b or -f"},
 		{[]string{"issue", "T", "-f", "/nonexistent/body.md"}, "no such file"},
+		{[]string{"issue", "T", "--label", ""}, "--label can't be empty"},
+		{[]string{"issue", "T", "--label", "  "}, "--label can't be empty"},
 		{[]string{"pipeline", "extra"}, "usage"},
 		{[]string{"pipeline", "--bogus"}, "usage"},
 		{[]string{"init", "extra"}, "usage"},
