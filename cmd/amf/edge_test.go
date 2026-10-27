@@ -394,6 +394,23 @@ func TestCommandLineErrors(t *testing.T) {
 	}
 }
 
+func TestIssueTrimsLabel(t *testing.T) {
+	gh, srv := newFakeGitHub(t)
+	t.Chdir(t.TempDir())
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	t.Setenv("GITHUB_REPO", "vic/demo")
+	t.Setenv("AMF_API_URL", srv.URL)
+
+	var stdout, stderr bytes.Buffer
+	err := run(context.Background(), []string{"issue", "T", "--label", " amf:ready "}, strings.NewReader(""), &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("%v: %s", err, stderr.String())
+	}
+	if is := gh.issues[1]; !is.HasLabel("amf:ready") || len(is.Labels) != 1 {
+		t.Fatalf("issue labels = %+v, want exactly [amf:ready]", is.Labels)
+	}
+}
+
 func TestPipelineCommandEdgeCases(t *testing.T) {
 	ctx := context.Background()
 	t.Chdir(t.TempDir())
