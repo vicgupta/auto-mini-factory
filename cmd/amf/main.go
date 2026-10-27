@@ -177,6 +177,9 @@ func cmdIssue(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 	if *noLabel && labelSet {
 		return errors.New("--label and --no-label can't be used together")
 	}
+	if !*noLabel && strings.TrimSpace(*label) == "" {
+		return errors.New("--label can't be empty")
+	}
 
 	text := *body
 	switch {

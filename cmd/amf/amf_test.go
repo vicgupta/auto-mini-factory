@@ -855,6 +855,28 @@ func TestIssueRejectsLabelWithNoLabel(t *testing.T) {
 	}
 }
 
+func TestIssueRejectsEmptyLabel(t *testing.T) {
+	gh, srv := newFakeGitHub(t)
+	t.Chdir(t.TempDir())
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	t.Setenv("GITHUB_REPO", "vic/demo")
+	t.Setenv("AMF_API_URL", srv.URL)
+
+	for _, label := range []string{"", "   "} {
+		var stdout, stderr bytes.Buffer
+		err := run(context.Background(), []string{"issue", "T", "--label", label}, strings.NewReader(""), &stdout, &stderr)
+		if err == nil {
+			t.Fatalf("--label %q should fail; stdout = %q", label, stdout.String())
+		}
+		if !strings.Contains(err.Error(), "--label can't be empty") {
+			t.Fatalf("error %q should name --label", err)
+		}
+	}
+	if len(gh.issues) != 0 {
+		t.Fatalf("rejected empty label still created issues: %+v", gh.issues)
+	}
+}
+
 func TestExcludeAMFDir(t *testing.T) {
 	root, _ := setupRepo(t)
 	ctx := context.Background()
