@@ -765,7 +765,10 @@ partial output. If Claim itself fails, the issue can be left on
    the tag that `https://github.com/vicgupta/auto-mini-factory/releases/latest`
    redirects to. If it equals the running version, print `amf <v> is up to
    date` and stop. `--check` stops here too: it prints `amf <v> is available
-   (you have <current>); run amf update`, except that when `--version` names
+   (you have <current>); run amf update` for the latest release, or
+   `amf <v> is available (you have <current>); run amf update --version <v>`
+   for an explicit target, using the normalized version. Checking does not
+   download or install a binary and exits successfully. When `--version` names
    a release older than the running one (both `vX.Y.Z`) it prints `amf <v>
    is older than this build (<current>); amf update --version <v> would
    downgrade`.
