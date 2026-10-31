@@ -1440,6 +1440,16 @@ func TestUpdateNoChange(t *testing.T) {
 	}
 }
 
+func TestUpdateTrimsVersionFlag(t *testing.T) {
+	var out bytes.Buffer
+	if err := run(context.Background(), []string{"update", "--check", "--version", " v0.0.7 "}, nil, &out, io.Discard); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if got := out.String(); !strings.Contains(got, "amf v0.0.7 is available") || strings.Contains(got, "v v0.0.7") {
+		t.Errorf("output = %q, want it to reference the trimmed v0.0.7", got)
+	}
+}
+
 func TestUpdateRefusesBadDownloads(t *testing.T) {
 	for _, tc := range []struct {
 		name, reports string

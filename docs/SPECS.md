@@ -49,7 +49,7 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened, and merged
 | `amf watch [--agent A] [--interval 60s] [--label amf:ready] [--exclude-label L]... [--agent-timeout 60m] [--eval-rounds 2] [--draft] [--merge[=squash\|rebase]] [--log-level L] [--log-file P]` | Polls open issues with the label (every page), oldest first by issue number (GitHub's `created_at` can tie for issues opened in the same second), and processes them one at a time until interrupted, skipping any issue that has one of the `--exclude-label` labels. |
 | `amf pipeline [--fetch]` | Checks the pipeline in `AGENTS.md` of the enclosing checkout, as it is on disk. See below. |
 | `amf doctor` | Checks the whole setup, one line per check, changing nothing. See below. |
-| `amf update [--version vX.Y.Z] [--check]` | Replaces the running binary with the latest release, or with the given one, which can be a downgrade. Needs no `.env`. See below. |
+| `amf update [--version vX.Y.Z] [--check]` | Replaces the running binary with the latest release, or with the given one, which can be a downgrade; surrounding whitespace on `--version` is trimmed. Needs no `.env`. See below. |
 | `amf version` | Prints `amf <version>`: the release tag, or the module version for `go install`. `amf --version` is the same. |
 | `amf help` | Prints the usage, as `-h` and `--help` do. |
 
@@ -755,7 +755,8 @@ partial output. If Claim itself fails, the issue can be left on
 
 ## Updating (`amf update`)
 
-1. Resolve the target: `--version` (a leading `v` is added if missing), or
+1. Resolve the target: `--version` (surrounding whitespace is trimmed, then
+   a leading `v` is added if missing), or
    the tag that `https://github.com/vicgupta/auto-mini-factory/releases/latest`
    redirects to. If it equals the running version, print `amf <v> is up to
    date` and stop. `--check` stops here too: it prints `amf <v> is available
