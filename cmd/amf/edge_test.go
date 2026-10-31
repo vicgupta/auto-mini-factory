@@ -353,6 +353,8 @@ func TestCommandLineErrors(t *testing.T) {
 		{[]string{"run", "1", "--log-level", "loud"}, "--log-level: log level must be"},
 		{[]string{"watch", "--log-level", "loud"}, "--log-level: log level must be"},
 		{[]string{"run", "#3"}, "GITHUB_TOKEN is not set"},
+		{[]string{"run", " 3"}, "GITHUB_TOKEN is not set"},
+		{[]string{"run", "#3 "}, "GITHUB_TOKEN is not set"},
 		{[]string{"watch", "extra"}, "usage"},
 		{[]string{"watch", "--interval", "0"}, "--interval must be positive"},
 		{[]string{"watch", "--timeout", "0"}, "--timeout: agent timeout must be positive"},

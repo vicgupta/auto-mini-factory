@@ -245,7 +245,7 @@ func cmdRun(ctx context.Context, args []string, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	n, err := strconv.Atoi(strings.TrimPrefix(pos[0], "#"))
+	n, err := strconv.Atoi(strings.TrimPrefix(strings.TrimSpace(pos[0]), "#"))
 	if err != nil || n <= 0 {
 		return fmt.Errorf("invalid issue number %q", pos[0])
 	}

@@ -45,7 +45,7 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened, and merged
 | `amf pr reopen <N>` | Reopens a chosen closed PR (`42` or `#42`); no git checkout needed. See below. |
 | `amf pr ready <N>` | Marks a draft pull request ready for review; no git checkout needed. See below. |
 | `amf pr draft <N>` | Converts a ready pull request back to a draft; no git checkout needed. See below. |
-| `amf run <N> [--agent A] [--agent-timeout 60m] [--eval-rounds 2] [--dry-run] [--draft] [--merge[=squash\|rebase]] [--log-level L] [--log-file P]` | Processes issue N (`42` or `#42`) once. |
+| `amf run <N> [--agent A] [--agent-timeout 60m] [--eval-rounds 2] [--dry-run] [--draft] [--merge[=squash\|rebase]] [--log-level L] [--log-file P]` | Processes issue N (`42` or `#42`, surrounding whitespace trimmed) once. |
 | `amf watch [--agent A] [--interval 60s] [--label amf:ready] [--exclude-label L]... [--agent-timeout 60m] [--eval-rounds 2] [--draft] [--merge[=squash\|rebase]] [--log-level L] [--log-file P]` | Polls open issues with the label (every page), oldest first by issue number (GitHub's `created_at` can tie for issues opened in the same second), and processes them one at a time until interrupted, skipping any issue that has one of the `--exclude-label` labels. |
 | `amf pipeline [--fetch]` | Checks the pipeline in `AGENTS.md` of the enclosing checkout, as it is on disk. See below. |
 | `amf doctor` | Checks the whole setup, one line per check, changing nothing. See below. |
@@ -224,7 +224,8 @@ Reads `.env` and the environment and checks repository access, as `amf list`
 does. Merges with a merge commit by default; `--squash` squashes and
 `--rebase` rebases. Both flags together fail before any GitHub call with
 `--squash and --rebase can't be used together`. Exactly one positive PR
-number is required. Missing or extra arguments and unknown flags exit 2;
+number is required; its surrounding whitespace is trimmed. Missing or extra
+arguments and unknown flags exit 2;
 invalid numbers and conflicting method flags exit 1. A bare negative
 number is parsed as an unknown flag and exits 2 (use `#-1` to pass it as
 a number, which exits 1).
@@ -254,7 +255,8 @@ left alone. The PR's closing references close issues as usual.
 
 `amf pr view <N> [--json]` reads `.env` like `amf list`, checks that GitHub can
 access `GITHUB_REPO` first, fetches `GET /repos/{repo}/pulls/N`, and needs no
-git checkout. `N` may be `57` or `#57` and must be positive. Missing or extra
+git checkout. `N` may be `57` or `#57`, must be positive, and its surrounding
+whitespace is trimmed. Missing or extra
 arguments print `usage: amf pr view <number> [--json]` to stderr and exit 2,
 before reading configuration or GitHub. A non-number or non-positive argument
 prints that same usage line plus `invalid pull request number "<N>": want a
@@ -297,7 +299,8 @@ nothing is written to stdout, and a failure to write stdout is an error.
 
 `amf pr diff <N> [--name-only]` reads `.env` like `amf list`, checks that
 GitHub can access `GITHUB_REPO` first, and needs no git checkout. `N` may be
-`57` or `#57` and must be positive. Missing, extra or non-number arguments
+`57` or `#57`, must be positive, and its surrounding whitespace is trimmed.
+Missing, extra or non-number arguments
 print `usage: amf pr diff <N> [--name-only]` to stderr and exit 2, before
 reading configuration or GitHub.
 
@@ -321,8 +324,8 @@ stdout, and a failure to write stdout is an error.
 
 Both read `.env` and the environment and check repository access, as `amf
 list` does, and need no git checkout. Exactly one positive PR number is
-required; missing or extra arguments and unknown flags exit 2, and an
-invalid number exits 1.
+required; its surrounding whitespace is trimmed. Missing or extra arguments
+and unknown flags exit 2, and an invalid number exits 1.
 
 `amf pr close` first reads `GET /repos/{repo}/pulls/N`. A merged PR fails
 with `#N is merged; it can't be closed`, and an already-closed PR prints
@@ -352,7 +355,8 @@ to retry an issue is still the user's step.
 
 Both read `.env` and the environment and check repository access, as `amf
 list` does, and need no git checkout. Exactly one positive PR number is
-required; missing, extra or non-number arguments print
+required; its surrounding whitespace is trimmed. Missing, extra or
+non-number arguments print
 `usage: amf pr <ready|draft> <N>` to stderr and exit 2, before reading
 configuration or GitHub.
 
