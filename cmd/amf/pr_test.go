@@ -44,16 +44,18 @@ func TestPRList(t *testing.T) {
 	gh.drafts = []bool{false, true, false, true}
 	listJSONEnv(t, srv)
 	for _, tc := range []struct {
+		name    string
 		state   string
 		numbers []int
 		states  []string
 	}{
-		{"open", []int{104, 103}, []string{"draft", "open"}},
-		{"closed", []int{102}, []string{"closed"}},
-		{"merged", []int{101}, []string{"merged"}},
-		{"all", []int{104, 103, 102, 101}, []string{"draft", "open", "closed", "merged"}},
+		{"open", "open", []int{104, 103}, []string{"draft", "open"}},
+		{"padded open", " open ", []int{104, 103}, []string{"draft", "open"}},
+		{"closed", "closed", []int{102}, []string{"closed"}},
+		{"merged", "merged", []int{101}, []string{"merged"}},
+		{"all", "all", []int{104, 103, 102, 101}, []string{"draft", "open", "closed", "merged"}},
 	} {
-		t.Run(tc.state, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			var out bytes.Buffer
 			err := run(context.Background(), []string{"pr", "list", "--json", "--state", tc.state}, nil, &out, io.Discard)
 			if err != nil {

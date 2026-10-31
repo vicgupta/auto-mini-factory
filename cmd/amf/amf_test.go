@@ -1197,6 +1197,9 @@ func TestListCommand(t *testing.T) {
 	if got := list("--state", "all"); !strings.Contains(got, "STATE") || !strings.Contains(got, "#1     closed  amf:done") {
 		t.Errorf("amf list --state all =\n%s", got)
 	}
+	if got := list("--state", " open "); got != list() {
+		t.Errorf("amf list --state with surrounding whitespace =\n%s\nwant same as default state", got)
+	}
 	if got := list("--label", "amf:ready"); strings.Contains(got, "#3") || !strings.Contains(got, "#2") {
 		t.Errorf("amf list --label amf:ready =\n%s", got)
 	}

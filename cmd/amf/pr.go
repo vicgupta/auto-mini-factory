@@ -98,6 +98,7 @@ func cmdPRList(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	if *issue < 0 {
 		return fmt.Errorf("--issue must be 0 or more, got %d", *issue)
 	}
+	*state = strings.TrimSpace(*state)
 	switch *state {
 	case "open", "closed", "merged", "all":
 	default:
