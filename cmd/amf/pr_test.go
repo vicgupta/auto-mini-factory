@@ -313,7 +313,7 @@ func TestPRListAPIError(t *testing.T) {
 }
 
 func TestParsePRNumber(t *testing.T) {
-	for _, s := range []string{"42", "#42"} {
+	for _, s := range []string{"42", "#42", " 42", "42 ", "\t42\t", " #42", "#42 "} {
 		if n, err := parsePRNumber(s); err != nil || n != 42 {
 			t.Errorf("%q: %d, %v", s, n, err)
 		}

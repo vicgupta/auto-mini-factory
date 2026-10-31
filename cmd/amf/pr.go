@@ -56,9 +56,10 @@ func cmdPR(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 }
 
-// parsePRNumber accepts a pull request number as "42" or "#42".
+// parsePRNumber accepts a pull request number as "42" or "#42", trimming
+// surrounding whitespace.
 func parsePRNumber(s string) (int, error) {
-	n, err := strconv.Atoi(strings.TrimPrefix(s, "#"))
+	n, err := strconv.Atoi(strings.TrimPrefix(strings.TrimSpace(s), "#"))
 	if err != nil || n <= 0 {
 		return 0, fmt.Errorf("invalid pull request number %q: want a positive number", s)
 	}
