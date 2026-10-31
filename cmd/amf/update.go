@@ -100,7 +100,11 @@ func (u *updater) run(ctx context.Context, target string, check bool) error {
 		return nil
 	}
 	if check {
-		fmt.Fprintf(u.out, "amf %s is available (you have %s); run amf update\n", target, u.current)
+		install := "amf update"
+		if pinned {
+			install += " --version " + target
+		}
+		fmt.Fprintf(u.out, "amf %s is available (you have %s); run %s\n", target, u.current, install)
 		return nil
 	}
 

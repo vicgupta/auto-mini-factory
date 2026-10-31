@@ -1414,24 +1414,32 @@ func TestUpdateReplacesBinary(t *testing.T) {
 
 func TestUpdateNoChange(t *testing.T) {
 	srv := fakeReleases(t, "v9.9.9", "amf v9.9.9", false)
+	handler := srv.Config.Handler
+	srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/releases/latest" {
+			t.Errorf("check must not fetch release assets: %s", r.URL.Path)
+		}
+		handler.ServeHTTP(w, r)
+	})
 	for _, tc := range []struct {
 		name, current, target string
 		check                 bool
 		want                  string
 	}{
 		{"up to date", "v9.9.9", "", false, "amf v9.9.9 is up to date"},
-		{"pinned, no v", "v9.9.9", "9.9.9", false, "is up to date"},
-		{"check only", "v0.0.7", "", true, "amf v9.9.9 is available (you have v0.0.7)"},
-		{"check newer pinned", "v0.0.7", "v9.9.9", true, "amf v9.9.9 is available (you have v0.0.7)"},
+		{"pinned, no v", "v9.9.9", "9.9.9", false, "amf v9.9.9 is up to date"},
+		{"check only", "v0.0.7", "", true, "amf v9.9.9 is available (you have v0.0.7); run amf update"},
+		{"check newer pinned", "v0.0.7", "v9.9.9", true, "amf v9.9.9 is available (you have v0.0.7); run amf update --version v9.9.9"},
+		{"check newer pinned, no v", "v0.0.7", "9.9.9", true, "amf v9.9.9 is available (you have v0.0.7); run amf update --version v9.9.9"},
 		{"check same pinned", "v9.9.9", "v9.9.9", true, "amf v9.9.9 is up to date"},
 		{"check older pinned", "v0.10.0", "v0.9.12", true, "amf v0.9.12 is older than this build (v0.10.0); amf update --version v0.9.12 would downgrade"},
-		{"check pinned on dev", "dev", "v0.0.1", true, "amf v0.0.1 is available (you have dev)"},
+		{"check pinned on dev", "dev", "v0.0.1", true, "amf v0.0.1 is available (you have dev); run amf update --version v0.0.1"},
 	} {
 		u, out := newTestUpdater(t, srv, tc.current)
 		if err := u.run(context.Background(), tc.target, tc.check); err != nil {
 			t.Fatalf("%s: %v", tc.name, err)
 		}
-		if !strings.Contains(out.String(), tc.want) {
+		if out.String() != tc.want+"\n" {
 			t.Errorf("%s: output = %q, want %q", tc.name, out, tc.want)
 		}
 		if mustRead(t, u.exe) != "old binary" {
@@ -1445,8 +1453,9 @@ func TestUpdateTrimsVersionFlag(t *testing.T) {
 	if err := run(context.Background(), []string{"update", "--check", "--version", " v0.0.7 "}, nil, &out, io.Discard); err != nil {
 		t.Fatalf("%v\n%s", err, out.String())
 	}
-	if got := out.String(); !strings.Contains(got, "amf v0.0.7 is available") || strings.Contains(got, "v v0.0.7") {
-		t.Errorf("output = %q, want it to reference the trimmed v0.0.7", got)
+	want := fmt.Sprintf("amf v0.0.7 is available (you have %s); run amf update --version v0.0.7\n", buildVersion())
+	if got := out.String(); got != want {
+		t.Errorf("output = %q, want %q", got, want)
 	}
 }
 
