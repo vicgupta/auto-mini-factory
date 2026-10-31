@@ -168,9 +168,12 @@ func cmdIssue(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 	// label. Reject the pair, so a script or typo gets a clear error instead
 	// of an unlabeled issue with no hint. fs.Visit tells an explicit --label
 	// apart from its amf:ready default, so plain --no-label keeps working.
-	var labelSet bool
+	var bodySet, labelSet bool
 	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "label" {
+		switch f.Name {
+		case "b":
+			bodySet = true
+		case "label":
 			labelSet = true
 		}
 	})
@@ -183,7 +186,7 @@ func cmdIssue(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 
 	text := *body
 	switch {
-	case *body != "" && *file != "":
+	case bodySet && *file != "":
 		return errors.New("use -b or -f, not both")
 	case *file == "-":
 		text, err = readAll(stdin)
@@ -191,7 +194,7 @@ func cmdIssue(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 		var b []byte
 		b, err = os.ReadFile(*file)
 		text = string(b)
-	case *body == "" && !isTerminal(stdin):
+	case !bodySet && !isTerminal(stdin):
 		text, err = readAll(stdin)
 	}
 	if err != nil {

@@ -833,6 +833,15 @@ func TestIssueCommand(t *testing.T) {
 	if is := gh.issues[2]; is.Body != "from stdin\n" || len(is.Labels) != 0 {
 		t.Fatalf("unexpected issue %+v", is)
 	}
+
+	// Explicit file selection can also read stdin.
+	err = run(context.Background(), []string{"issue", "Third", "-f", "-"}, strings.NewReader("from file stdin\n"), &stdout, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if is := gh.issues[3]; is.Body != "from file stdin\n" {
+		t.Fatalf("unexpected issue body %q", is.Body)
+	}
 }
 
 func TestIssueRejectsLabelWithNoLabel(t *testing.T) {
