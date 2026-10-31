@@ -2449,6 +2449,43 @@ func TestRetryKeepsDraftState(t *testing.T) {
 	}
 }
 
+func TestListHelpAndInvalidArgs(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("GITHUB_REPO", "")
+	for _, prefix := range [][]string{{"list"}, {"issue", "list"}} {
+		for _, tc := range []struct {
+			args []string
+			help bool
+		}{
+			{[]string{"-h"}, true},
+			{[]string{"--help"}, true},
+			{[]string{"--unknown"}, false},
+			{[]string{"--state"}, false},
+			{[]string{"unexpected"}, false},
+		} {
+			args := append(append([]string{}, prefix...), tc.args...)
+			t.Run(strings.Join(args, " "), func(t *testing.T) {
+				var stdout, stderr bytes.Buffer
+				err := run(context.Background(), args, nil, &stdout, &stderr)
+				if tc.help {
+					if err != nil {
+						t.Errorf("help: %v", err)
+					}
+					if !strings.Contains(stderr.String(), "Usage of list:") || !strings.Contains(stderr.String(), "-state") {
+						t.Errorf("stderr = %q, want list flag help", stderr.String())
+					}
+				} else if !errors.Is(err, errUsage) {
+					t.Errorf("error = %v, want errUsage", err)
+				}
+				if stdout.Len() != 0 {
+					t.Errorf("stdout = %q, want empty", stdout.String())
+				}
+			})
+		}
+	}
+}
+
 // listJSONEnv points amf list at srv from an empty directory.
 func listJSONEnv(t *testing.T, srv *httptest.Server) {
 	t.Chdir(t.TempDir())
