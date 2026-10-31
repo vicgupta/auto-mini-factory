@@ -43,6 +43,7 @@ func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	default:
 		return fmt.Errorf("--state must be open, closed or all, got %q", *state)
 	}
+	*label = strings.TrimSpace(*label)
 
 	cfg, err := loadConfig(envPaths(ctx)...)
 	if err != nil {

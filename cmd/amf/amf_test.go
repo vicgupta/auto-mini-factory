@@ -1166,7 +1166,7 @@ func TestListIssuesPaginates(t *testing.T) {
 func TestListCommand(t *testing.T) {
 	gh, srv := newFakeGitHub(t)
 	gh.issues[1] = &Issue{Number: 1, Title: "Old done", State: "closed", Labels: []Label{{Name: "amf:done"}, {Name: "bug"}}}
-	gh.issues[2] = &Issue{Number: 2, Title: "Waiting", State: "open", Labels: []Label{{Name: "amf:ready"}}}
+	gh.issues[2] = &Issue{Number: 2, Title: "Waiting", State: "open", Labels: []Label{{Name: "amf:ready"}, {Name: "team backend"}}}
 	gh.issues[3] = &Issue{Number: 3, Title: "Plain\tissue", State: "open"}
 	gh.issues[4] = &Issue{Number: 4, Title: "A PR", State: "open", PullRequest: &struct{}{}}
 	t.Chdir(t.TempDir())
@@ -1191,6 +1191,15 @@ func TestListCommand(t *testing.T) {
 	if got := list("--label", "amf:ready"); strings.Contains(got, "#3") || !strings.Contains(got, "#2") {
 		t.Errorf("amf list --label amf:ready =\n%s", got)
 	}
+	if got := list("--label", " amf:ready "); got != list("--label", "amf:ready") {
+		t.Errorf("padded label output =\n%s\nwant same as trimmed label output", got)
+	}
+	if got := list("--label", "team backend"); !strings.Contains(got, "#2") || strings.Contains(got, "#3") {
+		t.Errorf("internally spaced label output =\n%s", got)
+	}
+	if got := list("--label", " \t "); got != list() {
+		t.Errorf("whitespace-only label output =\n%s\nwant unfiltered output", got)
+	}
 	if got, want := list("--limit", "1"), "ISSUE  AMF  TITLE\n#3     -    Plain issue\n"; got != want {
 		t.Errorf("amf list --limit 1 =\n%s\nwant\n%s", got, want)
 	}
@@ -1209,6 +1218,10 @@ func TestListCommand(t *testing.T) {
 	if got := list("--state", "closed", "--label", "amf:failed"); got != "No closed issues labeled amf:failed in vic/demo.\n" {
 		t.Errorf("empty list = %q", got)
 	}
+	gh.issues[1].State = "open"
+	if got := list("--state", "closed", "--label", " \t "); got != "No closed issues in vic/demo.\n" {
+		t.Errorf("empty list with whitespace-only label = %q", got)
+	}
 	if err := run(context.Background(), []string{"list", "--state", "bogus"}, nil, io.Discard, io.Discard); err == nil {
 		t.Error("expected an error for --state bogus")
 	}
@@ -1218,7 +1231,7 @@ func TestListCommandJSON(t *testing.T) {
 	gh, srv := newFakeGitHub(t)
 	url := func(n int) string { return fmt.Sprintf("https://github.com/vic/demo/issues/%d", n) }
 	gh.issues[1] = &Issue{Number: 1, Title: "Old done", State: "closed", HTMLURL: url(1), Labels: []Label{{Name: "amf:done"}, {Name: "bug"}}}
-	gh.issues[2] = &Issue{Number: 2, Title: "Waiting", State: "open", HTMLURL: url(2), Labels: []Label{{Name: "enhancement"}, {Name: "amf:ready"}}}
+	gh.issues[2] = &Issue{Number: 2, Title: "Waiting", State: "open", HTMLURL: url(2), Labels: []Label{{Name: "enhancement"}, {Name: "amf:ready"}, {Name: "team backend"}}}
 	gh.issues[3] = &Issue{Number: 3, Title: "Plain\tissue", State: "open", HTMLURL: url(3)}
 	gh.issues[4] = &Issue{Number: 4, Title: "A PR", State: "open", PullRequest: &struct{}{}}
 	t.Chdir(t.TempDir())
@@ -1248,7 +1261,7 @@ func TestListCommandJSON(t *testing.T) {
 	raw, got := list()
 	want := []listedIssue{
 		{Number: 3, Title: "Plain\tissue", State: "open", URL: url(3), Labels: []string{}},
-		{Number: 2, Title: "Waiting", State: "open", URL: url(2), Labels: []string{"enhancement", "amf:ready"}},
+		{Number: 2, Title: "Waiting", State: "open", URL: url(2), Labels: []string{"enhancement", "amf:ready", "team backend"}},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("amf list --json = %+v, want %+v", got, want)
@@ -1276,6 +1289,15 @@ func TestListCommandJSON(t *testing.T) {
 	}
 	if _, got := list("--label", "amf:ready"); !slices.Equal(numbers(got), []int{2}) {
 		t.Errorf("amf list --json --label amf:ready = %+v", got)
+	}
+	if _, got := list("--label", " amf:ready "); !slices.Equal(numbers(got), []int{2}) {
+		t.Errorf("amf list --json --label padded amf:ready = %+v", got)
+	}
+	if _, got := list("--label", "team backend"); !slices.Equal(numbers(got), []int{2}) {
+		t.Errorf("amf list --json --label internally spaced = %+v", got)
+	}
+	if _, got := list("--label", " \t "); !slices.Equal(numbers(got), []int{3, 2}) {
+		t.Errorf("amf list --json --label whitespace-only = %+v", got)
 	}
 	if _, got := list("--state", "all", "--limit", "2"); !slices.Equal(numbers(got), []int{3, 2}) {
 		t.Errorf("amf list --json --state all --limit 2 = %+v", got)
