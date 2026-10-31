@@ -45,11 +45,12 @@ const usage = `amf turns GitHub issues into pull requests with coding agents: Cl
 
 Usage:
   amf init                                                           write .env (backing up an existing one) and create amf's labels
-  amf issue "Title" [-b body | -f file.md] [--label L] [--no-label]  create an issue (body may also come from stdin)
+  amf issue <command>                                                manage issues (create, list, run, watch)
+  amf issue "Title" [-b body | -f file.md] [--label L] [--no-label]  create an issue (body may also come from stdin) (alias of issue create)
   amf pr <command>                                                   manage pull requests (list, merge, view, diff, close, reopen, ready, draft)
-  amf list [--state open|closed|all] [--label L] [--limit N]         list issues, newest first, with their amf labels (also takes --json)
-  amf run <issue-number> [--agent A] [--agent-timeout 60m]           process one issue into a PR (also takes --draft, --dry-run, --merge, --eval-rounds, --log-level, --log-file)
-  amf watch [--agent A] [--interval 60s] [--label amf:ready]         process amf:ready issues as they arrive (also takes --exclude-label, --draft, --merge, --agent-timeout, --eval-rounds, --log-level, --log-file)
+  amf list [--state open|closed|all] [--label L] [--limit N]         list issues, newest first, with their amf labels (alias of issue list)
+  amf run <issue-number> [--agent A] [--agent-timeout 60m]           process one issue into a PR (alias of issue run; also takes --draft, --dry-run, --merge, --eval-rounds, --log-level, --log-file)
+  amf watch [--agent A] [--interval 60s] [--label amf:ready]         process amf:ready issues as they arrive (alias of issue watch; also takes --exclude-label, --draft, --merge, --agent-timeout, --eval-rounds, --log-level, --log-file)
   amf pipeline [--fetch]                                             check the plan/code/eval pipeline in this checkout's AGENTS.md
   amf doctor                                                         check the setup here, one line per check, changing nothing
   amf update [--version vX.Y.Z] [--check]                            replace this amf binary with the latest (or given) release
@@ -125,7 +126,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	case "list":
 		return cmdList(ctx, rest, stdout, stderr)
 	case "issue":
-		return cmdIssue(ctx, rest, stdin, stdout, stderr)
+		return cmdIssueGroup(ctx, rest, stdin, stdout, stderr)
 	case "run":
 		return cmdRun(ctx, rest, stderr)
 	case "watch":
@@ -148,7 +149,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 }
 
-func cmdIssue(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+func cmdIssueCreate(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("issue", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	body := fs.String("b", "", "issue body")
