@@ -28,6 +28,9 @@ func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	limit := fs.Int("limit", 0, "print at most N issues, 0 means no limit")
 	asJSON := fs.Bool("json", false, "print a JSON array of number, title, state, url and labels")
 	pos, err := parseArgs(fs, args)
+	if err == flag.ErrHelp {
+		return nil
+	}
 	if err != nil {
 		return errUsage
 	}
