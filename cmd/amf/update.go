@@ -42,6 +42,7 @@ func cmdUpdate(ctx context.Context, args []string, stdout, stderr io.Writer) err
 		fmt.Fprintln(stderr, "usage: amf update [--version vX.Y.Z] [--check]")
 		return errUsage
 	}
+	*target = strings.TrimSpace(*target)
 	exe, err := os.Executable()
 	if err != nil {
 		return err
