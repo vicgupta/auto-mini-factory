@@ -21,8 +21,8 @@ amf issue "Title" … is a shortcut for amf issue create "Title" …
 // `amf issue "Title"` form working as a shortcut for `create`.
 func cmdIssueGroup(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		fmt.Fprint(stdout, issueUsage)
-		return errUsage
+		_, err := fmt.Fprint(stdout, issueUsage)
+		return err
 	}
 	switch args[0] {
 	case "create":

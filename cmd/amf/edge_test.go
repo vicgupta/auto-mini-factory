@@ -368,7 +368,8 @@ func TestCommandLineErrors(t *testing.T) {
 		{[]string{"run", "1", "--exclude-label", "blocked"}, "usage"},
 		{[]string{"list", "extra"}, "usage"},
 		{[]string{"list", "--state", "bogus"}, "--state must be"},
-		{[]string{"issue"}, "usage"},
+		{[]string{"issue"}, ""},
+		{[]string{"issue", "create"}, "usage"},
 		{[]string{"issue", "   "}, "usage"},
 		{[]string{"issue", "A", "B"}, "usage"},
 		{[]string{"issue", "T", "-b", "x", "-f", "y.md"}, "use -b or -f"},
@@ -393,6 +394,33 @@ func TestCommandLineErrors(t *testing.T) {
 		case err == nil || errors.Is(err, errUsage) || !strings.Contains(err.Error(), tc.want):
 			t.Errorf("amf %q: error = %v, want %q", tc.args, err, tc.want)
 		}
+	}
+}
+
+func TestIssueGroupHelp(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("GITHUB_REPO", "")
+	for _, args := range [][]string{{"issue"}, {"issue", "help"}, {"issue", "-h"}, {"issue", "--help"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			stdin := &trackedReader{}
+			if err := run(context.Background(), args, stdin, &stdout, &stderr); err != nil {
+				t.Fatalf("help: %v", err)
+			}
+			if stdout.String() != issueUsage || stderr.Len() != 0 {
+				t.Fatalf("stdout = %q, stderr = %q; want issue usage and empty stderr", stdout.String(), stderr.String())
+			}
+			if stdin.reads != 0 {
+				t.Fatalf("help read stdin %d times", stdin.reads)
+			}
+		})
+	}
+}
+
+func TestIssueGroupHelpWriteError(t *testing.T) {
+	if err := run(context.Background(), []string{"issue"}, nil, failWriter{}, io.Discard); err == nil || !strings.Contains(err.Error(), "disk full") {
+		t.Fatalf("error = %v, want stdout write error", err)
 	}
 }
 
