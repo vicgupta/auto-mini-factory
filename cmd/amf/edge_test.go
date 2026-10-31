@@ -394,6 +394,69 @@ func TestCommandLineErrors(t *testing.T) {
 	}
 }
 
+type trackedReader struct {
+	reads int
+	text  string
+}
+
+func (r *trackedReader) Read(p []byte) (int, error) {
+	r.reads++
+	if r.text == "" {
+		return 0, io.EOF
+	}
+	n := copy(p, r.text)
+	r.text = r.text[n:]
+	return n, nil
+}
+
+func TestIssueExplicitEmptyBody(t *testing.T) {
+	gh, srv := newFakeGitHub(t)
+	t.Chdir(t.TempDir())
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	t.Setenv("GITHUB_REPO", "vic/demo")
+	t.Setenv("AMF_API_URL", srv.URL)
+
+	for _, args := range [][]string{{"issue", "T", "-b", ""}, {"issue", "T", "-b="}} {
+		stdin := &trackedReader{text: "unintended content"}
+		if err := run(context.Background(), args, stdin, io.Discard, io.Discard); err != nil {
+			t.Fatalf("amf %q: %v", args, err)
+		}
+		is := gh.issues[len(gh.issues)]
+		if is.Body != "" {
+			t.Errorf("amf %q body = %q, want empty", args, is.Body)
+		}
+		if stdin.reads != 0 {
+			t.Errorf("amf %q read stdin %d times", args, stdin.reads)
+		}
+	}
+}
+
+func TestIssueEmptyBodyConflictsWithFile(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("GITHUB_REPO", "")
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"body then missing file", []string{"issue", "T", "-b", "", "-f", "missing.md"}},
+		{"file then body", []string{"issue", "T", "-f", "missing.md", "-b", ""}},
+		{"body equals then stdin file", []string{"issue", "T", "-b=", "-f", "-"}},
+		{"stdin file then body equals", []string{"issue", "T", "-f", "-", "-b="}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stdin := &trackedReader{text: "must not read"}
+			err := run(context.Background(), tc.args, stdin, io.Discard, io.Discard)
+			if err == nil || err.Error() != "use -b or -f, not both" {
+				t.Fatalf("error = %v, want body/file conflict", err)
+			}
+			if stdin.reads != 0 {
+				t.Errorf("read stdin %d times", stdin.reads)
+			}
+		})
+	}
+}
+
 func TestIssueTrimsLabel(t *testing.T) {
 	gh, srv := newFakeGitHub(t)
 	t.Chdir(t.TempDir())
