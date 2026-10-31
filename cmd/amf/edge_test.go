@@ -2547,6 +2547,19 @@ type failWriter struct{}
 
 func (failWriter) Write([]byte) (int, error) { return 0, errors.New("disk full") }
 
+// Both issue-list entry points return errors writing an empty text result.
+func TestListEmptyWriteError(t *testing.T) {
+	for _, args := range [][]string{{"list"}, {"issue", "list"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			_, srv := newFakeGitHub(t)
+			listJSONEnv(t, srv)
+			if err := run(context.Background(), args, nil, failWriter{}, io.Discard); err == nil || !strings.Contains(err.Error(), "disk full") {
+				t.Fatalf("error = %v, want disk full", err)
+			}
+		})
+	}
+}
+
 // amf list --json returns the error when stdout can't be written.
 func TestListJSONWriteError(t *testing.T) {
 	_, srv := newFakeGitHub(t)

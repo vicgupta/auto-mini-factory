@@ -84,8 +84,8 @@ func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		if *label != "" {
 			which += " labeled " + *label
 		}
-		fmt.Fprintf(stdout, "No %s in %s.\n", which, cfg.Repo)
-		return nil
+		_, err := fmt.Fprintf(stdout, "No %s in %s.\n", which, cfg.Repo)
+		return err
 	}
 
 	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
