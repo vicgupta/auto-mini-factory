@@ -141,6 +141,17 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		fmt.Fprintln(stdout, "amf", buildVersion())
 		return nil
 	case "help", "-h", "--help":
+		// amf help issue and amf help pr print that group's usage.
+		if cmd == "help" && len(rest) > 0 {
+			switch rest[0] {
+			case "issue":
+				fmt.Fprint(stdout, issueUsage)
+				return nil
+			case "pr":
+				fmt.Fprint(stdout, prUsage)
+				return nil
+			}
+		}
 		fmt.Fprint(stdout, usage)
 		return nil
 	default:
