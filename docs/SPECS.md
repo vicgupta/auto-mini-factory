@@ -2,8 +2,9 @@
 
 amf (autonomous mini factory) turns labeled GitHub issues into pull requests by
 running coding agents headless in a git worktree. By default that's one run of
-a single agent: the one `--agent` names, or else Claude Code or Codex if it's
-installed and has an API key or token, then opencode. A repo can instead declare a plan → code → eval pipeline in its
+a single agent: the one `--agent` names, or else the primary agent
+(`AMF_PRIMARY_AGENT`, default Codex), falling back to the secondary
+(`AMF_SECONDARY_AGENT`, default Claude Code) if the primary fails. A repo can instead declare a plan → code → eval pipeline in its
 `AGENTS.md`, with a skill, agent and model for each stage. amf is a single Go
 binary that uses only the standard library, for one developer or a small team
 that doesn't want to run a platform.
@@ -149,13 +150,41 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened, and merged
   and never fall back to another. Any other value is an error. A repo with a
   pipeline ignores `--agent`, since the pipeline names each stage's agent;
   amf logs `ignoring --agent <agent>` for each such issue.
-- **Without `--agent`,** amf picks for each issue the first usable agent of:
+- **Without `--agent`,** amf runs the primary agent, `AMF_PRIMARY_AGENT`
+  (default `codex`), and if it fails, the secondary, `AMF_SECONDARY_AGENT`
+  (default `claudecode`). Both take `claudecode` (or `claude`), `codex` or
+  `opencode`, ignoring case; the secondary may also be `none`, for no
+  fallback. A secondary equal to the primary is the same as `none`. An empty
+  value counts as unset. Any other value is a config error that `run`,
+  `watch`, `issue run`, `issue watch` and `pipeline` report before doing
+  anything, and `doctor` shows as `FAIL agent settings`.
+  - **Failure** is any of: the agent isn't usable (below; decided before any
+    run), a non-zero exit or error result, the agent timeout, finishing
+    without changes, or a change to a refused path. Interrupting amf (Ctrl-C)
+    is not a failure and falls back to nothing.
+  - **Fallback** starts the secondary in a fresh worktree on `amf/issue-N`,
+    reset to `origin/<default>`, so nothing the primary left is kept. Its
+    output goes to `.amf/logs/issue-N-<agent>.log`. amf logs an
+    `agent.fallback` event (`from`, `to`, `reason`: `unusable`, `error` or
+    `agent_timeout`, `error`). When the secondary made the change after the
+    primary ran and failed, the PR body and the issue comment say
+    `<agent> made the change, after amf fell back from <agent> failed: <error>.`
+  - **Both failing** fails the issue as one agent failing would, with the
+    error `every agent failed: <primary> failed: ..., then <secondary> failed: ...`.
+  - **Precedence:** a pipeline's per-stage agent always wins; `--agent` runs
+    exactly that agent with no fallback; otherwise the primary and
+    secondary. If neither of them is usable, amf picks as before: the first
+    usable agent of:
 
   | Agent | Usable when |
   |---|---|
   | `claude` | installed, and `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` is set |
   | `codex` | installed, and `OPENAI_API_KEY` is set |
   | `opencode` | installed, and either `OPENCODE_MODEL` is free (`opencode/big-pickle`, an `opencode/` id ending in `-free`, or another provider's model), `OPENCODE_API_KEY` is set, or opencode has a saved login for the model's provider |
+
+  The same rule decides whether the primary and secondary are usable. Before
+  `AMF_PRIMARY_AGENT`, amf always tried claude first; the default order is
+  now codex, then claude.
 
   Keys come from the environment or `.env`; placeholders don't count. An
   installed claude or codex without its key is skipped, even if it has a
@@ -171,8 +200,9 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened, and merged
   installed`), whether its key is set (naming the one that is; for
   opencode, `needs no key`, `uses its saved login` or `OPENCODE_API_KEY not
   set and no saved login`), for opencode the model it runs with, and
-  `usable` or `skipped`. Then it logs which agent issues without a pipeline run, or a
-  warning that none is available.
+  `usable` or `skipped`. Then it logs which agents issues without a pipeline
+  run (`codex, then claude if it fails (primary codex, secondary claudecode)`),
+  or a warning that none is available.
 
 **Exit codes:** 0 on success, 1 on error, 2 on a usage error (no command,
 an unknown one, a bad flag or the wrong arguments; no command or an unknown
@@ -415,8 +445,8 @@ permission) fails with its first message and leaves the PR as it was.
 1. Must run inside a git checkout. Reads `AGENTS.md` at its top level from
    disk, so a change can be checked before it's merged.
 2. Without `AGENTS.md`, or without an `## amf` table in it, prints which
-   agent amf runs with its built-in prompt (picked as for `--agent` above,
-   with the reason each earlier agent was skipped) and exits 0. If none is
+   agents amf runs with its built-in prompt (the primary, then the
+   secondary, as above, with the reason each skipped agent wasn't usable) and exits 0. If none is
    usable it says so and exits 1.
 3. Otherwise prints the stages (`STAGE`, `AGENT`, `MODEL`, `SKILL`; an
    opencode stage with no model shows `<OPENCODE_MODEL> (OPENCODE_MODEL)`), then one
@@ -452,6 +482,8 @@ never prints a secret. The checks, in order:
 | `git push` | `git push --dry-run` to `origin` works with the user's git credentials, without prompting | `FAIL`, with git's message |
 | `git identity` | git has a name and email to commit with, in the checkout (or here); shows them | `FAIL`, with the `git config` commands to set them |
 | `log folder` | `.amf/runs/` in the checkout can be written: doctor writes and removes a file in it, or in the nearest folder above it while it doesn't exist yet | `FAIL`, naming the folder and the error; `skip` without a checkout |
+| `primary agent`, `secondary agent` | `AMF_PRIMARY_AGENT` and `AMF_SECONDARY_AGENT`: the agent, where the value is from (the default, `.env` or the environment), its path and version, and its key status | `warn` if it isn't installed or has no key; `ok` for a secondary of `none` (or equal to the primary): amf doesn't fall back. `FAIL agent settings` for an invalid value |
+| `agent order` | Which agents issues without a pipeline run, e.g. `codex, then claude if it fails` | `warn` when neither configured agent is usable and amf falls back to the first usable of claude, codex and opencode |
 | `pipeline` | Fetches the default branch; shows the pipeline from `AGENTS.md` on it, or that there is none | `FAIL` if the table doesn't parse |
 | `skill <stage>` | Each stage's skill downloads as in `run`; shows its size and SHA-256 | `FAIL` |
 | `claudecode`, `codex`, `opencode` | Installed; shows the path and `--version`. With no pipeline, the agent amf picks adds `runs issues without a pipeline`, and the `pipeline` line names it | `FAIL` if a stage needs it. With no pipeline: one `FAIL` on `claudecode` if no agent is usable; `warn` for an installed `claude` or `codex` without its key, or `opencode` that can't run a paid `OPENCODE_MODEL` (see `opencode auth`), naming the agent amf runs instead; `warn` for one that isn't installed |
@@ -485,6 +517,8 @@ space, a trailing comment. A leading byte order mark is ignored.
 | `AMF_TRUSTED` | unset | GitHub logins, separated by commas or spaces (a leading `@` is allowed, case is ignored). When set, amf only works on issues they opened. Unset means anyone's |
 | `AMF_POSTGRES_URL` | unset | A PostgreSQL server that `run` and `watch` also write their logs to. See [Logging to PostgreSQL](#logging-to-postgresql) |
 | `AMF_CLAUDE` | `claude` | Path to the Claude CLI |
+| `AMF_PRIMARY_AGENT` | `codex` | The agent for issues without a pipeline: `claudecode` (or `claude`), `codex` or `opencode`, ignoring case. `--agent` and a pipeline override it |
+| `AMF_SECONDARY_AGENT` | `claudecode` | The agent amf falls back to when the primary fails, in a fresh worktree; the same values, or `none` for no fallback |
 | `AMF_AGENT_TIMEOUT` | `60m` | How long each agent run may take, as a Go duration; `--agent-timeout` (or its alias `--timeout`) overrides it. Must be at least 1m and at most 24h |
 | `AMF_LOG_LEVEL` | `info` (terminal), `debug` (event log) | `debug`, `info`, `warn` or `error`, for both the terminal and the event log of `run` and `watch`; `--log-level` overrides it |
 | `AMF_CODEX` | `codex` | Path to the Codex CLI |
@@ -813,6 +847,7 @@ redirect to a URL ending in the tag, and serve the archive and
 | `.env`, `.env.NNNN` | Configuration and its backups (permissions 0600, git-excluded) |
 | `.amf/worktrees/issue-N/` | Working copy for an issue in progress or failed |
 | `.amf/logs/issue-N.log` | The agent's output for the latest run of issue N, without a pipeline (stream-json for Claude) |
+| `.amf/logs/issue-N-<agent>.log` | The secondary agent's output, when amf fell back to it |
 | `.amf/logs/issue-N[-<stage>].partial.md` | An agent's final-message file, kept (redacted) after a timeout cut the run short |
 | `.amf/logs/issue-N-<stage>.log` | Each pipeline stage's output: `plan`, `code-K`, `eval-K` |
 | `.amf/runs/issue-N/` | The latest pipeline run's `plan.md` and `eval-K.md` |
@@ -836,6 +871,7 @@ event log opens, are not. The fields of each event, besides those:
 
 | Event | Level | Fields |
 |---|---|---|
+| `agent.fallback` | warn | Without a pipeline, the primary agent failed or wasn't usable: `from`, `to`, `reason` (`unusable`, `error` or `agent_timeout`) and `error` |
 | `log.file` | info | `path`: the event log |
 | `run.summary` | debug, info | The fields of `summary.json` (see Commands) as `done`, `failed`, `skipped`, `github_calls`, `ratelimit_lowest`, `git_calls`, `agent_ms`, `errors`, `log`, and `final`: false (debug) after an issue, true (info, the terminal's last line) at exit |
 | `config.load` | debug | `paths` (the `.env` files looked for), `file` (the one read, or `""`), and `keys`: for each variable read, its `source` (`env`, `.env` or `default`) and `value`. Only `GITHUB_REPO`, `AMF_API_URL`, `OPENCODE_MODEL`, `AMF_AGENT_TIMEOUT`, `AMF_LOG_LEVEL`, `AMF_CLAUDE`, `AMF_CODEX` and `AMF_OPENCODE` show their value; every other one shows `set` or `unset` |

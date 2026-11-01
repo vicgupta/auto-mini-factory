@@ -47,6 +47,13 @@ type Config struct {
 	// defaulting to defaultOpencodeModel.
 	OpencodeModel string
 
+	// PrimaryAgent and SecondaryAgent are AMF_PRIMARY_AGENT and
+	// AMF_SECONDARY_AGENT as written: the agent amf runs first for an issue
+	// without a pipeline, and the one it falls back to when that fails.
+	// Config.agents parses them, so a bad value fails only run, watch and
+	// doctor, which names it.
+	PrimaryAgent, SecondaryAgent string
+
 	// PostgresURL is AMF_POSTGRES_URL, a PostgreSQL server amf also writes
 	// the logs of amf run and amf watch to, in the amflogs database.
 	// Optional.
@@ -122,18 +129,20 @@ func loadConfig(paths ...string) (Config, error) {
 		Codex:    get("AMF_CODEX", "codex"),
 		Opencode: get("AMF_OPENCODE", "opencode"),
 
-		ClaudeToken:   get("CLAUDE_CODE_OAUTH_TOKEN", ""),
-		AnthropicKey:  get("ANTHROPIC_API_KEY", ""),
-		OpenAIKey:     get("OPENAI_API_KEY", ""),
-		OpencodeKey:   get("OPENCODE_API_KEY", ""),
-		OpencodeModel: get("OPENCODE_MODEL", defaultOpencodeModel),
-		PostgresURL:   get("AMF_POSTGRES_URL", ""),
-		Trusted:       parseTrusted(get("AMF_TRUSTED", "")),
-		AgentTimeout:  get("AMF_AGENT_TIMEOUT", ""),
-		LogLevel:      get("AMF_LOG_LEVEL", ""),
-		EnvPaths:      paths,
-		EnvFile:       envFile,
-		seen:          seen,
+		ClaudeToken:    get("CLAUDE_CODE_OAUTH_TOKEN", ""),
+		AnthropicKey:   get("ANTHROPIC_API_KEY", ""),
+		OpenAIKey:      get("OPENAI_API_KEY", ""),
+		OpencodeKey:    get("OPENCODE_API_KEY", ""),
+		OpencodeModel:  get("OPENCODE_MODEL", defaultOpencodeModel),
+		PostgresURL:    get("AMF_POSTGRES_URL", ""),
+		PrimaryAgent:   get("AMF_PRIMARY_AGENT", defaultPrimaryAgent),
+		SecondaryAgent: get("AMF_SECONDARY_AGENT", defaultSecondaryAgent),
+		Trusted:        parseTrusted(get("AMF_TRUSTED", "")),
+		AgentTimeout:   get("AMF_AGENT_TIMEOUT", ""),
+		LogLevel:       get("AMF_LOG_LEVEL", ""),
+		EnvPaths:       paths,
+		EnvFile:        envFile,
+		seen:           seen,
 	}
 	if cfg.Token == "" {
 		return cfg, errors.New("GITHUB_TOKEN is not set (run amf init, then edit .env)")
@@ -224,7 +233,7 @@ func parseDotEnv(r io.Reader) (map[string]string, error) {
 
 // shownConfig are the variables whose values config.load may log; every
 // other one is logged only as set or unset.
-var shownConfig = []string{"GITHUB_REPO", "AMF_API_URL", "OPENCODE_MODEL", "AMF_AGENT_TIMEOUT", "AMF_LOG_LEVEL", "AMF_CLAUDE", "AMF_CODEX", "AMF_OPENCODE"}
+var shownConfig = []string{"GITHUB_REPO", "AMF_API_URL", "OPENCODE_MODEL", "AMF_AGENT_TIMEOUT", "AMF_LOG_LEVEL", "AMF_CLAUDE", "AMF_CODEX", "AMF_OPENCODE", "AMF_PRIMARY_AGENT", "AMF_SECONDARY_AGENT"}
 
 // configAttrs is, for config.load, each variable loadConfig read with where
 // it came from and its value, or set or unset for those not in shownConfig.

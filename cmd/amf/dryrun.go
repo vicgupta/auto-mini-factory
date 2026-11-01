@@ -14,7 +14,7 @@ import (
 // or merge; amf only reads the issue, the repo and the branch's open PR. A
 // failure is returned without marking the issue failed, and a timed-out
 // run's worktree is removed as usual.
-func (r *Runner) dryRun(ctx context.Context, issue Issue, base string, p *Pipeline, agent string) (err error) {
+func (r *Runner) dryRun(ctx context.Context, issue Issue, base string, p *Pipeline, agent runPlan) (err error) {
 	n := issue.Number
 	defer func() {
 		if err == nil {
