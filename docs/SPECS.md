@@ -176,7 +176,8 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened, and merged
 
 **Exit codes:** 0 on success, 1 on error, 2 on a usage error (no command,
 an unknown one, a bad flag or the wrong arguments; no command or an unknown
-one also prints the usage to stderr). Errors print as `amf: <error>` on
+one also prints the usage to stderr; an unknown command close to a real
+one, such as `lst`, first prints `Did you mean "list"?`). Errors print as `amf: <error>` on
 stderr. SIGINT and
 SIGTERM cancel the current step, with the run's process group killed as on
 expiry; the issue is still marked failed.
