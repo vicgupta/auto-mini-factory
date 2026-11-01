@@ -60,10 +60,12 @@ Configuration is read from .env (or the environment):
   GITHUB_TOKEN   token with contents, issues and pull-requests write access
   GITHUB_REPO    owner/name
   CLAUDE_CODE_OAUTH_TOKEN  optional subscription token for Claude Code (claude setup-token)
-  ANTHROPIC_API_KEY        optional Claude API key; with it or the token above, amf picks claude
-  OPENAI_API_KEY           optional OpenAI API key; with it, amf picks codex when claude can't run
+  ANTHROPIC_API_KEY        optional Claude API key; with it or the token above, claude is usable
+  OPENAI_API_KEY           optional OpenAI API key; with it, codex is usable
   OPENCODE_API_KEY         optional OpenCode Console API key, for paid opencode/ and Go opencode-go/ models
   OPENCODE_MODEL           model for opencode (default opencode/big-pickle); see opencode models
+  AMF_PRIMARY_AGENT        agent for issues without a pipeline: claudecode, codex or opencode (default codex)
+  AMF_SECONDARY_AGENT      agent amf falls back to if the primary fails, or none (default claudecode)
   AMF_AGENT_TIMEOUT        how long each agent run may take, a Go duration (default 60m);
                            --agent-timeout, or its deprecated alias --timeout, overrides it
   AMF_LOG_LEVEL            debug, info, warn or error (default info, and debug in .amf/runs/); --log-level overrides it
@@ -87,10 +89,13 @@ run and watch work in the enclosing git checkout. Started anywhere else, they
 clone GITHUB_REPO into ./<name> (or reuse that clone) and work there.
 
 Without a pipeline, each issue gets one agent run: the agent --agent names
-(claudecode, codex or opencode), or else claude if it's installed and has
-ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN, else codex if it's installed and
-has OPENAI_API_KEY, else opencode (which needs OPENCODE_API_KEY or its own
-login for a paid OPENCODE_MODEL). amf watch shows what it found for each.
+(claudecode, codex or opencode), with no fallback, or else AMF_PRIMARY_AGENT
+(default codex); if it fails, amf runs AMF_SECONDARY_AGENT (default
+claudecode) in a clean worktree. claude needs ANTHROPIC_API_KEY or
+CLAUDE_CODE_OAUTH_TOKEN, codex OPENAI_API_KEY, and opencode OPENCODE_API_KEY
+or its own login for a paid OPENCODE_MODEL. If neither configured agent can
+run, amf picks the first of claude, codex and opencode that can. amf watch
+shows what it found for each.
 
 A repo can declare a pipeline in its AGENTS.md: a table under "## amf" with a
 plan, code and eval stage, each naming a skill URL, an agent (claudecode,
@@ -369,7 +374,7 @@ func (f *labelsFlag) Set(s string) error {
 var errDraftMerge = errors.New("--draft and --merge can't be used together: GitHub doesn't merge draft pull requests")
 
 // agentFlagHelp describes --agent for run and watch.
-const agentFlagHelp = "agent for issues without a pipeline: claudecode, codex or opencode (default: claude if installed with ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN, else codex if installed with OPENAI_API_KEY, else opencode)"
+const agentFlagHelp = "agent for issues without a pipeline: claudecode, codex or opencode with no fallback (default: AMF_PRIMARY_AGENT, codex, then AMF_SECONDARY_AGENT, claudecode, if it fails)"
 
 // draftFlagHelp describes --draft for run and watch.
 const draftFlagHelp = "open new pull requests as drafts (a retry leaves an open PR a draft or ready for review as it was)"
@@ -548,6 +553,10 @@ func shownPath(root, path string) string {
 }
 
 func newRunnerFrom(ctx context.Context, cfg Config, timeout time.Duration, evalRounds int, agent string, log io.Writer) (*Runner, error) {
+	primary, secondary, err := cfg.agents()
+	if err != nil {
+		return nil, err
+	}
 	// A named agent must be there; the fallback order only applies without --agent.
 	agents := &Runner{Claude: cfg.Claude, Codex: cfg.Codex, Opencode: cfg.Opencode, Agent: agent} // --agent needs no key
 	if agent != "" {
@@ -579,6 +588,8 @@ func newRunnerFrom(ctx context.Context, cfg Config, timeout time.Duration, evalR
 		Codex:         cfg.Codex,
 		Opencode:      cfg.Opencode,
 		Agent:         agent,
+		Primary:       primary,
+		Secondary:     secondary,
 		ClaudeToken:   cfg.ClaudeToken,
 		AnthropicKey:  cfg.AnthropicKey,
 		OpenAIKey:     cfg.OpenAIKey,
