@@ -2798,3 +2798,23 @@ func TestIssueTypoSubcommandDoesNotCreateIssue(t *testing.T) {
 		t.Errorf("stdout = %q", out.String())
 	}
 }
+
+func TestHelpTopicPrintsGroupUsage(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"help", "issue"}, issueUsage},
+		{[]string{"help", "pr"}, prUsage},
+		{[]string{"help", "bogus"}, usage},
+		{[]string{"help"}, usage},
+	} {
+		var out, errb strings.Builder
+		if err := run(context.Background(), tc.args, strings.NewReader(""), &out, &errb); err != nil {
+			t.Fatalf("%v: %v", tc.args, err)
+		}
+		if out.String() != tc.want || errb.Len() != 0 {
+			t.Errorf("%v: wrong output %q / stderr %q", tc.args, out.String(), errb.String())
+		}
+	}
+}

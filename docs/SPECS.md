@@ -52,7 +52,7 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened, and merged
 | `amf doctor` | Checks the whole setup, one line per check, changing nothing. See below. |
 | `amf update [--version vX.Y.Z] [--check]` | Replaces the running binary with the latest release, or with the given one, which can be a downgrade; surrounding whitespace on `--version` is trimmed. Needs no `.env`. See below. |
 | `amf version` | Prints `amf <version>`: the release tag, or the module version for `go install`. `amf --version` is the same. |
-| `amf help` | Prints the usage, as `-h` and `--help` do. |
+| `amf help` | Prints the usage, as `-h` and `--help` do. `amf help issue` and `amf help pr` print that command group's usage instead, as `amf issue help` and `amf pr help` do; any other word after `help` is ignored and the usage is printed. |
 
 - `--agent-timeout` limits each agent run, not the whole issue; the old
   `--timeout` is accepted as a deprecated alias of it. Both must be at least
