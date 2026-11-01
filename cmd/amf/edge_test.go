@@ -368,6 +368,8 @@ func TestCommandLineErrors(t *testing.T) {
 		{[]string{"watch", "--label", ""}, "--label must not be empty"},
 		{[]string{"run", "1", "--exclude-label", "blocked"}, "usage"},
 		{[]string{"list", "extra"}, "usage"},
+		{[]string{"list", "--unknown"}, "usage"},
+		{[]string{"list", "--state"}, "usage"},
 		{[]string{"list", "--state", "bogus"}, "--state must be"},
 		{[]string{"issue"}, ""},
 		{[]string{"issue", "create"}, "usage"},
@@ -395,6 +397,26 @@ func TestCommandLineErrors(t *testing.T) {
 		case err == nil || errors.Is(err, errUsage) || !strings.Contains(err.Error(), tc.want):
 			t.Errorf("amf %q: error = %v, want %q", tc.args, err, tc.want)
 		}
+	}
+}
+
+func TestListHelp(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("GITHUB_REPO", "")
+	for _, args := range [][]string{
+		{"list", "-h"}, {"list", "--help"},
+		{"issue", "list", "-h"}, {"issue", "list", "--help"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if err := run(context.Background(), args, nil, &stdout, &stderr); err != nil {
+				t.Fatalf("help: %v", err)
+			}
+			if stdout.Len() != 0 || !strings.Contains(stderr.String(), "Usage of list:") || !strings.Contains(stderr.String(), "-state") {
+				t.Fatalf("stdout = %q, stderr = %q; want empty stdout and list flag help on stderr", stdout.String(), stderr.String())
+			}
+		})
 	}
 }
 
