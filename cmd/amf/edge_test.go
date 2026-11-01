@@ -2806,7 +2806,7 @@ func TestHelpTopicPrintsGroupUsage(t *testing.T) {
 	}{
 		{[]string{"help", "issue"}, issueUsage},
 		{[]string{"help", "pr"}, prUsage},
-		{[]string{"help", "bogus"}, usage},
+		{[]string{"help", "run"}, usage},
 		{[]string{"help"}, usage},
 	} {
 		var out, errb strings.Builder
@@ -2816,5 +2816,21 @@ func TestHelpTopicPrintsGroupUsage(t *testing.T) {
 		if out.String() != tc.want || errb.Len() != 0 {
 			t.Errorf("%v: wrong output %q / stderr %q", tc.args, out.String(), errb.String())
 		}
+	}
+}
+
+func TestHelpUnknownTopic(t *testing.T) {
+	var out, errb bytes.Buffer
+	err := run(context.Background(), []string{"help", "isue"}, nil, &out, &errb)
+	if !errors.Is(err, errUsage) || out.Len() != 0 {
+		t.Fatalf("err %v, stdout %q", err, &out)
+	}
+	if e := errb.String(); !strings.Contains(e, `unknown help topic "isue"`) || !strings.Contains(e, `Did you mean "issue"?`) {
+		t.Fatalf("stderr: %q", e)
+	}
+	// A real command without its own help still prints the usage.
+	out.Reset()
+	if err := run(context.Background(), []string{"help", "run"}, nil, &out, io.Discard); err != nil || !strings.Contains(out.String(), "Usage:") {
+		t.Fatalf("help run: %v, %q", err, &out)
 	}
 }
