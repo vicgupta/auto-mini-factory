@@ -65,6 +65,8 @@ ANTHROPIC_API_KEY=sk-ant-api03-...   # optional: Claude API key, used if there's
 OPENAI_API_KEY=sk-proj-...   # optional: OpenAI API key for codex
 # OPENCODE_API_KEY=oc_sk_...   # optional: OpenCode Console API key, for pay-as-you-go and Go models
 # OPENCODE_MODEL=opencode/big-pickle   # opencode/<id> for free and pay-as-you-go models, opencode-go/<id> for Go; 'opencode models' lists them
+# AMF_PRIMARY_AGENT=codex   # optional: claudecode, codex or opencode; the agent for issues without a pipeline
+# AMF_SECONDARY_AGENT=claudecode   # optional: claudecode, codex, opencode or none; runs when the primary fails
 # AMF_AGENT_TIMEOUT=60m   # optional: how long each agent run may take (--agent-timeout overrides it)
 # AMF_LOG_LEVEL=info   # optional: debug, info, warn or error, for the terminal and the event log in .amf/runs/
 AMF_TRUSTED=login1,login2...   # optional: only work on issues opened by these GitHub users
@@ -177,8 +179,20 @@ amf run 42 --dry-run        # make the change locally and show the PR, touching 
 
 ### Choosing the agent
 
-Without a pipeline, each issue gets one agent run. Unless you name one, amf
-uses the first of these that's ready:
+Without a pipeline, each issue gets one agent run: the primary agent,
+`AMF_PRIMARY_AGENT` (default `codex`). If it fails (it isn't ready, exits
+with an error, times out, or makes no change), amf runs the secondary,
+`AMF_SECONDARY_AGENT` (default `claudecode`), in a clean worktree reset to
+the default branch, and the PR and issue comment say which agent made the
+change. If both fail, the error names both. Set `AMF_SECONDARY_AGENT=none`
+for no fallback. Either takes `claudecode` (or `claude`), `codex` or
+`opencode`.
+
+**Changed:** amf used to try claude first; the default order is now codex,
+then claude. Set `AMF_PRIMARY_AGENT=claudecode` and
+`AMF_SECONDARY_AGENT=codex` for the old order.
+
+If neither is ready, amf uses the first of these that's ready:
 
 | Agent | Ready when |
 |---|---|
@@ -195,13 +209,14 @@ amf: agents for issues without a pipeline (claude and codex need a key, opencode
 amf:   claude   installed at /Users/vic/.local/bin/claude; CLAUDE_CODE_OAUTH_TOKEN is set: usable
 amf:   codex    installed at /Users/vic/.local/bin/codex; OPENAI_API_KEY not set: skipped
 amf:   opencode installed at /Users/vic/.opencode/bin/opencode; needs no key, model opencode/big-pickle: usable
-amf: issues without a pipeline run claude
+amf: issues without a pipeline run claude (primary codex, secondary claudecode); codex is not usable: codex has no OPENAI_API_KEY
 ```
 
 To pick one yourself, pass `--agent claudecode` (or `claude`), `--agent codex`
 or `--agent opencode` to `amf run` or `amf watch`. A named agent must be
 installed but needs no key, so `--agent claudecode` runs Claude on its own
-login. amf never quietly falls back from a named agent to another. If no agent
+login. amf never falls back from a named agent to another. A pipeline's
+per-stage agent wins over both `--agent` and the primary/secondary settings. If no agent
 is ready, amf leaves the issue on `amf:ready` and `watch` tries again on its
 next poll. `amf doctor` shows which agent amf would use, and warns if
 `OPENCODE_MODEL` isn't one opencode lists. With `OPENCODE_API_KEY` set, it

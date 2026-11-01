@@ -247,7 +247,9 @@ func TestDoctorFallbackAgent(t *testing.T) {
 	if err := run(context.Background(), []string{"pipeline"}, nil, &stdout, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(stdout.String(), "so amf runs codex with its built-in prompt (") || !strings.Contains(stdout.String(), "no-claude is not installed), unless --agent names another.") {
+	// codex is the default primary agent, so it runs first, passing nothing
+	// over (before AMF_PRIMARY_AGENT, amf passed over the missing claude).
+	if !strings.Contains(stdout.String(), "so amf runs codex with its built-in prompt, unless --agent names another.") {
 		t.Errorf("amf pipeline = %q", stdout.String())
 	}
 	t.Setenv("AMF_CODEX", filepath.Join(t.TempDir(), "no-codex"))

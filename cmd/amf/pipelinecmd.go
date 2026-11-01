@@ -102,14 +102,23 @@ func cmdPipeline(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	return nil
 }
 
-// noPipeline reports which agent amf runs without a pipeline: the first
-// usable of claude, codex and opencode (see pickAgent). None usable is an
-// error.
+// noPipeline reports which agents amf runs without a pipeline: the primary,
+// then the secondary agent, or the first usable of claude, codex and
+// opencode (see agentPlan). None usable, or a bad setting, is an error.
 func noPipeline(ctx context.Context, stdout io.Writer, why string) error {
 	cfg, _ := loadConfig(envPaths(ctx)...)
 	r := &Runner{Claude: cfg.Claude, Codex: cfg.Codex, Opencode: cfg.Opencode, ClaudeToken: cfg.ClaudeToken, AnthropicKey: cfg.AnthropicKey, OpenAIKey: cfg.OpenAIKey,
 		OpencodeKey: cfg.OpencodeKey, OpencodeModel: cfg.OpencodeModel}
-	agent, passed, err := r.pickAgent()
+	var err error
+	if r.Primary, r.Secondary, err = cfg.agents(); err != nil {
+		fmt.Fprintf(stdout, "%s, so amf runs one agent with its built-in prompt, but %v.\n", why, err)
+		return errors.New("the pipeline has 1 problem")
+	}
+	plan, err := r.agentPlan()
+	var passed []string
+	for _, s := range plan.Skipped {
+		passed = append(passed, s.Reason)
+	}
 	if err != nil {
 		fmt.Fprintf(stdout, "%s, so amf runs one agent with its built-in prompt, but %v.\n", why, err)
 		return errors.New("the pipeline has 1 problem")
@@ -118,6 +127,6 @@ func noPipeline(ctx context.Context, stdout io.Writer, why string) error {
 	if len(passed) > 0 {
 		because = " (" + strings.Join(passed, "; ") + ")"
 	}
-	fmt.Fprintf(stdout, "%s, so amf runs %s with its built-in prompt%s, unless --agent names another.\n", why, agentName(agent), because)
+	fmt.Fprintf(stdout, "%s, so amf runs %s with its built-in prompt%s, unless --agent names another.\n", why, plan.describe(), because)
 	return nil
 }
