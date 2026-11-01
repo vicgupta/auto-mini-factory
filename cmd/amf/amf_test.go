@@ -1224,6 +1224,15 @@ func TestListCommand(t *testing.T) {
 	if got := list("--label", "amf:ready", "--limit", "1"); strings.Contains(got, "#3") || !strings.Contains(got, "#2") {
 		t.Errorf("amf list --label amf:ready --limit 1 =\n%s", got)
 	}
+	if got, want := list("--search", " WAIT "), "ISSUE  AMF        TITLE\n#2     amf:ready  Waiting\n"; got != want {
+		t.Errorf("amf list --search =\n%s\nwant\n%s", got, want)
+	}
+	if got := list("--search", "nothing-like-this"); got != "No open issues with \"nothing-like-this\" in the title in vic/demo.\n" {
+		t.Errorf("empty search = %q", got)
+	}
+	if got := list("--search", "  "); got != list() {
+		t.Errorf("blank search =\n%s\nwant unfiltered output", got)
+	}
 	if err := run(context.Background(), []string{"list", "--limit", "-1"}, nil, io.Discard, io.Discard); err == nil || !strings.Contains(err.Error(), "--limit") {
 		t.Errorf("amf list --limit -1: err = %v, want an error mentioning --limit", err)
 	}
