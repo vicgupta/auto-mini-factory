@@ -51,10 +51,17 @@ func cmdPR(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	case "draft":
 		return cmdPRDraft(ctx, args[1:], stdout, stderr)
 	default:
+		fmt.Fprintf(stderr, "amf: unknown pr command %q\n", args[0])
+		if s := suggestFrom(args[0], prSubcommands); s != "" {
+			fmt.Fprintf(stderr, "Did you mean %q?\n", s)
+		}
+		fmt.Fprintln(stderr)
 		fmt.Fprint(stderr, prUsage)
 		return errUsage
 	}
 }
+
+var prSubcommands = []string{"list", "merge", "view", "diff", "close", "reopen", "ready", "draft", "help"}
 
 // parsePRNumber accepts a pull request number as "42" or "#42", trimming
 // surrounding whitespace.
@@ -138,6 +145,7 @@ func cmdPRList(ctx context.Context, args []string, stdout, stderr io.Writer) err
 		}
 		out = kept
 	}
+	matched := len(out)
 	if *limit > 0 && len(out) > *limit {
 		out = out[:*limit]
 	}
@@ -167,7 +175,13 @@ func cmdPRList(ctx context.Context, args []string, stdout, stderr io.Writer) err
 		}
 		fmt.Fprintf(tw, "#%d\t%s\t%s\t%s\n", pr.Number, issue, pr.State, strings.ReplaceAll(pr.Title, "\t", " "))
 	}
-	return tw.Flush()
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	if len(out) < matched {
+		fmt.Fprintf(stderr, "Showing %d of %d pull requests; use --limit 0 to list them all.\n", len(out), matched)
+	}
+	return nil
 }
 
 func cmdPRMerge(ctx context.Context, args []string, stdout, stderr io.Writer) error {

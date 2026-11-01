@@ -30,6 +30,9 @@ func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	asJSON := fs.Bool("json", false, "print a JSON array of number, title, state, url and labels")
 	pos, err := parseArgs(fs, args)
 	if err != nil {
+		if err == flag.ErrHelp {
+			return nil
+		}
 		return errUsage
 	}
 	if len(pos) != 0 {
@@ -39,7 +42,7 @@ func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	if *limit < 0 {
 		return fmt.Errorf("--limit must be 0 or more, got %d", *limit)
 	}
-	*state = strings.TrimSpace(*state)
+	*state = strings.ToLower(strings.TrimSpace(*state))
 	switch *state {
 	case "open", "closed", "all":
 	default:
