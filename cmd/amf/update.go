@@ -147,7 +147,7 @@ func (u *updater) latest(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("finding the latest release: %w", err)
 	}
-	resp.Body.Close()
+	defer resp.Body.Close()
 	tag := path.Base(resp.Header.Get("Location"))
 	if resp.StatusCode/100 != 3 || !strings.HasPrefix(tag, "v") {
 		return "", fmt.Errorf("finding the latest release: unexpected response %s from %s/releases/latest", resp.Status, u.base)
