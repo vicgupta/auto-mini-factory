@@ -2765,3 +2765,19 @@ func TestUnknownCommandSuggestion(t *testing.T) {
 		t.Errorf("unexpected output %q", errb.String())
 	}
 }
+
+func TestUnknownPRCommandSuggestion(t *testing.T) {
+	var out, errb bytes.Buffer
+	err := run(context.Background(), []string{"pr", "lst"}, strings.NewReader(""), &out, &errb)
+	if !errors.Is(err, errUsage) {
+		t.Fatalf("err = %v, want errUsage", err)
+	}
+	if !strings.Contains(errb.String(), `Did you mean "list"?`) || !strings.Contains(errb.String(), `unknown pr command "lst"`) {
+		t.Errorf("no suggestion in %q", errb.String())
+	}
+	errb.Reset()
+	_ = run(context.Background(), []string{"pr", "bogus"}, strings.NewReader(""), &out, &errb)
+	if strings.Contains(errb.String(), "Did you mean") || out.Len() != 0 {
+		t.Errorf("unexpected output %q", errb.String())
+	}
+}

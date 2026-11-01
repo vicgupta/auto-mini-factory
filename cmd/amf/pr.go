@@ -51,10 +51,15 @@ func cmdPR(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	case "draft":
 		return cmdPRDraft(ctx, args[1:], stdout, stderr)
 	default:
+		if s := suggestFrom(args[0], prSubcommands); s != "" {
+			fmt.Fprintf(stderr, "amf: unknown pr command %q\nDid you mean %q?\n\n", args[0], s)
+		}
 		fmt.Fprint(stderr, prUsage)
 		return errUsage
 	}
 }
+
+var prSubcommands = []string{"list", "merge", "view", "diff", "close", "reopen", "ready", "draft", "help"}
 
 // parsePRNumber accepts a pull request number as "42" or "#42", trimming
 // surrounding whitespace.
