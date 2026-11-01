@@ -347,6 +347,7 @@ func TestCommandLineErrors(t *testing.T) {
 		{[]string{"run", "abc"}, "invalid issue number"},
 		{[]string{"run", "0"}, "invalid issue number"},
 		{[]string{"run", "#"}, "invalid issue number"},
+		{[]string{"run", "abc"}, "use a positive number such as 42 or #42"},
 		{[]string{"run", "1", "--timeout", "0"}, "--timeout: agent timeout must be positive"},
 		{[]string{"run", "1", "--timeout", "-5m"}, "--timeout: agent timeout must be positive"},
 		{[]string{"run", "1", "--eval-rounds", "-1"}, "can't be negative"},
@@ -367,6 +368,8 @@ func TestCommandLineErrors(t *testing.T) {
 		{[]string{"watch", "--label", ""}, "--label must not be empty"},
 		{[]string{"run", "1", "--exclude-label", "blocked"}, "usage"},
 		{[]string{"list", "extra"}, "usage"},
+		{[]string{"list", "--unknown"}, "usage"},
+		{[]string{"list", "--state"}, "usage"},
 		{[]string{"list", "--state", "bogus"}, "--state must be"},
 		{[]string{"issue"}, ""},
 		{[]string{"issue", "create"}, "usage"},
@@ -394,6 +397,26 @@ func TestCommandLineErrors(t *testing.T) {
 		case err == nil || errors.Is(err, errUsage) || !strings.Contains(err.Error(), tc.want):
 			t.Errorf("amf %q: error = %v, want %q", tc.args, err, tc.want)
 		}
+	}
+}
+
+func TestListHelp(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("GITHUB_REPO", "")
+	for _, args := range [][]string{
+		{"list", "-h"}, {"list", "--help"},
+		{"issue", "list", "-h"}, {"issue", "list", "--help"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if err := run(context.Background(), args, nil, &stdout, &stderr); err != nil {
+				t.Fatalf("help: %v", err)
+			}
+			if stdout.Len() != 0 || !strings.Contains(stderr.String(), "Usage of list:") || !strings.Contains(stderr.String(), "-state") {
+				t.Fatalf("stdout = %q, stderr = %q; want empty stdout and list flag help on stderr", stdout.String(), stderr.String())
+			}
+		})
 	}
 }
 
@@ -2748,4 +2771,101 @@ func TestPRListUnorderedAndDeletedHeads(t *testing.T) {
 	if len(rows) != 2 || rows[0].Number != 2 || rows[0].Issue == nil || *rows[0].Issue != 13 || rows[1].Number != 1 || rows[1].Issue != nil {
 		t.Fatalf("rows = %+v", rows)
 	}
+}
+
+func TestUnknownCommandSuggestion(t *testing.T) {
+	var out, errb bytes.Buffer
+	err := run(context.Background(), []string{"lst"}, strings.NewReader(""), &out, &errb)
+	if !errors.Is(err, errUsage) {
+		t.Fatalf("err = %v, want errUsage", err)
+	}
+	if !strings.Contains(errb.String(), `Did you mean "list"?`) {
+		t.Errorf("no suggestion in %q", errb.String())
+	}
+	errb.Reset()
+	_ = run(context.Background(), []string{"bogus"}, strings.NewReader(""), &out, &errb)
+	if strings.Contains(errb.String(), "Did you mean") || !strings.Contains(errb.String(), `unknown command "bogus"`) {
+		t.Errorf("unexpected output %q", errb.String())
+	}
+}
+
+func TestUnknownPRCommandSuggestion(t *testing.T) {
+	var out, errb bytes.Buffer
+	err := run(context.Background(), []string{"pr", "lst"}, strings.NewReader(""), &out, &errb)
+	if !errors.Is(err, errUsage) {
+		t.Fatalf("err = %v, want errUsage", err)
+	}
+	if !strings.Contains(errb.String(), `Did you mean "list"?`) || !strings.Contains(errb.String(), `unknown pr command "lst"`) {
+		t.Errorf("no suggestion in %q", errb.String())
+	}
+	errb.Reset()
+	_ = run(context.Background(), []string{"pr", "bogus"}, strings.NewReader(""), &out, &errb)
+	if strings.Contains(errb.String(), "Did you mean") || out.Len() != 0 || !strings.Contains(errb.String(), `unknown pr command "bogus"`) {
+		t.Errorf("unexpected output %q", errb.String())
+	}
+}
+
+func TestIssueTypoSubcommandDoesNotCreateIssue(t *testing.T) {
+	var out, errb bytes.Buffer
+	err := run(context.Background(), []string{"issue", "lst"}, strings.NewReader(""), &out, &errb)
+	if !errors.Is(err, errUsage) {
+		t.Fatalf("err = %v, want errUsage", err)
+	}
+	for _, want := range []string{`unknown issue command "lst"`, `Did you mean "list"?`, `amf issue create "lst"`} {
+		if !strings.Contains(errb.String(), want) {
+			t.Errorf("missing %q in %q", want, errb.String())
+		}
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout = %q", out.String())
+	}
+}
+
+func TestHelpTopicPrintsGroupUsage(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"help", "issue"}, issueUsage},
+		{[]string{"help", "pr"}, prUsage},
+		{[]string{"help", "run"}, usage},
+		{[]string{"help"}, usage},
+	} {
+		var out, errb strings.Builder
+		if err := run(context.Background(), tc.args, strings.NewReader(""), &out, &errb); err != nil {
+			t.Fatalf("%v: %v", tc.args, err)
+		}
+		if out.String() != tc.want || errb.Len() != 0 {
+			t.Errorf("%v: wrong output %q / stderr %q", tc.args, out.String(), errb.String())
+		}
+	}
+}
+
+func TestHelpUnknownTopic(t *testing.T) {
+	var out, errb bytes.Buffer
+	err := run(context.Background(), []string{"help", "isue"}, nil, &out, &errb)
+	if !errors.Is(err, errUsage) || out.Len() != 0 {
+		t.Fatalf("err %v, stdout %q", err, &out)
+	}
+	if e := errb.String(); !strings.Contains(e, `unknown help topic "isue"`) || !strings.Contains(e, `Did you mean "issue"?`) {
+		t.Fatalf("stderr: %q", e)
+	}
+	// A real command without its own help still prints the usage.
+	out.Reset()
+	if err := run(context.Background(), []string{"help", "run"}, nil, &out, io.Discard); err != nil || !strings.Contains(out.String(), "Usage:") {
+		t.Fatalf("help run: %v, %q", err, &out)
+	}
+}
+
+// Every flag amf list takes appears in the top-level usage, --json included.
+func TestUsageListMentionsJSON(t *testing.T) {
+	for _, line := range strings.Split(usage, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "amf list ") {
+			if !strings.Contains(line, "--json") {
+				t.Errorf("amf list usage line omits --json: %q", line)
+			}
+			return
+		}
+	}
+	t.Error("no amf list line in usage")
 }
