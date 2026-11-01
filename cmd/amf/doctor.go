@@ -196,6 +196,8 @@ func (d *doctor) check(ctx context.Context) {
 	// get --agent).
 	agents := &Runner{Claude: cfg.Claude, Codex: cfg.Codex, Opencode: cfg.Opencode, ClaudeToken: cfg.ClaudeToken, AnthropicKey: cfg.AnthropicKey, OpenAIKey: cfg.OpenAIKey,
 		OpencodeKey: cfg.OpencodeKey, OpencodeModel: cfg.OpencodeModel}
+	agents.Primary, agents.Secondary, _ = cfg.agents() // checkAgentSettings reports a bad value
+	d.checkAgentSettings(ctx, cfg, envFile, agents, parsed)
 	fallback, fallbackErr := agents.defaultAgent()
 	runs := "no agent (none is available)"
 	if fallbackErr == nil {
@@ -292,6 +294,63 @@ func (d *doctor) check(ctx context.Context) {
 		d.checkPostgres(ctx, cfg, envFile)
 	} else {
 		d.line("skip", "postgres", ".env didn't parse")
+	}
+}
+
+// checkAgentSettings reports AMF_PRIMARY_AGENT and AMF_SECONDARY_AGENT:
+// which agent each is, where the setting came from, and whether it's
+// installed and has the key amf needs to pick it.
+func (d *doctor) checkAgentSettings(ctx context.Context, cfg Config, envFile string, agents *Runner, parsed bool) {
+	if !parsed {
+		d.line("skip", "primary agent", ".env didn't parse")
+		d.line("skip", "secondary agent", ".env didn't parse")
+		return
+	}
+	if _, _, err := cfg.agents(); err != nil {
+		d.line("FAIL", "agent settings", "%v", err)
+		return
+	}
+	plan, planErr := agents.agentPlan()
+	for _, role := range []struct {
+		check, key, agent string
+	}{{"primary agent", "AMF_PRIMARY_AGENT", agents.Primary}, {"secondary agent", "AMF_SECONDARY_AGENT", agents.Secondary}} {
+		from := "the default"
+		if v := cfg.seen[role.key]; v.From != "default" {
+			from = "from " + source(role.key, envFile)
+		}
+		if role.agent == "" {
+			if strings.EqualFold(strings.TrimSpace(cfg.SecondaryAgent), agentNone) {
+				d.line("ok", role.check, "none, %s; amf doesn't fall back when the primary fails", from)
+			} else {
+				d.line("ok", role.check, "%s too, %s; amf doesn't fall back when the primary fails", agentName(agents.Primary), from)
+			}
+			continue
+		}
+		st := agents.agentStatus(role.agent)
+		name := agentName(role.agent)
+		switch {
+		case st.Path == "":
+			d.line("warn", role.check, "%s, %s; %s is not installed, so amf skips it", name, from, st.Bin)
+		case !st.Keyed:
+			d.line("warn", role.check, "%s, %s; %s, %s; %s, so amf skips it", name, from, st.Path, agentVersion(ctx, st.Path), st.reason())
+		default:
+			key := "needs no key"
+			switch {
+			case st.Key == opencodeSavedLogin:
+				key = "uses its saved login"
+			case st.Key != "":
+				key = st.Key + " is set"
+			}
+			d.line("ok", role.check, "%s, %s; %s, %s; %s", name, from, st.Path, agentVersion(ctx, st.Path), key)
+		}
+	}
+	switch {
+	case planErr != nil:
+		// The agent lines below report it.
+	case len(plan.Skipped) > 0 && len(plan.Agents) == 1 && plan.Agents[0] != agents.Primary && plan.Agents[0] != agents.Secondary:
+		d.line("warn", "agent order", "neither the primary nor the secondary agent is usable, so amf runs %s, the first usable of claude, codex and opencode", agentName(plan.Agents[0]))
+	default:
+		d.line("ok", "agent order", "issues without a pipeline run %s, unless --agent names one", plan.describe())
 	}
 }
 

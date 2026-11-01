@@ -48,6 +48,15 @@ type Runner struct {
 	// Agent is the agent for issues without a pipeline (claudecode, codex or
 	// opencode), from --agent. "" means amf picks: see defaultAgent.
 	Agent string
+	// Primary is the agent amf runs first for an issue without a pipeline,
+	// and Secondary the one it falls back to when the primary fails or isn't
+	// usable, from AMF_PRIMARY_AGENT and AMF_SECONDARY_AGENT. --agent
+	// overrides both. Secondary "" means no fallback; Primary "" (as in
+	// tests) means amf picks as it did before them: see agentPlan.
+	Primary, Secondary string
+	// fellBack, set by build, says which agent made the change after which
+	// failed, for the PR body and the issue's comment; "" without a fallback.
+	fellBack string
 	// ClaudeToken, when set, is passed to Claude as CLAUDE_CODE_OAUTH_TOKEN.
 	ClaudeToken string
 	// AnthropicKey, when set (and ClaudeToken isn't), is passed to Claude as
@@ -146,9 +155,9 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 	if err != nil {
 		return err
 	}
-	agent := ""
+	var agent runPlan
 	if pipeline == nil {
-		if agent, err = r.defaultAgent(); err != nil {
+		if agent, err = r.agentPlan(); err != nil {
 			return err
 		}
 	} else if r.Agent != "" {
@@ -229,6 +238,9 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 	r.event(slog.LevelInfo, "issue.pr", n, fmt.Sprintf("#%d: %s %s", n, verb, pr.HTMLURL),
 		"action", verb, "number", pr.Number, "url", pr.HTMLURL)
 	msg := fmt.Sprintf("amf %s %s for this issue.", verb, pr.HTMLURL)
+	if r.fellBack != "" {
+		msg += " " + r.fellBack
+	}
 	var merr error
 	if r.Merge != "" {
 		if merr = r.mergePR(ctx, n, base, pr); merr != nil {
@@ -287,7 +299,7 @@ func (r *Runner) checkAuthor(issue Issue) error {
 // process turns the issue into a PR: with a single run of agent, or with the
 // repo's pipeline when its AGENTS.md declares one. updated is true when the
 // branch already had an open PR, which now has the new title and body.
-func (r *Runner) process(ctx context.Context, issue Issue, base string, p *Pipeline, agent string) (pr PullRequest, updated bool, err error) {
+func (r *Runner) process(ctx context.Context, issue Issue, base string, p *Pipeline, agent runPlan) (pr PullRequest, updated bool, err error) {
 	n := issue.Number
 	branch, wt := issueBranch(n), r.worktreePath(n)
 	summary, extra, err := r.build(ctx, issue, base, p, agent)
@@ -353,12 +365,16 @@ func (r *Runner) prBody(summary, extra string, n int) string {
 	return r.Redact.Redact(fmt.Sprintf("%s\n\nCloses #%d\n\n---\n_Opened by amf._", summary, n))
 }
 
-// build makes the change on the issue's branch in a fresh worktree, with a
-// single run of agent or with the pipeline p, and leaves it as one commit,
-// unpushed. It returns the agent's summary and the pipeline's sections for
-// the PR body.
-func (r *Runner) build(ctx context.Context, issue Issue, base string, p *Pipeline, agent string) (summary, extra string, err error) {
+// build makes the change on the issue's branch in a fresh worktree, with
+// the agents of plan (see buildOne) or with the pipeline p, and leaves it as
+// one commit, unpushed. It returns the agent's summary and the pipeline's
+// sections, or the fallback note, for the PR body.
+func (r *Runner) build(ctx context.Context, issue Issue, base string, p *Pipeline, plan runPlan) (summary, extra string, err error) {
 	n := issue.Number
+	r.fellBack = ""
+	if p == nil {
+		return r.buildFallback(ctx, issue, base, plan)
+	}
 	branch, wt := issueBranch(n), r.worktreePath(n)
 
 	r.event(slog.LevelInfo, "issue.worktree", n, fmt.Sprintf("#%d: creating worktree %s on %s from origin/%s", n, wt, branch, base),
@@ -367,25 +383,6 @@ func (r *Runner) build(ctx context.Context, issue Issue, base string, p *Pipelin
 		return "", "", err
 	}
 
-	if p == nil {
-		model := r.agentModel(agent, "")
-		r.event(slog.LevelDebug, "issue.pipeline", n, fmt.Sprintf("#%d: no pipeline; one %s run", n, agentName(agent)),
-			"declared", false, "stages", []string{"code"}, "agents", []string{agentName(agent)}, "models", []string{model})
-		text := fmt.Sprintf("#%d: running %s (timeout %s)", n, agentName(agent), r.Timeout)
-		if model != "" {
-			text = fmt.Sprintf("#%d: running %s (%s, timeout %s)", n, agentName(agent), model, r.Timeout)
-		}
-		r.event(slog.LevelInfo, "issue.agent", n, text, "agent", agentName(agent), "model", model, "timeout", r.Timeout.String())
-		log := filepath.Join(r.Root, ".amf", "logs", fmt.Sprintf("issue-%d.log", n))
-		out := filepath.Join(wt, ".amf", "code.md") // for agents that write their final message to a file
-		if summary, err = r.runAgent(ctx, agent, "", model, wt, buildPrompt(r.Repo, branch, issue), log, out); err != nil {
-			return "", "", err
-		}
-		if err := commitAll(ctx, wt, prTitle(issue), n, base, agent); err != nil {
-			return "", "", err
-		}
-		return summary, "", nil
-	}
 	var stages, agents, models []string
 	for _, s := range p.stages() {
 		stages, agents, models = append(stages, s.Name), append(agents, s.Agent), append(models, s.model())
@@ -393,6 +390,91 @@ func (r *Runner) build(ctx context.Context, issue Issue, base string, p *Pipelin
 	r.event(slog.LevelInfo, "issue.pipeline", n, fmt.Sprintf("#%d: running the pipeline from AGENTS.md: %s", n, describePipeline(p)),
 		"declared", true, "stages", stages, "agents", agents, "models", models)
 	return r.runPipeline(ctx, wt, issue, branch, base, p)
+}
+
+// buildOne makes the change with a single run of agent in a fresh worktree
+// reset to origin/base, and commits it. log is the agent's log file.
+func (r *Runner) buildOne(ctx context.Context, issue Issue, base, agent, log string) (summary string, err error) {
+	n := issue.Number
+	branch, wt := issueBranch(n), r.worktreePath(n)
+	r.event(slog.LevelInfo, "issue.worktree", n, fmt.Sprintf("#%d: creating worktree %s on %s from origin/%s", n, wt, branch, base),
+		"path", wt, "branch", branch, "base", base)
+	if err := r.prepareWorktree(ctx, wt, branch, base); err != nil {
+		return "", err
+	}
+	model := r.agentModel(agent, "")
+	r.event(slog.LevelDebug, "issue.pipeline", n, fmt.Sprintf("#%d: no pipeline; one %s run", n, agentName(agent)),
+		"declared", false, "stages", []string{"code"}, "agents", []string{agentName(agent)}, "models", []string{model})
+	text := fmt.Sprintf("#%d: running %s (timeout %s)", n, agentName(agent), r.Timeout)
+	if model != "" {
+		text = fmt.Sprintf("#%d: running %s (%s, timeout %s)", n, agentName(agent), model, r.Timeout)
+	}
+	r.event(slog.LevelInfo, "issue.agent", n, text, "agent", agentName(agent), "model", model, "timeout", r.Timeout.String())
+	out := filepath.Join(wt, ".amf", "code.md") // for agents that write their final message to a file
+	if summary, err = r.runAgent(ctx, agent, "", model, wt, buildPrompt(r.Repo, branch, issue), log, out); err != nil {
+		return "", err
+	}
+	if err := commitAll(ctx, wt, prTitle(issue), n, base, agent); err != nil {
+		return "", err
+	}
+	return summary, nil
+}
+
+// buildFallback is build without a pipeline: it runs the plan's agents in
+// order until one makes a change. Any failure of an agent's run (not
+// installed or usable, a non-zero exit, an error result, a timeout) or of
+// its commit (no changes, a refused path) moves on to the next agent, which
+// starts from a fresh worktree reset to origin/base, so nothing the failed
+// one left behind is kept. Cancelling amf (ctx) stops at once. When the
+// last agent fails too, the error names every failure.
+func (r *Runner) buildFallback(ctx context.Context, issue Issue, base string, plan runPlan) (summary, extra string, err error) {
+	n := issue.Number
+	var failed []string // how each agent that ran failed, in order
+	// An agent passed over as not usable is a fallback too, but one decided
+	// before anything ran, so only the event records it, not the PR body.
+	if len(plan.Skipped) > 0 {
+		s := plan.Skipped[len(plan.Skipped)-1]
+		r.fallbackEvent(n, s.Agent, plan.Agents[0], "unusable", s.Reason)
+	}
+	for i, agent := range plan.Agents {
+		log := filepath.Join(r.Root, ".amf", "logs", fmt.Sprintf("issue-%d.log", n))
+		if i > 0 { // keep the failed agent's log
+			log = filepath.Join(r.Root, ".amf", "logs", fmt.Sprintf("issue-%d-%s.log", n, agentName(agent)))
+		}
+		summary, err = r.buildOne(ctx, issue, base, agent, log)
+		if err == nil {
+			if len(failed) > 0 {
+				r.fellBack = fmt.Sprintf("%s made the change, after amf fell back from %s.", agentName(agent), strings.Join(failed, ", then "))
+				return summary, "_" + r.fellBack + "_", nil
+			}
+			return summary, "", nil
+		}
+		if ctx.Err() != nil {
+			return "", "", err
+		}
+		failed = append(failed, fmt.Sprintf("%s failed: %v", agentName(agent), err))
+		if i+1 < len(plan.Agents) {
+			reason := "error"
+			if errors.As(err, new(*agentTimeoutError)) {
+				reason = "agent_timeout"
+			}
+			r.fallbackEvent(n, agent, plan.Agents[i+1], reason, err.Error())
+		}
+	}
+	if len(failed) == 1 {
+		return "", "", err
+	}
+	var ate *agentTimeoutError
+	if errors.As(err, &ate) {
+		ate.Before = strings.Join(failed[:len(failed)-1], "; ")
+	}
+	return "", "", fmt.Errorf("every agent failed: %s: %w", strings.Join(failed[:len(failed)-1], "; "), err)
+}
+
+// fallbackEvent records that amf moves on from one agent to the next.
+func (r *Runner) fallbackEvent(n int, from, to, reason, detail string) {
+	r.event(slog.LevelWarn, "agent.fallback", n, fmt.Sprintf("#%d: %s failed (%s); falling back to %s", n, agentName(from), detail, agentName(to)),
+		"from", agentName(from), "to", agentName(to), "reason", reason, "error", detail)
 }
 
 // removeWorktree force-removes an issue's worktree, even one git has already
@@ -679,13 +761,20 @@ func (r *Runner) Watch(ctx context.Context, label string, interval time.Duration
 		r.event(slog.LevelInfo, "watch.agents", 0, "  "+st.describe(),
 			"agent", st.Agent, "path", st.Path, "key", st.Key, "usable", st.usable(), "model", st.Model)
 	}
-	switch agent, _, err := r.pickAgent(); {
+	switch plan, err := r.agentPlan(); {
 	case r.Agent != "":
 		r.event(slog.LevelInfo, "watch.agents", 0, fmt.Sprintf("issues without a pipeline run %s (--agent)", agentName(r.Agent)), "picked", agentName(r.Agent))
 	case err != nil:
 		r.event(slog.LevelWarn, "watch.agents", 0, fmt.Sprintf("warning: %v; issues without a pipeline wait until one is available", err), "error", err)
 	default:
-		r.event(slog.LevelInfo, "watch.agents", 0, fmt.Sprintf("issues without a pipeline run %s", agentName(agent)), "picked", agentName(agent))
+		text := fmt.Sprintf("issues without a pipeline run %s", plan.describe())
+		if r.Primary != "" {
+			text += fmt.Sprintf(" (primary %s, secondary %s)", agentName(r.Primary), agentNameOrNone(r.Secondary))
+		}
+		for _, s := range plan.Skipped {
+			text += fmt.Sprintf("; %s is not usable: %s", agentName(s.Agent), s.Reason)
+		}
+		r.event(slog.LevelInfo, "watch.agents", 0, text, "picked", agentName(plan.Agents[0]), "fallback", plan.describe())
 	}
 	for cycle := 1; ; cycle++ {
 		issues, err := r.GH.ListIssues(ctx, "open", label, true)
