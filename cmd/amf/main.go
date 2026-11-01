@@ -615,9 +615,13 @@ var topCommands = []string{"init", "issue", "pr", "list", "run", "watch", "pipel
 
 // suggestCommand returns the command closest to a mistyped one, or "" when
 // nothing is close enough to be a likely typo.
-func suggestCommand(cmd string) string {
+func suggestCommand(cmd string) string { return suggestFrom(cmd, topCommands) }
+
+// suggestFrom returns the entry of names closest to cmd, or "" when none is
+// within two edits.
+func suggestFrom(cmd string, names []string) string {
 	best, bestD := "", 3
-	for _, c := range topCommands {
+	for _, c := range names {
 		if d := editDistance(strings.ToLower(cmd), c); d < bestD {
 			best, bestD = c, d
 		}
