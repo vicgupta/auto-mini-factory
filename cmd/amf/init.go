@@ -31,6 +31,8 @@ var envTemplate = []envVar{
 	{"OPENAI_API_KEY", "sk-proj-...", "optional: OpenAI API key for codex", false},
 	{"OPENCODE_API_KEY", "oc_sk_...", "optional: OpenCode Console API key, for pay-as-you-go and Go models", true},
 	{"OPENCODE_MODEL", defaultOpencodeModel, "opencode/<id> for free and pay-as-you-go models, opencode-go/<id> for Go; 'opencode models' lists them", true},
+	{"AMF_PRIMARY_AGENT", defaultPrimaryAgent, "optional: claudecode, codex or opencode; the agent for issues without a pipeline", true},
+	{"AMF_SECONDARY_AGENT", defaultSecondaryAgent, "optional: claudecode, codex, opencode or none; runs when the primary fails", true},
 	{"AMF_AGENT_TIMEOUT", fmt.Sprintf("%dm", defaultAgentTimeout/time.Minute), "optional: how long each agent run may take (--agent-timeout overrides it)", true},
 	{"AMF_LOG_LEVEL", "info", "optional: debug, info, warn or error, for the terminal and the event log in .amf/runs/", true},
 	{"AMF_TRUSTED", "login1,login2...", "optional: only work on issues opened by these GitHub users", false},

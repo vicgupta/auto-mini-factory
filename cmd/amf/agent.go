@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"slices"
 	"strings"
 	"time"
 )
 
 // agentOrder is the order amf tries agents in for an issue without a
-// pipeline, when --agent doesn't name one.
+// pipeline when neither --agent nor a usable primary or secondary agent
+// names one (see agentPlan).
 var agentOrder = []string{agentClaude, agentCodex, agentOpencode}
 
 // parseAgent reads an --agent value: claudecode (or claude), codex or
@@ -29,6 +31,49 @@ func parseAgent(s string) (string, error) {
 	return "", fmt.Errorf("--agent must be claudecode, codex or opencode, got %q", s)
 }
 
+// Defaults for AMF_PRIMARY_AGENT and AMF_SECONDARY_AGENT.
+const (
+	defaultPrimaryAgent   = agentCodex
+	defaultSecondaryAgent = agentClaude
+)
+
+// agentNone is the AMF_SECONDARY_AGENT value that turns the fallback off.
+const agentNone = "none"
+
+// parseAgentSetting reads AMF_PRIMARY_AGENT or AMF_SECONDARY_AGENT: the
+// values --agent takes, and for the secondary also none, which is "".
+func parseAgentSetting(key, v string, allowNone bool) (string, error) {
+	s := strings.ToLower(strings.TrimSpace(v))
+	if allowNone && s == agentNone {
+		return "", nil
+	}
+	if s != "" {
+		if a, err := parseAgent(s); err == nil {
+			return a, nil
+		}
+	}
+	want := "claudecode, codex or opencode"
+	if allowNone {
+		want = "claudecode, codex, opencode or none"
+	}
+	return "", fmt.Errorf("%s must be %s, got %q", key, want, v)
+}
+
+// agents reads AMF_PRIMARY_AGENT and AMF_SECONDARY_AGENT. secondary is ""
+// for none, and also when it names the primary.
+func (cfg Config) agents() (primary, secondary string, err error) {
+	if primary, err = parseAgentSetting("AMF_PRIMARY_AGENT", cfg.PrimaryAgent, false); err != nil {
+		return "", "", err
+	}
+	if secondary, err = parseAgentSetting("AMF_SECONDARY_AGENT", cfg.SecondaryAgent, true); err != nil {
+		return "", "", err
+	}
+	if secondary == primary {
+		secondary = ""
+	}
+	return primary, secondary, nil
+}
+
 // agentName is the command an agent runs as, for messages: claude, codex
 // or opencode.
 func agentName(agent string) string {
@@ -36,6 +81,14 @@ func agentName(agent string) string {
 		return name
 	}
 	return "claude"
+}
+
+// agentNameOrNone is agentName, or none for "".
+func agentNameOrNone(agent string) string {
+	if agent == "" {
+		return agentNone
+	}
+	return agentName(agent)
 }
 
 // agentKeys are the environment variables that give an agent a credential
@@ -181,6 +234,20 @@ func (s agentStatus) describe() string {
 	return fmt.Sprintf("%-8s %s; %s: %s", agentName(s.Agent), where, key, verdict)
 }
 
+// agentStatus checks one agent.
+func (r *Runner) agentStatus(a string) agentStatus {
+	bin := r.agentBin(a)
+	st := agentStatus{Agent: a, Bin: bin}
+	if bin == "" {
+		st.Bin = agentCommand[a]
+	} else if path, err := exec.LookPath(bin); err == nil {
+		st.Path = path
+	}
+	st.Key, st.Keyed = r.agentKey(a)
+	st.Model = r.agentModel(a, "")
+	return st
+}
+
 // agentStatuses checks each agent, in agentOrder. Agents with no binary
 // configured (as in tests) are left out.
 func (r *Runner) agentStatuses() []agentStatus {
@@ -190,26 +257,85 @@ func (r *Runner) agentStatuses() []agentStatus {
 		if bin == "" {
 			continue
 		}
-		st := agentStatus{Agent: a, Bin: bin}
-		if path, err := exec.LookPath(bin); err == nil {
-			st.Path = path
-		}
-		st.Key, st.Keyed = r.agentKey(a)
-		st.Model = r.agentModel(a, "")
-		out = append(out, st)
+		out = append(out, r.agentStatus(a))
 	}
 	return out
 }
 
-// defaultAgent picks the agent for an issue without a pipeline: the one
-// --agent named, which must be installed, or else the first of claude,
-// codex and opencode that is installed and has a key (see agentKeys).
+// defaultAgent is the first agent amf runs for an issue without a pipeline
+// (see agentPlan).
 func (r *Runner) defaultAgent() (string, error) {
-	agent, _, err := r.pickAgent()
-	return agent, err
+	plan, err := r.agentPlan()
+	if err != nil {
+		return "", err
+	}
+	return plan.Agents[0], nil
 }
 
-// pickAgent is defaultAgent, also saying why each agent before the chosen
+// agentSkip is a primary or secondary agent amf passed over before running
+// anything, because it isn't usable.
+type agentSkip struct{ Agent, Reason string }
+
+// runPlan is the agents amf tries, in order, for an issue without a
+// pipeline, and the configured ones it passed over as not usable.
+type runPlan struct {
+	Agents  []string
+	Skipped []agentSkip
+}
+
+// describe is the plan for messages: "codex", or "codex, then claude if
+// it fails".
+func (p runPlan) describe() string {
+	names := make([]string, len(p.Agents))
+	for i, a := range p.Agents {
+		names[i] = agentName(a)
+	}
+	if len(names) == 1 {
+		return names[0]
+	}
+	return strings.Join(names, ", then ") + " if it fails"
+}
+
+// agentPlan picks the agents for an issue without a pipeline:
+//   - with --agent, that one alone, which must be installed, and no fallback;
+//   - else the primary agent, then the secondary one, each only when usable
+//     (installed, with a key when it needs one: see agentKeys);
+//   - else, with neither usable (or none configured, as in tests), the first
+//     usable of claude, codex and opencode, as pickAgent chooses it.
+func (r *Runner) agentPlan() (runPlan, error) {
+	if r.Agent != "" || r.Primary == "" {
+		agent, _, err := r.pickAgent()
+		if err != nil {
+			return runPlan{}, err
+		}
+		return runPlan{Agents: []string{agent}}, nil
+	}
+	var plan runPlan
+	for _, a := range []string{r.Primary, r.Secondary} {
+		if a == "" || slices.Contains(plan.Agents, a) {
+			continue
+		}
+		if st := r.agentStatus(a); st.usable() {
+			plan.Agents = append(plan.Agents, a)
+		} else if len(plan.Agents) == 0 {
+			plan.Skipped = append(plan.Skipped, agentSkip{a, st.reason()})
+		}
+	}
+	if len(plan.Agents) > 0 {
+		return plan, nil
+	}
+	agent, _, err := r.pickAgent()
+	if err != nil {
+		return runPlan{}, err
+	}
+	plan.Agents = []string{agent}
+	return plan, nil
+}
+
+// pickAgent picks one agent for an issue without a pipeline: the one
+// --agent named, which must be installed, or else the first of claude,
+// codex and opencode that is installed and has a key (see agentKeys). It
+// also says why each agent before the chosen
 // one was passed over, such as "codex has no OPENAI_API_KEY".
 func (r *Runner) pickAgent() (agent string, passed []string, err error) {
 	if r.Agent != "" {

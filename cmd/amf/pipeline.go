@@ -844,6 +844,9 @@ type agentTimeoutError struct {
 	Limit, Elapsed time.Duration
 	LogPath        string
 	Partial        string // where the agent's final message so far is kept, or ""
+	// Before is how the agents amf tried first failed, when this one was
+	// the fallback; "" otherwise.
+	Before string
 }
 
 func (e *agentTimeoutError) Error() string {
@@ -860,9 +863,13 @@ func (e *agentTimeoutError) comment(root string) string {
 	if e.Partial != "" {
 		kept += fmt.Sprintf(" (its final message so far: `%s`)", relLog(root, e.Partial))
 	}
-	return fmt.Sprintf("amf stopped **%s** %s and opened no pull request. %s. "+
+	before := ""
+	if e.Before != "" {
+		before = fmt.Sprintf("First %s; amf fell back to **%s**. ", e.Before, e.Agent)
+	}
+	return fmt.Sprintf("%samf stopped **%s** %s and opened no pull request. %s. "+
 		"To retry with more time, set `AMF_AGENT_TIMEOUT` or `--agent-timeout` and re-add the `%s` label.",
-		e.Agent, when, kept, labelReady)
+		before, e.Agent, when, kept, labelReady)
 }
 
 // relLog is a log path relative to the checkout, as one would type it.

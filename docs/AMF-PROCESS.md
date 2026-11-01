@@ -38,8 +38,9 @@ each, one at a time.
 7. **The repo's setup is checked.** amf gets the default branch from GitHub
    and runs `git fetch origin <default>`. It reads `AGENTS.md` on
    `origin/<default>`; with no `## amf` table there, one agent runs once:
-   the one `--agent` names, or else the first usable of claude, codex and
-   opencode (here, Claude with `ANTHROPIC_API_KEY` or
+   the one `--agent` names, or else the primary agent (`AMF_PRIMARY_AGENT`,
+   default codex), falling back to the secondary (`AMF_SECONDARY_AGENT`,
+   default claude) if it fails (here, Claude with `ANTHROPIC_API_KEY` or
    `CLAUDE_CODE_OAUTH_TOKEN`). It also checks that git has a name and email
    to commit with.
 
