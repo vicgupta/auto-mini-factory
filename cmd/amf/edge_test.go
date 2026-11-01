@@ -2749,3 +2749,19 @@ func TestPRListUnorderedAndDeletedHeads(t *testing.T) {
 		t.Fatalf("rows = %+v", rows)
 	}
 }
+
+func TestUnknownCommandSuggestion(t *testing.T) {
+	var out, errb bytes.Buffer
+	err := run(context.Background(), []string{"lst"}, strings.NewReader(""), &out, &errb)
+	if !errors.Is(err, errUsage) {
+		t.Fatalf("err = %v, want errUsage", err)
+	}
+	if !strings.Contains(errb.String(), `Did you mean "list"?`) {
+		t.Errorf("no suggestion in %q", errb.String())
+	}
+	errb.Reset()
+	_ = run(context.Background(), []string{"bogus"}, strings.NewReader(""), &out, &errb)
+	if strings.Contains(errb.String(), "Did you mean") || !strings.Contains(errb.String(), `unknown command "bogus"`) {
+		t.Errorf("unexpected output %q", errb.String())
+	}
+}

@@ -144,7 +144,11 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		fmt.Fprint(stdout, usage)
 		return nil
 	default:
-		fmt.Fprintf(stderr, "amf: unknown command %q\n\n%s", cmd, usage)
+		fmt.Fprintf(stderr, "amf: unknown command %q\n", cmd)
+		if s := suggestCommand(cmd); s != "" {
+			fmt.Fprintf(stderr, "Did you mean %q?\n", s)
+		}
+		fmt.Fprintf(stderr, "\n%s", usage)
 		return errUsage
 	}
 }
@@ -605,4 +609,38 @@ func isTerminal(r io.Reader) bool {
 	}
 	st, err := f.Stat()
 	return err == nil && st.Mode()&os.ModeCharDevice != 0
+}
+
+var topCommands = []string{"init", "issue", "pr", "list", "run", "watch", "pipeline", "doctor", "update", "version", "help"}
+
+// suggestCommand returns the command closest to a mistyped one, or "" when
+// nothing is close enough to be a likely typo.
+func suggestCommand(cmd string) string {
+	best, bestD := "", 3
+	for _, c := range topCommands {
+		if d := editDistance(strings.ToLower(cmd), c); d < bestD {
+			best, bestD = c, d
+		}
+	}
+	return best
+}
+
+func editDistance(a, b string) int {
+	prev := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		cur := make([]int, len(b)+1)
+		cur[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
+		}
+		prev = cur
+	}
+	return prev[len(b)]
 }
