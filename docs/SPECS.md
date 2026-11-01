@@ -46,7 +46,7 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened, and merged
 | `amf pr reopen <N>` | Reopens a chosen closed PR (`42` or `#42`); no git checkout needed. See below. |
 | `amf pr ready <N>` | Marks a draft pull request ready for review; no git checkout needed. See below. |
 | `amf pr draft <N>` | Converts a ready pull request back to a draft; no git checkout needed. See below. |
-| `amf run <N> [--agent A] [--agent-timeout 60m] [--eval-rounds 2] [--dry-run] [--draft] [--merge[=squash\|rebase]] [--log-level L] [--log-file P]` | Processes issue N (`42` or `#42`, surrounding whitespace trimmed) once. |
+| `amf run <N> [--agent A] [--agent-timeout 60m] [--eval-rounds 2] [--dry-run] [--draft] [--merge[=squash\|rebase]] [--log-level L] [--log-file P]` | Processes issue N (`42` or `#42`, surrounding whitespace trimmed) once. Anything else, or `0`, fails with `invalid issue number "X"; use a positive number such as 42 or #42` (exit 1). |
 | `amf watch [--agent A] [--interval 60s] [--label amf:ready] [--exclude-label L]... [--agent-timeout 60m] [--eval-rounds 2] [--draft] [--merge[=squash\|rebase]] [--log-level L] [--log-file P]` | Polls open issues with the label (every page), oldest first by issue number (GitHub's `created_at` can tie for issues opened in the same second), and processes them one at a time until interrupted, skipping any issue that has one of the `--exclude-label` labels. |
 | `amf pipeline [--fetch]` | Checks the pipeline in `AGENTS.md` of the enclosing checkout, as it is on disk. See below. |
 | `amf doctor` | Checks the whole setup, one line per check, changing nothing. See below. |
