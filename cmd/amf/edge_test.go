@@ -2834,3 +2834,16 @@ func TestHelpUnknownTopic(t *testing.T) {
 		t.Fatalf("help run: %v, %q", err, &out)
 	}
 }
+
+// Every flag amf list takes appears in the top-level usage, --json included.
+func TestUsageListMentionsJSON(t *testing.T) {
+	for _, line := range strings.Split(usage, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "amf list ") {
+			if !strings.Contains(line, "--json") {
+				t.Errorf("amf list usage line omits --json: %q", line)
+			}
+			return
+		}
+	}
+	t.Error("no amf list line in usage")
+}
