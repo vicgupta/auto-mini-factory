@@ -552,7 +552,10 @@ func commitRound(ctx context.Context, wt string, k int, base string, s *Stage) e
 	if len(changed) == 0 {
 		return fmt.Errorf("the code stage (%s) finished without making any changes", s.Agent)
 	}
-	return pathRefusal(changed)
+	if err := pathRefusal(changed); err != nil {
+		return err
+	}
+	return secretScan(wt, changed)
 }
 
 // runAgent runs a coding agent headless in wt and returns its final message.

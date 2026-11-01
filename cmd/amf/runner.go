@@ -461,7 +461,10 @@ func commitAll(ctx context.Context, wt, title string, n int, base, agent string)
 	if len(changed) == 0 {
 		return fmt.Errorf("%s finished without making any changes", agentName(agent))
 	}
-	return pathRefusal(changed)
+	if err := pathRefusal(changed); err != nil {
+		return err
+	}
+	return secretScan(wt, changed)
 }
 
 // changedPaths lists the paths rev changes relative to origin/base. -z
@@ -504,6 +507,31 @@ func protectedPaths(changed []string) []string {
 		}
 	}
 	return bad
+}
+
+// secretScan reads each changed file and refuses the change when it contains
+// something that looks like a secret, so an agent can't quietly commit a
+// token or key. It is a pattern match, the same one the redactor uses, so
+// it can miss an unusual format; it is a guard, not a guarantee.
+func secretScan(root string, changed []string) error {
+	for _, p := range changed {
+		full := filepath.Join(root, p)
+		info, err := os.Stat(full)
+		if err != nil || info.IsDir() || info.Size() > 1<<20 {
+			continue
+		}
+		data, err := os.ReadFile(full)
+		if err != nil {
+			continue
+		}
+		text := string(data)
+		for _, re := range []*regexp.Regexp{githubTokenRE, apiKeyRE, awsKeyRE, authHeaderRE, secretRE, urlCredsRE} {
+			if re.MatchString(text) {
+				return fmt.Errorf("the agent changed %s, which appears to contain a secret (%s); refusing to push", p, re.String())
+			}
+		}
+	}
+	return nil
 }
 
 func buildPrompt(repo, branch string, issue Issue) string {
