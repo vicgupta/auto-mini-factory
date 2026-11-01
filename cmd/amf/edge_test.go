@@ -2782,3 +2782,19 @@ func TestUnknownPRCommandSuggestion(t *testing.T) {
 		t.Errorf("unexpected output %q", errb.String())
 	}
 }
+
+func TestIssueTypoSubcommandDoesNotCreateIssue(t *testing.T) {
+	var out, errb bytes.Buffer
+	err := run(context.Background(), []string{"issue", "lst"}, strings.NewReader(""), &out, &errb)
+	if !errors.Is(err, errUsage) {
+		t.Fatalf("err = %v, want errUsage", err)
+	}
+	for _, want := range []string{`unknown issue command "lst"`, `Did you mean "list"?`, `amf issue create "lst"`} {
+		if !strings.Contains(errb.String(), want) {
+			t.Errorf("missing %q in %q", want, errb.String())
+		}
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout = %q", out.String())
+	}
+}
