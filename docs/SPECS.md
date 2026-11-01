@@ -497,9 +497,9 @@ Checks that need GitHub, the repo or a checkout are `skip` without them.
 Claude's and Codex's own logins aren't checked: their CLIs can't report them
 reliably.
 
-## Configuration
+## Configuration (`.env`)
 
-amf reads one `.env`: `./.env`, or else `.env` at the top of the git
+`amf help env` prints these settings. amf reads one `.env`: `./.env`, or else `.env` at the top of the git
 checkout. Environment variables override the file. Values ending in `...`, and `owner/name`, are
 placeholders and count as unset. The file has `KEY=value` lines, optionally
 prefixed with `export ` and quoted; `#` starts a comment line or, after a

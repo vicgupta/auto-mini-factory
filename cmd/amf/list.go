@@ -23,6 +23,7 @@ type listedIssue struct {
 func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("list", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	withHelp(fs, stderr, listHelp)
 	state := fs.String("state", "open", "open, closed or all")
 	label := fs.String("label", "", "only issues with this label, e.g. amf:ready")
 	search := fs.String("search", "", "only issues whose title contains this text, ignoring case")

@@ -296,7 +296,7 @@ func TestPRViewGroup(t *testing.T) {
 		t.Fatalf("bogus: %v, stdout %q, stderr %q", err, &out, &stderr)
 	}
 	out.Reset()
-	if err := run(context.Background(), []string{"help"}, nil, &out, io.Discard); err != nil || !strings.Contains(out.String(), "amf pr") {
+	if err := run(context.Background(), []string{"help"}, nil, &out, io.Discard); err != nil || !strings.Contains(out.String(), "\n  pr ") {
 		t.Fatalf("help: %v, %q", err, &out)
 	}
 }

@@ -50,6 +50,9 @@ func isPlaceholder(v string) bool {
 // repo, it also creates any of amf's labels the repository is missing.
 func cmdInit(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if len(args) != 0 {
+		if isHelpArgs(args) {
+			fmt.Fprint(stderr, initHelp)
+		}
 		fmt.Fprintln(stderr, "usage: amf init")
 		return errUsage
 	}

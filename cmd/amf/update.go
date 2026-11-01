@@ -32,6 +32,7 @@ const releasesURL = "https://github.com/vicgupta/auto-mini-factory"
 func cmdUpdate(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("update", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	withHelp(fs, stderr, updateHelp)
 	target := fs.String("version", "", "release to install, e.g. v0.0.7 (default: latest)")
 	check := fs.Bool("check", false, "only report whether an update is available")
 	pos, err := parseArgs(fs, args)

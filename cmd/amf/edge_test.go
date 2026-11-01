@@ -2405,8 +2405,8 @@ func TestDraftFlagHelp(t *testing.T) {
 			t.Errorf("amf %s -h doesn't describe --draft:\n%s", cmd, stderr.String())
 		}
 	}
-	if !strings.Contains(usage, "also takes --draft") {
-		t.Error("usage doesn't mention --draft")
+	if !strings.Contains(runHelp, "also takes\n--draft") && !strings.Contains(runHelp, "also takes --draft") {
+		t.Error("amf help run doesn't mention --draft")
 	}
 }
 
@@ -2828,7 +2828,10 @@ func TestHelpTopicPrintsGroupUsage(t *testing.T) {
 	}{
 		{[]string{"help", "issue"}, issueUsage},
 		{[]string{"help", "pr"}, prUsage},
-		{[]string{"help", "run"}, usage},
+		{[]string{"help", "run"}, runHelp},
+		{[]string{"help", "watch"}, watchHelp},
+		{[]string{"help", "env"}, envHelp},
+		{[]string{"help", "agents"}, agentsHelp},
 		{[]string{"help"}, usage},
 	} {
 		var out, errb strings.Builder
@@ -2850,16 +2853,23 @@ func TestHelpUnknownTopic(t *testing.T) {
 	if e := errb.String(); !strings.Contains(e, `unknown help topic "isue"`) || !strings.Contains(e, `Did you mean "issue"?`) {
 		t.Fatalf("stderr: %q", e)
 	}
-	// A real command without its own help still prints the usage.
-	out.Reset()
-	if err := run(context.Background(), []string{"help", "run"}, nil, &out, io.Discard); err != nil || !strings.Contains(out.String(), "Usage:") {
-		t.Fatalf("help run: %v, %q", err, &out)
+	// Every command and topic has its own help.
+	for _, topic := range topicNames() {
+		out.Reset()
+		if err := run(context.Background(), []string{"help", topic}, nil, &out, io.Discard); err != nil || out.Len() == 0 || out.String() == usage {
+			t.Errorf("help %s: %v, %q", topic, err, &out)
+		}
+	}
+	// A typo of a topic is suggested too.
+	errb.Reset()
+	if err := run(context.Background(), []string{"help", "evn"}, nil, io.Discard, &errb); !errors.Is(err, errUsage) || !strings.Contains(errb.String(), `Did you mean "env"?`) {
+		t.Errorf("help evn: %v, %q", err, errb.String())
 	}
 }
 
-// Every flag amf list takes appears in the top-level usage, --json included.
+// Every flag amf list takes appears in its help, --json included.
 func TestUsageListMentionsJSON(t *testing.T) {
-	for _, line := range strings.Split(usage, "\n") {
+	for _, line := range strings.Split(listHelp, "\n") {
 		if strings.HasPrefix(strings.TrimSpace(line), "amf list ") {
 			if !strings.Contains(line, "--json") {
 				t.Errorf("amf list usage line omits --json: %q", line)
@@ -2867,5 +2877,39 @@ func TestUsageListMentionsJSON(t *testing.T) {
 			return
 		}
 	}
-	t.Error("no amf list line in usage")
+	t.Error("no amf list line in amf help list")
+}
+
+// The overview lists each command and topic on one line, with no flags,
+// and points to the per-command help.
+func TestUsageIsOverview(t *testing.T) {
+	for _, args := range [][]string{{"help"}, {"-h"}, {"--help"}} {
+		var out bytes.Buffer
+		if err := run(context.Background(), args, nil, &out, io.Discard); err != nil || out.String() != usage {
+			t.Errorf("amf %v: %v, %q", args, err, &out)
+		}
+	}
+	for _, name := range topicNames() {
+		if !regexp.MustCompile(`(?m)^  ` + name + ` +\S`).MatchString(usage) {
+			t.Errorf("overview has no line for %s", name)
+		}
+	}
+	if strings.Contains(usage, "--") || !strings.Contains(usage, "Run amf help <command> or amf <command> -h for details.") {
+		t.Errorf("overview:\n%s", usage)
+	}
+	// -h on a command prints its help topic, then its flags.
+	var errb bytes.Buffer
+	if err := run(context.Background(), []string{"run", "-h"}, nil, io.Discard, &errb); !errors.Is(err, errUsage) || !strings.HasPrefix(errb.String(), runHelp) || !strings.Contains(errb.String(), "-agent-timeout") {
+		t.Errorf("amf run -h: %v\n%s", err, errb.String())
+	}
+	errb.Reset()
+	if err := run(context.Background(), []string{"doctor", "-h"}, nil, io.Discard, &errb); !errors.Is(err, errUsage) || !strings.Contains(errb.String(), doctorHelp) {
+		t.Errorf("amf doctor -h: %v\n%s", err, errb.String())
+	}
+	// The settings, agents included, are in amf help env.
+	for _, k := range []string{"GITHUB_TOKEN", "AMF_PRIMARY_AGENT", "AMF_SECONDARY_AGENT", "OPENCODE_MODEL", "AMF_LOG_LEVEL"} {
+		if !strings.Contains(envHelp, k) {
+			t.Errorf("amf help env omits %s", k)
+		}
+	}
 }

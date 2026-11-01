@@ -41,68 +41,6 @@ func buildVersion() string {
 // permission, so a run without a limit could watch forever.
 const defaultAgentTimeout = 60 * time.Minute
 
-const usage = `amf turns GitHub issues into pull requests with coding agents: Claude Code, Codex or opencode.
-
-Usage:
-  amf init                                                           write .env (backing up an existing one) and create amf's labels
-  amf issue <command>                                                manage issues (create, list, run, watch)
-  amf issue "Title" [-b body | -f file.md] [--label L] [--no-label]  create an issue (body may also come from stdin) (alias of issue create)
-  amf pr <command>                                                   manage pull requests (list, merge, view, diff, close, reopen, ready, draft)
-  amf list [--state open|closed|all] [--label L] [--search TEXT] [--limit N]     list issues, newest first, with their amf labels (alias of issue list; also takes --json)
-  amf run <issue-number> [--agent A] [--agent-timeout 60m]           process one issue into a PR (alias of issue run; also takes --draft, --dry-run, --merge, --eval-rounds, --log-level, --log-file)
-  amf watch [--agent A] [--interval 60s] [--label amf:ready]         process amf:ready issues as they arrive (alias of issue watch; also takes --exclude-label, --draft, --merge, --agent-timeout, --eval-rounds, --log-level, --log-file)
-  amf pipeline [--fetch]                                             check the plan/code/eval pipeline in this checkout's AGENTS.md
-  amf doctor                                                         check the setup here, one line per check, changing nothing
-  amf update [--version vX.Y.Z] [--check]                            replace this amf binary with the latest (or given) release
-  amf version
-
-Configuration is read from .env (or the environment):
-  GITHUB_TOKEN   token with contents, issues and pull-requests write access
-  GITHUB_REPO    owner/name
-  CLAUDE_CODE_OAUTH_TOKEN  optional subscription token for Claude Code (claude setup-token)
-  ANTHROPIC_API_KEY        optional Claude API key; with it or the token above, claude is usable
-  OPENAI_API_KEY           optional OpenAI API key; with it, codex is usable
-  OPENCODE_API_KEY         optional OpenCode Console API key, for paid opencode/ and Go opencode-go/ models
-  OPENCODE_MODEL           model for opencode (default opencode/big-pickle); see opencode models
-  AMF_PRIMARY_AGENT        agent for issues without a pipeline: claudecode, codex or opencode (default codex)
-  AMF_SECONDARY_AGENT      agent amf falls back to if the primary fails, or none (default claudecode)
-  AMF_AGENT_TIMEOUT        how long each agent run may take, a Go duration (default 60m);
-                           --agent-timeout, or its deprecated alias --timeout, overrides it
-  AMF_LOG_LEVEL            debug, info, warn or error (default info, and debug in .amf/runs/); --log-level overrides it
-  AMF_POSTGRES_URL         optional postgres:// URL; run and watch also log to its amflogs database
-  AMF_CLAUDE     path to the claude binary (default "claude")
-  AMF_CODEX      path to the codex binary (default "codex")
-  AMF_OPENCODE   path to the opencode binary (default "opencode")
-  AMF_TRUSTED    optional GitHub logins, comma-separated; amf only works on their issues
-  AMF_API_URL    GitHub API base URL (default https://api.github.com)
-  AMF_CLONE_URL  URL to clone GITHUB_REPO from (default https://github.com/GITHUB_REPO.git)
-
---merge makes run and watch merge each PR they open or update, without
-review: a merge commit, or --merge=squash or --merge=rebase. A merge GitHub
-refuses (a conflict, required checks or reviews) leaves the PR open.
-
-amf run --dry-run makes the change on the local amf/issue-N branch and prints
-the pull request it would open, without labeling, commenting, pushing,
-opening a PR or merging.
-
-run and watch work in the enclosing git checkout. Started anywhere else, they
-clone GITHUB_REPO into ./<name> (or reuse that clone) and work there.
-
-Without a pipeline, each issue gets one agent run: the agent --agent names
-(claudecode, codex or opencode), with no fallback, or else AMF_PRIMARY_AGENT
-(default codex); if it fails, amf runs AMF_SECONDARY_AGENT (default
-claudecode) in a clean worktree. claude needs ANTHROPIC_API_KEY or
-CLAUDE_CODE_OAUTH_TOKEN, codex OPENAI_API_KEY, and opencode OPENCODE_API_KEY
-or its own login for a paid OPENCODE_MODEL. If neither configured agent can
-run, amf picks the first of claude, codex and opencode that can. amf watch
-shows what it found for each.
-
-A repo can declare a pipeline in its AGENTS.md: a table under "## amf" with a
-plan, code and eval stage, each naming a skill URL, an agent (claudecode,
-codex or opencode) and a model. See docs/SPECS.md at
-github.com/vicgupta/auto-mini-factory.
-`
-
 var errUsage = errors.New("usage")
 
 func main() {
@@ -146,21 +84,17 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		fmt.Fprintln(stdout, "amf", buildVersion())
 		return nil
 	case "help", "-h", "--help":
-		// amf help issue and amf help pr print that group's usage.
+		// amf help <command or topic> prints its details.
 		if cmd == "help" && len(rest) > 0 {
-			switch rest[0] {
-			case "issue":
-				fmt.Fprint(stdout, issueUsage)
-				return nil
-			case "pr":
-				fmt.Fprint(stdout, prUsage)
-				return nil
+			if t, ok := helpTopics[rest[0]]; ok {
+				_, err := fmt.Fprint(stdout, t)
+				return err
 			}
 			// A word that names no command is a typo: say so, rather than
 			// printing the usage as if the question had been answered.
-			if !slices.Contains(topCommands, rest[0]) && !strings.HasPrefix(rest[0], "-") {
+			if !strings.HasPrefix(rest[0], "-") {
 				fmt.Fprintf(stderr, "amf: unknown help topic %q\n", rest[0])
-				if s := suggestCommand(rest[0]); s != "" {
+				if s := suggestFrom(rest[0], topicNames()); s != "" {
 					fmt.Fprintf(stderr, "Did you mean %q?\n", s)
 				}
 				fmt.Fprintf(stderr, "\n%s", usage)
@@ -251,6 +185,7 @@ func cmdIssueCreate(ctx context.Context, args []string, stdin io.Reader, stdout,
 func cmdRun(ctx context.Context, args []string, stderr io.Writer) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	withHelp(fs, stderr, runHelp)
 	at, alias := addTimeoutFlags(fs)
 	evalRounds := fs.Int("eval-rounds", 2, "how many times a pipeline's eval stage may send the change back to code")
 	agent := fs.String("agent", "", agentFlagHelp)
@@ -299,6 +234,7 @@ func cmdRun(ctx context.Context, args []string, stderr io.Writer) error {
 func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 	fs := flag.NewFlagSet("watch", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	withHelp(fs, stderr, watchHelp)
 	interval := fs.Duration("interval", 60*time.Second, "how often to poll GitHub")
 	label := fs.String("label", labelReady, "process open issues with this label")
 	var exclude labelsFlag

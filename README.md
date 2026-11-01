@@ -5,6 +5,39 @@ coding agent (Claude Code, Codex or opencode, whichever you have), or with a
 plan → code → eval pipeline of them. For a solo developer or small team that wants coding agents without
 running a platform.
 
+## Commands
+
+| Command | What it does |
+|---|---|
+| `amf init` | write `.env` and create amf's labels |
+| `amf issue` | manage issues: `create`, `list`, `run`, `watch` |
+| `amf pr` | manage pull requests: `list`, `merge`, `view`, `diff`, `close`, `reopen`, `ready`, `draft` |
+| `amf list` | list issues, newest first (alias of `issue list`) |
+| `amf run N` | process one issue into a PR (alias of `issue run`) |
+| `amf watch` | process `amf:ready` issues as they arrive (alias of `issue watch`) |
+| `amf pipeline` | check the plan/code/eval pipeline in `AGENTS.md` |
+| `amf doctor` | check the setup here, changing nothing |
+| `amf update` | replace this amf binary with the latest (or given) release |
+| `amf version` | print amf's version |
+| `amf help` | show help for a command, or the `agents` and `env` topics |
+
+`amf help <command>` or `amf <command> -h` prints a command's details, and
+[docs/COMMANDS.md](docs/COMMANDS.md) has the full reference.
+
+## Quick start
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/vicgupta/auto-mini-factory/main/install.sh | sh
+cd your-repo
+amf init                 # writes .env: fill in GITHUB_TOKEN and an agent key
+amf doctor               # check the setup
+amf issue "Add dark mode" -b "Use CSS variables for the palette"
+amf run 1                # or: amf watch, to handle amf:ready issues as they come
+```
+
+<details>
+<summary><b>Install options</b></summary>
+
 ## Install
 
 ```sh
@@ -32,7 +65,7 @@ go install github.com/vicgupta/auto-mini-factory/cmd/amf@latest
 
 Needs `git` and at least one coding agent on `PATH`:
 [`claude`](https://claude.com/claude-code), [`codex`](https://github.com/openai/codex)
-or [`opencode`](https://opencode.ai). See [Choosing the agent](#choosing-the-agent)
+or [`opencode`](https://opencode.ai). See [Choosing the agent](docs/COMMANDS.md#choosing-the-agent)
 for which one amf runs.
 
 To update later:
@@ -47,15 +80,58 @@ amf update --version v0.0.7   # install a specific release (also downgrades)
 against `checksums.txt`, makes sure the new binary runs, then swaps it in place
 of the running one. It needs write access to the folder `amf` is in.
 
+</details>
+
 ## Configure
 
-In a clone of the repo you want amf to work on, run:
+In a clone of the repo you want amf to work on, run `amf init`. It writes
+`.env` with every setting amf uses (listed in
+[Configuration (.env)](#configuration-env)) and creates amf's labels.
 
-```sh
-amf init
-```
+- **Backups:** if `.env` already exists, `amf init` first copies it to the next
+  free `.env.0001`, `.env.0002`, and so on, then keeps its real values in the
+  new file, including any extra variables.
+- **Repo:** `GITHUB_REPO` is filled in from the checkout's GitHub `origin`.
+- **Git:** `.env` and `.env.NNNN` are added to `.git/info/exclude` (for the
+  folder you ran `amf init` in, even a subdirectory), so the
+  tokens never show up in `git status`.
+- **Labels:** once `GITHUB_TOKEN` and `GITHUB_REPO` are filled in, `amf init`
+  makes sure the repo has `amf:ready`, `amf:in-progress`, `amf:done` and
+  `amf:failed`, creating any that are missing. Run it again after editing
+  `.env`. If nothing changed, it makes no new backup.
 
-This writes `.env` with every variable amf uses:
+amf reads `.env` in the current directory, then at the top of the enclosing
+git checkout. Real environment variables win over the file.
+Keep `.env` out of git: add it to the target repo's `.gitignore`.
+
+### Configuration (.env)
+
+Every setting amf reads, from `.env` or the environment (`amf help env`
+prints the same list). Real environment variables win over the file, and
+placeholders ending in `...` count as unset.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `GITHUB_TOKEN` | required | API access: Contents, Issues, Pull requests (read & write) |
+| `GITHUB_REPO` | required | `owner/name`; github.com URLs are accepted |
+| `CLAUDE_CODE_OAUTH_TOKEN` | unset | Claude subscription token, passed to Claude. Makes `claude` usable without `--agent` |
+| `ANTHROPIC_API_KEY` | unset | Claude API key, passed to Claude when there's no `CLAUDE_CODE_OAUTH_TOKEN`. Makes `claude` usable without `--agent` |
+| `OPENAI_API_KEY` | unset | OpenAI API key, passed to Codex. Makes `codex` usable without `--agent` |
+| `OPENCODE_API_KEY` | unset | OpenCode Console API key (`oc_sk_...`), passed to opencode only. One key covers pay-as-you-go `opencode/<id>` models (with credits) and, for a workspace subscribed to OpenCode Go, `opencode-go/<id>` models. Makes `opencode` usable without `--agent` with a paid `OPENCODE_MODEL`. Never written to a file |
+| `OPENCODE_MODEL` | `opencode/big-pickle` | The model opencode runs with: always without a pipeline, and for pipeline stages that name no model. `opencode/<id>` is a free or pay-as-you-go model, `opencode-go/<id>` an OpenCode Go one. `opencode models` lists the choices |
+| `AMF_TRUSTED` | unset | GitHub logins, separated by commas or spaces (a leading `@` is allowed, case is ignored). When set, amf only works on issues they opened. Unset means anyone's |
+| `AMF_POSTGRES_URL` | unset | A PostgreSQL server that `run` and `watch` also write their logs to. See [Logging to PostgreSQL](docs/COMMANDS.md#logs-in-postgresql) |
+| `AMF_CLAUDE` | `claude` | Path to the Claude CLI |
+| `AMF_PRIMARY_AGENT` | `codex` | The agent for issues without a pipeline: `claudecode` (or `claude`), `codex` or `opencode`, ignoring case. `--agent` and a pipeline override it |
+| `AMF_SECONDARY_AGENT` | `claudecode` | The agent amf falls back to when the primary fails, in a fresh worktree; the same values, or `none` for no fallback |
+| `AMF_AGENT_TIMEOUT` | `60m` | How long each agent run may take, as a Go duration; `--agent-timeout` (or its alias `--timeout`) overrides it. Must be at least 1m and at most 24h |
+| `AMF_LOG_LEVEL` | `info` (terminal), `debug` (event log) | `debug`, `info`, `warn` or `error`, for both the terminal and the event log of `run` and `watch`; `--log-level` overrides it |
+| `AMF_CODEX` | `codex` | Path to the Codex CLI |
+| `AMF_OPENCODE` | `opencode` | Path to the opencode CLI |
+| `AMF_API_URL` | `https://api.github.com` | GitHub API base URL. `amf pr ready` and `amf pr draft` derive their GraphQL endpoint from it: `…/graphql` appended, or a GitHub Enterprise Server `…/api/v3` becomes `…/api/graphql` |
+| `AMF_CLONE_URL` | `https://github.com/<repo>.git` | Where to clone the repo from |
+
+`amf init` writes them like this, the optional ones commented out:
 
 ```sh
 GITHUB_TOKEN=github_pat_...   # Contents, Issues, Pull requests: read & write
@@ -73,33 +149,15 @@ AMF_TRUSTED=login1,login2...   # optional: only work on issues opened by these G
 # AMF_POSTGRES_URL=postgres://user:password@localhost:5432/postgres   # optional: also save the logs to database amflogs on this PostgreSQL server
 ```
 
-Edit it and replace the placeholders. Placeholders ending in `...` count as
-unset, so you can leave the optional ones as they are. The agent keys decide
-which agent amf runs (see below). To run opencode with another model,
-uncomment `OPENCODE_MODEL` and set it to one that `opencode models` lists.
-Free models (`opencode/big-pickle` and the `opencode/...-free` ones) need no
-key. For a pay-as-you-go `opencode/<id>` model, or an
-[OpenCode Go](https://opencode.ai/v2/docs/console/go/) `opencode-go/<id>`
-model, also uncomment `OPENCODE_API_KEY` and set it to an OpenCode Console
-API key; one key covers both, and the model's prefix picks the plan. amf
-passes the key only to opencode, through its environment.
-To keep the logs in PostgreSQL too, uncomment `AMF_POSTGRES_URL` (see
-[Logs in PostgreSQL](#logs-in-postgresql)).
-
-- **Backups:** if `.env` already exists, `amf init` first copies it to the next
-  free `.env.0001`, `.env.0002`, and so on, then keeps its real values in the
-  new file, including any extra variables.
-- **Repo:** `GITHUB_REPO` is filled in from the checkout's GitHub `origin`.
-- **Git:** `.env` and `.env.NNNN` are added to `.git/info/exclude` (for the
-  folder you ran `amf init` in, even a subdirectory), so the
-  tokens never show up in `git status`.
-- **Labels:** once `GITHUB_TOKEN` and `GITHUB_REPO` are filled in, `amf init`
-  makes sure the repo has `amf:ready`, `amf:in-progress`, `amf:done` and
-  `amf:failed`, creating any that are missing. Run it again after editing
-  `.env`. If nothing changed, it makes no new backup.
-
-amf reads `.env` in the current directory, then at the top of the enclosing
-git checkout. Real environment variables win over the file.
+The agent keys and `AMF_PRIMARY_AGENT`/`AMF_SECONDARY_AGENT` decide which
+agent amf runs; see [Choosing the agent](docs/COMMANDS.md#choosing-the-agent)
+or `amf help agents`. Free opencode models (`opencode/big-pickle` and the
+`opencode/...-free` ones) need no key. For a pay-as-you-go `opencode/<id>`
+model, or an [OpenCode Go](https://opencode.ai/v2/docs/console/go/)
+`opencode-go/<id>` model, set `OPENCODE_API_KEY` to an OpenCode Console API
+key; one key covers both, and the model's prefix picks the plan. amf passes
+the key only to opencode, through its environment. `AMF_POSTGRES_URL` is
+described in [Logs in PostgreSQL](docs/COMMANDS.md#logs-in-postgresql).
 
 `CLAUDE_CODE_OAUTH_TOKEN` lets Claude run on your Pro/Max subscription, which
 helps on servers or in CI where you can't log in interactively. Generate one with
@@ -168,7 +226,7 @@ amf list --json --label amf:failed | jq -r '.[].url'  # as JSON: number, title, 
 
 amf run 42                  # process one issue now
 amf watch --interval 60s    # process issues labeled `amf:ready`, one at a time
-amf watch --agent codex     # ...with Codex, even if Claude Code is installed
+amf watch --agent codex     # ...with Codex only, no fallback
 amf watch --exclude-label blocked --exclude-label needs-human  # ...leaving issues with either label alone until it's removed
 amf run 42 --draft          # open the PR as a draft
 amf watch --draft           # ...opening each new PR as a draft
@@ -177,220 +235,11 @@ amf watch --merge=squash    # squash and merge each PR (or --merge=rebase)
 amf run 42 --dry-run        # make the change locally and show the PR, touching nothing on GitHub
 ```
 
-### Choosing the agent
+See [docs/COMMANDS.md](docs/COMMANDS.md) for the details:
 
-Without a pipeline, each issue gets one agent run: the primary agent,
-`AMF_PRIMARY_AGENT` (default `codex`). If it fails (it isn't ready, exits
-with an error, times out, or makes no change), amf runs the secondary,
-`AMF_SECONDARY_AGENT` (default `claudecode`), in a clean worktree reset to
-the default branch, and the PR and issue comment say which agent made the
-change. If both fail, the error names both. Set `AMF_SECONDARY_AGENT=none`
-for no fallback. Either takes `claudecode` (or `claude`), `codex` or
-`opencode`.
-
-**Changed:** amf used to try claude first; the default order is now codex,
-then claude. Set `AMF_PRIMARY_AGENT=claudecode` and
-`AMF_SECONDARY_AGENT=codex` for the old order.
-
-If neither is ready, amf uses the first of these that's ready:
-
-| Agent | Ready when |
-|---|---|
-| `claude` | installed, and `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` is set |
-| `codex` | installed, and `OPENAI_API_KEY` is set |
-| `opencode` | installed; runs with `OPENCODE_MODEL` (default `opencode/big-pickle`). A paid `opencode/` or Go `opencode-go/` model also needs `OPENCODE_API_KEY` or a saved `opencode auth login` |
-
-Keys can be in `.env` or the environment. An installed claude or codex
-without its key is skipped, even if you're logged in to it. `amf watch` prints what it found
-for each agent when it starts:
-
-```
-amf: agents for issues without a pipeline (claude and codex need a key, opencode one for a paid model):
-amf:   claude   installed at /Users/vic/.local/bin/claude; CLAUDE_CODE_OAUTH_TOKEN is set: usable
-amf:   codex    installed at /Users/vic/.local/bin/codex; OPENAI_API_KEY not set: skipped
-amf:   opencode installed at /Users/vic/.opencode/bin/opencode; needs no key, model opencode/big-pickle: usable
-amf: issues without a pipeline run claude (primary codex, secondary claudecode); codex is not usable: codex has no OPENAI_API_KEY
-```
-
-To pick one yourself, pass `--agent claudecode` (or `claude`), `--agent codex`
-or `--agent opencode` to `amf run` or `amf watch`. A named agent must be
-installed but needs no key, so `--agent claudecode` runs Claude on its own
-login. amf never falls back from a named agent to another. A pipeline's
-per-stage agent wins over both `--agent` and the primary/secondary settings. If no agent
-is ready, amf leaves the issue on `amf:ready` and `watch` tries again on its
-next poll. `amf doctor` shows which agent amf would use, and warns if
-`OPENCODE_MODEL` isn't one opencode lists. With `OPENCODE_API_KEY` set, it
-also asks OpenCode which plans the key grants (pay-as-you-go, Go) and fails
-if the key is rejected or an `opencode-go/` model's workspace isn't
-subscribed to Go. A repo with a pipeline ignores
-`--agent`, because the pipeline names each stage's agent.
-
-### What `amf run N` does
-
-Without a pipeline (see below), amf runs one agent once. With Claude Code:
-
-1. Labels the issue `amf:in-progress` and removes `amf:ready`.
-2. Fetches the default branch and creates a worktree at
-   `.amf/worktrees/issue-N` on branch `amf/issue-N` from `origin/<default>`.
-3. Runs `claude -p --dangerously-skip-permissions --output-format stream-json --verbose` in the
-   worktree with the issue as the prompt. Claude is told to make the change,
-   run the project's tests/build, and not touch git. Output streams to
-   `.amf/logs/issue-N.log` as it works, one JSON message per line
-   (`tail -f` it to follow along). Each agent run may take at most 60 minutes
-   (`--agent-timeout`; amf then kills the agent and everything it spawned, or
-   `AMF_AGENT_TIMEOUT` in `.env` sets it without a flag).
-   Codex and opencode run the same way, with the commands in
-   [docs/SPECS.md](docs/SPECS.md#agents).
-4. Commits the changes (`Fix #N: <title>`), fails if there are none, and runs
-   `git push --force -u origin amf/issue-N` with your own git credentials.
-   If the change touches anything under `.github/`, amf refuses to push it
-   and the issue fails, since a pushed workflow change runs with your
-   Actions secrets before anyone reviews it.
-5. Opens a PR with the agent's final message as the body plus `Closes #N`, as
-   a draft with `--draft` (default off; `amf run` and `amf watch` take it). On
-   a retry whose PR is still open, it updates that PR's title and body
-   instead, and leaves it a draft or ready for review as it was.
-6. Comments the PR link on the issue, labels it `amf:done` (a draft PR
-   counts), removes the worktree.
-
-With `--merge`, amf also merges the PR before commenting, with a merge commit
-(or `--merge=squash`, `--merge=rebase`), pinned to the commit it pushed. It
-doesn't wait for checks, so with required checks or reviews GitHub refuses
-and the PR stays open; amf comments why, and `amf run` exits 1. amf never
-merges a change to the top-level `AGENTS.md`, which holds the pipeline.
-`--merge` can't be combined with `--draft`, since GitHub doesn't merge drafts.
-
-With `--dry-run`, `amf run N` only reads from GitHub. It leaves the issue's
-labels alone, runs the agent (or the pipeline) and commits on the local
-`amf/issue-N` branch as usual, then prints the diff stat and the PR it would
-open or update (and whether `--merge` would merge it) instead of pushing.
-Nothing is labeled, commented, pushed, opened or merged. See the change with
-`git diff origin/main amf/issue-N`. The agent still runs with every
-permission, so the trust rules below still apply.
-
-On any failure the issue gets `amf:failed` plus a comment with the reason,
-and the worktree is kept for inspection. A run that hit the agent timeout
-loses only the worktree: amf comments with how to retry with more time and
-keeps the logs and partial output. Re-running `amf run N` starts again from a
-fresh worktree.
-
-### Logs
-
-Besides the `amf: …` lines on the terminal and the agents' logs in
-`.amf/logs/`, each `amf run` and `amf watch` writes an event log to
-`.amf/runs/<run_id>/events.jsonl`: one JSON object per line for every step,
-GitHub call, git command and agent run, with the issue it was for.
-
-```sh
-jq -c 'select(.issue == 12)' .amf/runs/*/events.jsonl   # everything about #12
-jq -c 'select(.event == "github.call") | [.method, .path, .status]' .amf/runs/*/events.jsonl
-```
-
-After each issue, and when amf exits (Ctrl-C included), it writes
-`summary.json` next to the log: issues done, failed and skipped, GitHub and
-git calls, agent time per stage and errors. It prints the same as the last
-line, `amf: summary: 3 issues (2 done, 1 failed, 0 skipped); 41 GitHub calls; log …`.
-
-- `--log-level debug|info|warn|error` (or `AMF_LOG_LEVEL`) sets what the
-  terminal and the log show. By default the terminal shows `info` and the
-  log keeps `debug`.
-- `--log-file PATH` writes the log somewhere else, and `--log-file off`
-  writes none.
-- Everything amf writes is **redacted**: tokens and keys from `.env`,
-  well-known secret formats, credentials in URLs, emails and your home
-  directory are masked as `[REDACTED:<kind>]` on the terminal, in every log,
-  in PostgreSQL and in the comments and PRs amf posts. It's pattern
-  matching, so a secret in an unusual format can still get through; see
-  [docs/SPECS.md](docs/SPECS.md#security-model).
-
-`amf doctor` checks that `.amf/runs/` is writable.
-
-### Logs in PostgreSQL
-
-Set `AMF_POSTGRES_URL` in `.env` and `amf run` and `amf watch` also write
-every log line to PostgreSQL, while still printing it and writing
-`.amf/logs/` as usual:
-
-```sh
-AMF_POSTGRES_URL=postgres://amf:secret@db.example.com:5432/postgres?sslmode=require
-```
-
-amf logs to a database named `amflogs` on that server. If it doesn't exist,
-amf creates it (the user needs `CREATEDB` that first time), along with two
-tables:
-
-- `amf_log`: amf's own lines, such as `#12: running claude`, with the issue
-  number when the line is about one.
-- `agent_log`: every line the agents print, with the issue, the agent and
-  the log file it also went to.
-
-```sql
-SELECT logged_at, message FROM amf_log WHERE issue = 12 ORDER BY id;
-```
-
-Logging never holds up an issue. If the server is down, amf warns, keeps
-the lines in memory and retries. amf has no dependencies, so it speaks the
-PostgreSQL protocol itself: TLS (`sslmode`), and password, MD5 or
-SCRAM-SHA-256 logins. `amf doctor` checks the connection. Agents' output can
-include your code, so restrict who can read `amflogs`.
-
-### Pipelines: plan → code → eval
-
-Instead of one agent run, a repo can have amf plan the change, code it, and
-have a reviewer agent check it before any PR is opened. Each stage gets its
-own skill, agent (`claudecode`, `codex` or `opencode`) and model. Declare the
-pipeline in the target repo's `AGENTS.md`:
-
-```markdown
-## amf
-
-| Stage | Skill | Agent | Model |
-|---|---|---|---|
-| plan | https://raw.githubusercontent.com/vicgupta/auto-mini-factory/v0.2.0/skills/plan/SKILL.md | claudecode | claude-opus-5-5 |
-| code | https://raw.githubusercontent.com/vicgupta/auto-mini-factory/v0.2.0/skills/code/SKILL.md | codex | default |
-| eval | https://raw.githubusercontent.com/vicgupta/auto-mini-factory/v0.2.0/skills/eval/SKILL.md | opencode | opencode/deepseek-v4.1-flash-free |
-```
-
-- **plan** writes a plan with acceptance criteria. It can stop with
-  `BLOCKED:` and questions when the issue is too unclear, and amf comments
-  them on the issue.
-- **code** follows the plan, then amf commits the round. A round that
-  changes anything under `.github/` fails the issue: amf refuses to push
-  such changes, as it does without a pipeline.
-- **eval** runs the tests, reviews the diff against the plan, and ends with
-  `VERDICT: PASS` or `VERDICT: FAIL`. On a fail, its review goes back to
-  code, up to `--eval-rounds` times (default 2). If it still fails, amf
-  pushes the branch for you to look at and marks the issue `amf:failed`.
-- The PR gets one `Fix #N` commit, with eval's verdict and review and the
-  plan in collapsed sections of the body.
-
-Only `code` is required. A skill URL can be pinned with `#sha256=…`, and
-amf refuses the skill if it changes. Plan and eval can't change the branch,
-because amf resets the worktree after them. Each stage logs to
-`.amf/logs/issue-N-<stage>.log`.
-
-`amf run` and `amf watch` read the pipeline from `AGENTS.md` on the default
-branch, so a change takes effect once merged. To check a change before
-merging, run `amf pipeline --fetch` in your checkout: it shows the stages,
-checks the agents are installed, and downloads each skill.
-
-Starter skills are in [`skills/`](skills): [plan](skills/plan/SKILL.md),
-[code](skills/code/SKILL.md) and [eval](skills/eval/SKILL.md). Write your own
-by copying one; amf's prompt already fixes each stage's inputs and output
-format, so a skill only needs to say how to do the work.
-
-### Labels
-
-An issue moves `amf:ready` → `amf:in-progress` → `amf:done` or `amf:failed`.
-`amf issue` adds `amf:ready`, and `amf watch` picks up open `amf:ready` issues
-oldest first. To retry an issue, add `amf:ready` again or run `amf run N`.
-If amf is killed mid-run and an issue is stuck on `amf:in-progress`, run
-`amf run N`.
-
-Issues labeled `amf` by amf v0.0.4 and earlier aren't picked up any more.
-Relabel them `amf:ready`, or run `amf watch --label amf`.
-
-`.amf/` is added to `.git/info/exclude`, so it never shows up in `git status`.
+- [Choosing the agent](docs/COMMANDS.md#choosing-the-agent): which agent runs, and the fallback
+- [What `amf run N` does](docs/COMMANDS.md#what-amf-run-n-does), [logs](docs/COMMANDS.md#logs) and [logs in PostgreSQL](docs/COMMANDS.md#logs-in-postgresql)
+- [Pipelines](docs/COMMANDS.md#pipelines-plan--code--eval) and [labels](docs/COMMANDS.md#labels)
 
 ## Security
 
