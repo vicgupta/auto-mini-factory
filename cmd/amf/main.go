@@ -48,7 +48,7 @@ Usage:
   amf issue <command>                                                manage issues (create, list, run, watch)
   amf issue "Title" [-b body | -f file.md] [--label L] [--no-label]  create an issue (body may also come from stdin) (alias of issue create)
   amf pr <command>                                                   manage pull requests (list, merge, view, diff, close, reopen, ready, draft)
-  amf list [--state open|closed|all] [--label L] [--search TEXT] [--limit N]     list issues, newest first, with their amf labels (alias of issue list)
+  amf list [--state open|closed|all] [--label L] [--search TEXT] [--limit N]     list issues, newest first, with their amf labels (alias of issue list; also takes --json)
   amf run <issue-number> [--agent A] [--agent-timeout 60m]           process one issue into a PR (alias of issue run; also takes --draft, --dry-run, --merge, --eval-rounds, --log-level, --log-file)
   amf watch [--agent A] [--interval 60s] [--label amf:ready]         process amf:ready issues as they arrive (alias of issue watch; also takes --exclude-label, --draft, --merge, --agent-timeout, --eval-rounds, --log-level, --log-file)
   amf pipeline [--fetch]                                             check the plan/code/eval pipeline in this checkout's AGENTS.md
