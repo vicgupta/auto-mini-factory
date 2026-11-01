@@ -344,7 +344,7 @@ func TestCommandLineErrors(t *testing.T) {
 		{[]string{"run"}, "usage"},
 		{[]string{"run", "1", "2"}, "usage"},
 		{[]string{"run", "--bogus", "1"}, "usage"},
-		{[]string{"run", "abc"}, "invalid issue number"},
+		{[]string{"run", "abc"}, `invalid issue number "abc": want a positive number`},
 		{[]string{"run", "0"}, "invalid issue number"},
 		{[]string{"run", "#"}, "invalid issue number"},
 		{[]string{"run", "1", "--timeout", "0"}, "--timeout: agent timeout must be positive"},

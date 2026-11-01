@@ -252,7 +252,7 @@ func cmdRun(ctx context.Context, args []string, stderr io.Writer) error {
 	}
 	n, err := strconv.Atoi(strings.TrimPrefix(strings.TrimSpace(pos[0]), "#"))
 	if err != nil || n <= 0 {
-		return fmt.Errorf("invalid issue number %q", pos[0])
+		return fmt.Errorf("invalid issue number %q: want a positive number, like 12 or #12", pos[0])
 	}
 	if err := lo.check(); err != nil {
 		return err
