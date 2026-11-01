@@ -77,6 +77,14 @@ func (d *doctor) check(ctx context.Context) {
 		d.line("warn", ".env", "none in %s; using the environment only (amf init writes one)", strings.Join(paths, " or "))
 	default:
 		d.line("ok", ".env", "%s", envFile)
+		if info, err := os.Stat(envFile); err == nil {
+			mode := info.Mode().Perm()
+			if mode&0o044 != 0 {
+				d.line("warn", "env perms", "%s is readable by others (mode %04o); run chmod 600 on it to protect the tokens in it", envFile, mode)
+			} else {
+				d.line("ok", "env perms", "not readable by others")
+			}
+		}
 	}
 	tokenOK, repoOK := cfg.Token != "", cfg.Repo != "" && validRepo(cfg.Repo) == nil
 	switch {
