@@ -51,9 +51,11 @@ func cmdPR(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	case "draft":
 		return cmdPRDraft(ctx, args[1:], stdout, stderr)
 	default:
+		fmt.Fprintf(stderr, "amf: unknown pr command %q\n", args[0])
 		if s := suggestFrom(args[0], prSubcommands); s != "" {
-			fmt.Fprintf(stderr, "amf: unknown pr command %q\nDid you mean %q?\n\n", args[0], s)
+			fmt.Fprintf(stderr, "Did you mean %q?\n", s)
 		}
+		fmt.Fprintln(stderr)
 		fmt.Fprint(stderr, prUsage)
 		return errUsage
 	}
