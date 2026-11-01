@@ -151,6 +151,16 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 				fmt.Fprint(stdout, prUsage)
 				return nil
 			}
+			// A word that names no command is a typo: say so, rather than
+			// printing the usage as if the question had been answered.
+			if !slices.Contains(topCommands, rest[0]) && !strings.HasPrefix(rest[0], "-") {
+				fmt.Fprintf(stderr, "amf: unknown help topic %q\n", rest[0])
+				if s := suggestCommand(rest[0]); s != "" {
+					fmt.Fprintf(stderr, "Did you mean %q?\n", s)
+				}
+				fmt.Fprintf(stderr, "\n%s", usage)
+				return errUsage
+			}
 		}
 		fmt.Fprint(stdout, usage)
 		return nil
