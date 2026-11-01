@@ -101,6 +101,32 @@ func TestPRList(t *testing.T) {
 	}
 }
 
+func TestPRListLimitHint(t *testing.T) {
+	gh, srv := newFakeGitHub(t)
+	gh.prs = []map[string]string{
+		{"head": "a", "base": "main", "state": "open", "title": "A"},
+		{"head": "b", "base": "main", "state": "open", "title": "B"},
+	}
+	listJSONEnv(t, srv)
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--limit", "1"}, "Showing 1 of 2 pull requests; use --limit 0 to list them all.\n"},
+		{[]string{"--limit", "2"}, ""},
+		{[]string{"--limit", "1", "--json"}, ""},
+		{nil, ""},
+	} {
+		var out, errb bytes.Buffer
+		if err := run(context.Background(), append([]string{"pr", "list"}, tc.args...), nil, &out, &errb); err != nil {
+			t.Fatal(err)
+		}
+		if errb.String() != tc.want {
+			t.Errorf("%v: stderr = %q, want %q", tc.args, errb.String(), tc.want)
+		}
+	}
+}
+
 func TestPRListIssueFilter(t *testing.T) {
 	gh, srv := newFakeGitHub(t)
 	gh.prs = []map[string]string{
