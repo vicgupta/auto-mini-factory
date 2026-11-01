@@ -39,7 +39,7 @@ func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	if *limit < 0 {
 		return fmt.Errorf("--limit must be 0 or more, got %d", *limit)
 	}
-	*state = strings.TrimSpace(*state)
+	*state = strings.ToLower(strings.TrimSpace(*state))
 	switch *state {
 	case "open", "closed", "all":
 	default:

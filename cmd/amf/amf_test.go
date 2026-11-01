@@ -1564,3 +1564,20 @@ func TestReleaseArchive(t *testing.T) {
 		}
 	}
 }
+
+func TestListStateIgnoresCase(t *testing.T) {
+	gh, srv := newFakeGitHub(t)
+	gh.issues[1] = &Issue{Number: 1, Title: "One", State: "open"}
+	gh.issues[2] = &Issue{Number: 2, Title: "Two", State: "closed"}
+	t.Chdir(t.TempDir())
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	t.Setenv("GITHUB_REPO", "vic/demo")
+	t.Setenv("AMF_API_URL", srv.URL)
+	var out, errb bytes.Buffer
+	if err := run(context.Background(), []string{"list", "--state", " ALL "}, nil, &out, &errb); err != nil {
+		t.Fatalf("amf list --state ALL: %v", err)
+	}
+	if !strings.Contains(out.String(), "#1") || !strings.Contains(out.String(), "#2") || !strings.Contains(out.String(), "STATE") {
+		t.Errorf("--state ALL output %q", out.String())
+	}
+}
