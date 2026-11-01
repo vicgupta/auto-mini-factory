@@ -1248,6 +1248,33 @@ func TestListCommand(t *testing.T) {
 	}
 }
 
+func TestListLimitHint(t *testing.T) {
+	gh, srv := newFakeGitHub(t)
+	gh.issues[1] = &Issue{Number: 1, Title: "One", State: "open"}
+	gh.issues[2] = &Issue{Number: 2, Title: "Two", State: "open"}
+	gh.issues[3] = &Issue{Number: 3, Title: "Three", State: "open"}
+	t.Chdir(t.TempDir())
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	t.Setenv("GITHUB_REPO", "vic/demo")
+	t.Setenv("AMF_API_URL", srv.URL)
+	hint := func(args ...string) (string, string) {
+		t.Helper()
+		var out, errb bytes.Buffer
+		if err := run(context.Background(), append([]string{"list"}, args...), nil, &out, &errb); err != nil {
+			t.Fatalf("amf list %v: %v", args, err)
+		}
+		return out.String(), errb.String()
+	}
+	if out, errs := hint("--limit", "2"); errs != "Showing 2 of 3 issues; use --limit 0 to list them all.\n" || strings.Contains(out, "Showing") {
+		t.Errorf("--limit 2: stdout %q, stderr %q", out, errs)
+	}
+	for _, args := range [][]string{{"--limit", "3"}, {"--limit", "5"}, {}, {"--limit", "1", "--json"}} {
+		if _, errs := hint(args...); errs != "" {
+			t.Errorf("amf list %v: stderr %q, want empty", args, errs)
+		}
+	}
+}
+
 func TestListCommandJSON(t *testing.T) {
 	gh, srv := newFakeGitHub(t)
 	url := func(n int) string { return fmt.Sprintf("https://github.com/vic/demo/issues/%d", n) }
