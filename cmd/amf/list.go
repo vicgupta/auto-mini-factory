@@ -70,6 +70,7 @@ func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		}
 		issues = kept
 	}
+	matched := len(issues)
 	if *limit > 0 && len(issues) > *limit {
 		issues = issues[:*limit]
 	}
@@ -117,7 +118,13 @@ func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error
 			fmt.Fprintf(tw, "#%d\t%s\t%s\n", is.Number, amfLabelNames(is), title)
 		}
 	}
-	return tw.Flush()
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	if len(issues) < matched {
+		fmt.Fprintf(stderr, "Showing %d of %d issues; use --limit 0 to list them all.\n", len(issues), matched)
+	}
+	return nil
 }
 
 // amfLabelNames lists an issue's amf labels (amf:* and the pre-v0.0.5 "amf"), or "-".
