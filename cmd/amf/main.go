@@ -48,7 +48,7 @@ Usage:
   amf issue <command>                                                manage issues (create, list, run, watch)
   amf issue "Title" [-b body | -f file.md] [--label L] [--no-label]  create an issue (body may also come from stdin) (alias of issue create)
   amf pr <command>                                                   manage pull requests (list, merge, view, diff, close, reopen, ready, draft)
-  amf list [--state open|closed|all] [--label L] [--limit N]         list issues, newest first, with their amf labels (alias of issue list)
+  amf list [--state open|closed|all] [--label L] [--search TEXT] [--limit N]     list issues, newest first, with their amf labels (alias of issue list; also takes --json)
   amf run <issue-number> [--agent A] [--agent-timeout 60m]           process one issue into a PR (alias of issue run; also takes --draft, --dry-run, --merge, --eval-rounds, --log-level, --log-file)
   amf watch [--agent A] [--interval 60s] [--label amf:ready]         process amf:ready issues as they arrive (alias of issue watch; also takes --exclude-label, --draft, --merge, --agent-timeout, --eval-rounds, --log-level, --log-file)
   amf pipeline [--fetch]                                             check the plan/code/eval pipeline in this checkout's AGENTS.md
@@ -141,10 +141,35 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		fmt.Fprintln(stdout, "amf", buildVersion())
 		return nil
 	case "help", "-h", "--help":
+		// amf help issue and amf help pr print that group's usage.
+		if cmd == "help" && len(rest) > 0 {
+			switch rest[0] {
+			case "issue":
+				fmt.Fprint(stdout, issueUsage)
+				return nil
+			case "pr":
+				fmt.Fprint(stdout, prUsage)
+				return nil
+			}
+			// A word that names no command is a typo: say so, rather than
+			// printing the usage as if the question had been answered.
+			if !slices.Contains(topCommands, rest[0]) && !strings.HasPrefix(rest[0], "-") {
+				fmt.Fprintf(stderr, "amf: unknown help topic %q\n", rest[0])
+				if s := suggestCommand(rest[0]); s != "" {
+					fmt.Fprintf(stderr, "Did you mean %q?\n", s)
+				}
+				fmt.Fprintf(stderr, "\n%s", usage)
+				return errUsage
+			}
+		}
 		fmt.Fprint(stdout, usage)
 		return nil
 	default:
-		fmt.Fprintf(stderr, "amf: unknown command %q\n\n%s", cmd, usage)
+		fmt.Fprintf(stderr, "amf: unknown command %q\n", cmd)
+		if s := suggestCommand(cmd); s != "" {
+			fmt.Fprintf(stderr, "Did you mean %q?\n", s)
+		}
+		fmt.Fprintf(stderr, "\n%s", usage)
 		return errUsage
 	}
 }
@@ -248,7 +273,7 @@ func cmdRun(ctx context.Context, args []string, stderr io.Writer) error {
 	}
 	n, err := strconv.Atoi(strings.TrimPrefix(strings.TrimSpace(pos[0]), "#"))
 	if err != nil || n <= 0 {
-		return fmt.Errorf("invalid issue number %q", pos[0])
+		return fmt.Errorf("invalid issue number %q; use a positive number such as 42 or #42", pos[0])
 	}
 	if err := lo.check(); err != nil {
 		return err
@@ -605,4 +630,42 @@ func isTerminal(r io.Reader) bool {
 	}
 	st, err := f.Stat()
 	return err == nil && st.Mode()&os.ModeCharDevice != 0
+}
+
+var topCommands = []string{"init", "issue", "pr", "list", "run", "watch", "pipeline", "doctor", "update", "version", "help"}
+
+// suggestCommand returns the command closest to a mistyped one, or "" when
+// nothing is close enough to be a likely typo.
+func suggestCommand(cmd string) string { return suggestFrom(cmd, topCommands) }
+
+// suggestFrom returns the entry of names closest to cmd, or "" when none is
+// within two edits.
+func suggestFrom(cmd string, names []string) string {
+	best, bestD := "", 3
+	for _, c := range names {
+		if d := editDistance(strings.ToLower(cmd), c); d < bestD {
+			best, bestD = c, d
+		}
+	}
+	return best
+}
+
+func editDistance(a, b string) int {
+	prev := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		cur := make([]int, len(b)+1)
+		cur[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
+		}
+		prev = cur
+	}
+	return prev[len(b)]
 }

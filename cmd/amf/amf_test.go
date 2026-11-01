@@ -1224,6 +1224,15 @@ func TestListCommand(t *testing.T) {
 	if got := list("--label", "amf:ready", "--limit", "1"); strings.Contains(got, "#3") || !strings.Contains(got, "#2") {
 		t.Errorf("amf list --label amf:ready --limit 1 =\n%s", got)
 	}
+	if got, want := list("--search", " WAIT "), "ISSUE  AMF        TITLE\n#2     amf:ready  Waiting\n"; got != want {
+		t.Errorf("amf list --search =\n%s\nwant\n%s", got, want)
+	}
+	if got := list("--search", "nothing-like-this"); got != "No open issues with \"nothing-like-this\" in the title in vic/demo.\n" {
+		t.Errorf("empty search = %q", got)
+	}
+	if got := list("--search", "  "); got != list() {
+		t.Errorf("blank search =\n%s\nwant unfiltered output", got)
+	}
 	if err := run(context.Background(), []string{"list", "--limit", "-1"}, nil, io.Discard, io.Discard); err == nil || !strings.Contains(err.Error(), "--limit") {
 		t.Errorf("amf list --limit -1: err = %v, want an error mentioning --limit", err)
 	}
@@ -1236,6 +1245,33 @@ func TestListCommand(t *testing.T) {
 	}
 	if err := run(context.Background(), []string{"list", "--state", "bogus"}, nil, io.Discard, io.Discard); err == nil {
 		t.Error("expected an error for --state bogus")
+	}
+}
+
+func TestListLimitHint(t *testing.T) {
+	gh, srv := newFakeGitHub(t)
+	gh.issues[1] = &Issue{Number: 1, Title: "One", State: "open"}
+	gh.issues[2] = &Issue{Number: 2, Title: "Two", State: "open"}
+	gh.issues[3] = &Issue{Number: 3, Title: "Three", State: "open"}
+	t.Chdir(t.TempDir())
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	t.Setenv("GITHUB_REPO", "vic/demo")
+	t.Setenv("AMF_API_URL", srv.URL)
+	hint := func(args ...string) (string, string) {
+		t.Helper()
+		var out, errb bytes.Buffer
+		if err := run(context.Background(), append([]string{"list"}, args...), nil, &out, &errb); err != nil {
+			t.Fatalf("amf list %v: %v", args, err)
+		}
+		return out.String(), errb.String()
+	}
+	if out, errs := hint("--limit", "2"); errs != "Showing 2 of 3 issues; use --limit 0 to list them all.\n" || strings.Contains(out, "Showing") {
+		t.Errorf("--limit 2: stdout %q, stderr %q", out, errs)
+	}
+	for _, args := range [][]string{{"--limit", "3"}, {"--limit", "5"}, {}, {"--limit", "1", "--json"}} {
+		if _, errs := hint(args...); errs != "" {
+			t.Errorf("amf list %v: stderr %q, want empty", args, errs)
+		}
 	}
 }
 
@@ -1535,5 +1571,22 @@ func TestReleaseArchive(t *testing.T) {
 		if folder != "amf_v1.2.3_"+tc.goos+"_amd64" || file != tc.file || bin != tc.bin {
 			t.Errorf("releaseArchive(%s) = %s, %s, %s", tc.goos, folder, file, bin)
 		}
+	}
+}
+
+func TestListStateIgnoresCase(t *testing.T) {
+	gh, srv := newFakeGitHub(t)
+	gh.issues[1] = &Issue{Number: 1, Title: "One", State: "open"}
+	gh.issues[2] = &Issue{Number: 2, Title: "Two", State: "closed"}
+	t.Chdir(t.TempDir())
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	t.Setenv("GITHUB_REPO", "vic/demo")
+	t.Setenv("AMF_API_URL", srv.URL)
+	var out, errb bytes.Buffer
+	if err := run(context.Background(), []string{"list", "--state", " ALL "}, nil, &out, &errb); err != nil {
+		t.Fatalf("amf list --state ALL: %v", err)
+	}
+	if !strings.Contains(out.String(), "#1") || !strings.Contains(out.String(), "#2") || !strings.Contains(out.String(), "STATE") {
+		t.Errorf("--state ALL output %q", out.String())
 	}
 }

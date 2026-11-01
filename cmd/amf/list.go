@@ -25,26 +25,31 @@ func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	fs.SetOutput(stderr)
 	state := fs.String("state", "open", "open, closed or all")
 	label := fs.String("label", "", "only issues with this label, e.g. amf:ready")
+	search := fs.String("search", "", "only issues whose title contains this text, ignoring case")
 	limit := fs.Int("limit", 0, "print at most N issues, 0 means no limit")
 	asJSON := fs.Bool("json", false, "print a JSON array of number, title, state, url and labels")
 	pos, err := parseArgs(fs, args)
 	if err != nil {
+		if err == flag.ErrHelp {
+			return nil
+		}
 		return errUsage
 	}
 	if len(pos) != 0 {
-		fmt.Fprintln(stderr, "usage: amf list [--state open|closed|all] [--label L] [--limit N] [--json]")
+		fmt.Fprintln(stderr, "usage: amf list [--state open|closed|all] [--label L] [--search TEXT] [--limit N] [--json]")
 		return errUsage
 	}
 	if *limit < 0 {
 		return fmt.Errorf("--limit must be 0 or more, got %d", *limit)
 	}
-	*state = strings.TrimSpace(*state)
+	*state = strings.ToLower(strings.TrimSpace(*state))
 	switch *state {
 	case "open", "closed", "all":
 	default:
 		return fmt.Errorf("--state must be open, closed or all, got %q", *state)
 	}
 	*label = strings.TrimSpace(*label)
+	*search = strings.TrimSpace(*search)
 
 	cfg, err := loadConfig(envPaths(ctx)...)
 	if err != nil {
@@ -58,6 +63,17 @@ func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	if err != nil {
 		return err
 	}
+	if *search != "" {
+		needle := strings.ToLower(*search)
+		kept := issues[:0]
+		for _, is := range issues {
+			if strings.Contains(strings.ToLower(is.Title), needle) {
+				kept = append(kept, is)
+			}
+		}
+		issues = kept
+	}
+	matched := len(issues)
 	if *limit > 0 && len(issues) > *limit {
 		issues = issues[:*limit]
 	}
@@ -84,6 +100,9 @@ func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		if *label != "" {
 			which += " labeled " + *label
 		}
+		if *search != "" {
+			which += fmt.Sprintf(" with %q in the title", *search)
+		}
 		_, err := fmt.Fprintf(stdout, "No %s in %s.\n", which, cfg.Repo)
 		return err
 	}
@@ -102,7 +121,13 @@ func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error
 			fmt.Fprintf(tw, "#%d\t%s\t%s\n", is.Number, amfLabelNames(is), title)
 		}
 	}
-	return tw.Flush()
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	if len(issues) < matched {
+		fmt.Fprintf(stderr, "Showing %d of %d issues; use --limit 0 to list them all.\n", len(issues), matched)
+	}
+	return nil
 }
 
 // amfLabelNames lists an issue's amf labels (amf:* and the pre-v0.0.5 "amf"), or "-".
