@@ -200,7 +200,10 @@ by number descending so the highest number is first even when creation times tie
   otherwise `closed` for a closed PR, otherwise `draft` or `open`. Tabs in
   titles print as spaces.
 - `--limit N` defaults to `0` (no limit), and applies after filtering and
-  sorting. Negative values fail with `--limit must be 0 or more, got N`.
+  sorting. When it hides some pull requests, the table output is followed on
+  stderr by `Showing N of M pull requests; use --limit 0 to list them all.`
+  (stdout is unchanged, and `--json` prints no hint). Negative values fail
+  with `--limit must be 0 or more, got N`.
 - `--issue N` defaults to `0` (no filter). When set, only pull requests whose
   `ISSUE` column is `#N` are kept — that is, a head branch named `amf/issue-N`
   in this repository, so forks and deleted head repositories never match. The

@@ -138,6 +138,7 @@ func cmdPRList(ctx context.Context, args []string, stdout, stderr io.Writer) err
 		}
 		out = kept
 	}
+	matched := len(out)
 	if *limit > 0 && len(out) > *limit {
 		out = out[:*limit]
 	}
@@ -167,7 +168,13 @@ func cmdPRList(ctx context.Context, args []string, stdout, stderr io.Writer) err
 		}
 		fmt.Fprintf(tw, "#%d\t%s\t%s\t%s\n", pr.Number, issue, pr.State, strings.ReplaceAll(pr.Title, "\t", " "))
 	}
-	return tw.Flush()
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	if len(out) < matched {
+		fmt.Fprintf(stderr, "Showing %d of %d pull requests; use --limit 0 to list them all.\n", len(out), matched)
+	}
+	return nil
 }
 
 func cmdPRMerge(ctx context.Context, args []string, stdout, stderr io.Writer) error {
