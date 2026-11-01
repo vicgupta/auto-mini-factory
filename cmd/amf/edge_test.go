@@ -2778,7 +2778,7 @@ func TestUnknownPRCommandSuggestion(t *testing.T) {
 	}
 	errb.Reset()
 	_ = run(context.Background(), []string{"pr", "bogus"}, strings.NewReader(""), &out, &errb)
-	if strings.Contains(errb.String(), "Did you mean") || out.Len() != 0 {
+	if strings.Contains(errb.String(), "Did you mean") || out.Len() != 0 || !strings.Contains(errb.String(), `unknown pr command "bogus"`) {
 		t.Errorf("unexpected output %q", errb.String())
 	}
 }
