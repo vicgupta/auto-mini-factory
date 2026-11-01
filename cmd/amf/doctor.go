@@ -39,6 +39,9 @@ func (d *doctor) line(status, check, format string, a ...any) {
 // anything: no clone, no labels, no push.
 func cmdDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if len(args) != 0 {
+		if isHelpArgs(args) {
+			fmt.Fprint(stderr, doctorHelp)
+		}
 		fmt.Fprintln(stderr, "usage: amf doctor")
 		return errUsage
 	}

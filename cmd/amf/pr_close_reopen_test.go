@@ -155,7 +155,7 @@ func TestPRCloseReopenGroupUsage(t *testing.T) {
 		}
 	}
 	var out bytes.Buffer
-	if err := run(context.Background(), []string{"help"}, nil, &out, io.Discard); err != nil || !strings.Contains(out.String(), "amf pr") {
+	if err := run(context.Background(), []string{"help"}, nil, &out, io.Discard); err != nil || !strings.Contains(out.String(), "close, reopen") {
 		t.Fatalf("help: %v, %q", err, &out)
 	}
 }

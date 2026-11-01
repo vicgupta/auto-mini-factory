@@ -19,6 +19,7 @@ import (
 func cmdPipeline(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("pipeline", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	withHelp(fs, stderr, pipelineHelp)
 	fetch := fs.Bool("fetch", false, "also download and check each stage's skill")
 	pos, err := parseArgs(fs, args)
 	if err != nil {

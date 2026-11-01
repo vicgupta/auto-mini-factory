@@ -15,6 +15,7 @@ Commands:
   watch [--agent A] [--interval 60s] [--label amf:ready]          process amf:ready issues as they arrive (also takes --exclude-label, --draft, --merge, --agent-timeout, --eval-rounds, --log-level, --log-file)
 
 amf issue "Title" … is a shortcut for amf issue create "Title" …
+Run amf help list, amf help run or amf help watch for each one's details.
 `
 
 var issueSubcommands = []string{"create", "list", "run", "watch", "help"}
