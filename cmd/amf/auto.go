@@ -30,7 +30,7 @@ const autoChecksPoll = 10 * time.Second
 const autoStateVersion = 1
 
 const autoHelp = `Usage:
-  amf auto "<one simple sentence>" [--no-checkpoint | --checkpoint-after N] [--approve] [--wait-for-checks] [--agent A] [--max-issues 5] [--merge[=squash|rebase]] [--agent-timeout 60m] [--eval-rounds 2] [--dry-run] [--log-level L] [--log-file P]
+  amf auto "<one simple sentence>" [--no-checkpoint | --checkpoint-after N] [--approve] [--wait-for-checks] [--agent A] [--max-issues 5] [--merge[=squash|rebase]] [--agent-timeout 60m] [--eval-rounds 2] [--dry-run] [--log-level L] [--log-file P] [--memory-backend sqlite|markdown|logfiles] [--memory-dir D]
   amf auto --continue [--no-checkpoint | --checkpoint-after N] [--approve] [--wait-for-checks] [--agent A] [--agent-timeout 60m] [--eval-rounds 2] [--log-level L] [--log-file P]
   amf auto status
   amf auto --abort [--close-issues]
@@ -364,6 +364,7 @@ func (r *Runner) autoCreateIssues(ctx context.Context, st *autoState, path strin
 			ensuredLabel = true
 		}
 		p := plannedIssue{Title: is.Title, Scope: is.Scope, Acceptance: is.Acceptance}
+		r.memTriage(0, is.Title, is.Scope)
 		body := r.Redact.Redact(autoIssueBody(p, st.Sentence, i+1, len(st.Issues)))
 		created, err := r.GH.CreateIssue(ctx, is.Title, body, []string{labelAuto})
 		if err != nil {
@@ -596,6 +597,7 @@ func cmdAuto(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	closeIssues := fs.Bool("close-issues", false, "with --abort, close the created, unmerged issues first")
 	dryRun := fs.Bool("dry-run", false, "plan only: print the issues amf would create, and create nothing")
 	lo := addLogFlags(fs)
+	mo := addMemoryFlags(fs)
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return errUsage
@@ -661,11 +663,18 @@ func cmdAuto(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	if err := lo.check(); err != nil {
 		return err
 	}
+	if err := mo.check(); err != nil {
+		return err
+	}
 	r, err := newRunner(ctx, timeout, *evalRounds, *agent, *lo, stderr)
 	if err != nil {
 		return err
 	}
 	defer r.Close()
+	r.Command = "auto"
+	if !*dryRun {
+		r.openMemory(*mo)
+	}
 	err = redactErr(r.Redact, r.Auto(ctx, sentence, autoOptions{
 		Continue: *cont, DryRun: *dryRun, MaxIssues: *maxIssues, Merge: merge.value,
 		NoCheckpoint: *noCheckpoint, CheckpointAfter: *checkpointAfter, Approve: *approve, WaitForChecks: *waitForChecks,

@@ -47,6 +47,10 @@ type Issue struct {
 	User        struct {
 		Login string `json:"login"`
 	} `json:"user"`
+	// The timestamps are for amf's memory; GitHub sends RFC 3339.
+	CreatedAt string `json:"created_at,omitempty"`
+	UpdatedAt string `json:"updated_at,omitempty"`
+	ClosedAt  string `json:"closed_at,omitempty"`
 }
 
 func (is Issue) HasLabel(name string) bool {

@@ -18,6 +18,7 @@ For common failures and fixes, see the [troubleshooting guide](TROUBLESHOOTING.m
 | `amf run` | process one issue into a PR (alias of `issue run`) |
 | `amf watch` | process `amf:ready` issues as they arrive (alias of `issue watch`) |
 | `amf auto` | plan one sentence into up to 5 issues and merge their PRs, pausing after the first by default |
+| `amf memory` | the repo's memory of issues, PRs and runs: sync, similar, show |
 | `amf pipeline` | check the plan/code/eval pipeline in this checkout's `AGENTS.md` |
 | `amf doctor` | check the setup here, changing nothing |
 | `amf update` | replace this amf binary with the latest (or given) release |
@@ -354,10 +355,61 @@ SELECT logged_at, message FROM amf_log WHERE issue = 12 ORDER BY id;
 ```
 
 Logging never holds up an issue. If the server is down, amf warns, keeps
-the lines in memory and retries. amf has no dependencies, so it speaks the
+the lines in memory and retries. amf has no PostgreSQL driver, so it speaks the
 PostgreSQL protocol itself: TLS (`sslmode`), and password, MD5 or
 SCRAM-SHA-256 logins. `amf doctor` checks the connection. Agents' output can
 include your code, so restrict who can read `amflogs`.
+
+## Repo memory
+
+amf keeps a memory of each repo's issues, pull requests and runs, so a new
+issue can be pointed at similar past work.
+
+```sh
+amf memory sync                  # backfill from GitHub; later syncs fetch only what changed (--full rereads all)
+amf memory similar 42            # past work like issue 42, best first
+amf memory similar "text" --json # ...or like any text, as JSON
+amf memory show 42 [--json]      # issue 42, its PRs and every run
+```
+
+`amf run`, `watch` and `auto` record every attempt (command, start and
+finish, outcome, agent, exit code, PR, error and a redacted log tail), on a
+best-effort basis: a memory failure is a warning and never fails a run.
+`--dry-run` records nothing. When `run` or `watch` picks up an issue, and
+when `auto` plans one, amf logs similar past work (event `memory.similar`)
+and adds a short "Similar past work" note to the agent's prompt. A close
+match to merged work also logs `memory.duplicate`, a warning only: amf never
+closes an issue as a duplicate.
+
+PRs are linked to their issue by an `amf/issue-N` branch or a
+`Closes/Fixes/Resolves #N` line in the body.
+
+### Backends
+
+`--memory-backend` on `run`, `watch`, `auto` and `amf memory` picks the store;
+there is no environment variable. With no flag amf uses SQLite.
+
+| Backend | Files in the repo's folder |
+|---|---|
+| `sqlite` (default) | `memory.db`: versioned schema, FTS5 search |
+| `markdown` | `issues/N.md`, `prs/N.md`, `runs/<id>.md` with front matter, plus `index.md` and `index.json` |
+| `logfiles` | append-only `issues.jsonl`, `prs.jsonl`, `runs.jsonl`, `sync.jsonl`; the latest line per record wins |
+
+All three keep the same records and links. Markdown and log files are only
+ever written when that backend is chosen on the command line. Each backend
+is a separate store: memory synced into one isn't seen by another.
+
+### Where memory lives
+
+`--memory-dir D` (default: the current directory; a relative path is taken
+from it, and a missing one is created) holds
+`D/amf-memory/<host>/<owner>/<repo>/`. The repo key is the lowercased
+host/owner/name from `GITHUB_REPO` (for example
+`github.com/vicgupta/auto-mini-factory`). Every store records its key and
+refuses to open for another repo, and every query is filtered by it, so
+repos sharing a memory dir never see each other's work. amf adds the
+`amf-memory` folder to `.git/info/exclude` when it lies inside the checkout,
+and leaves it out of its own commits.
 
 ## Pipelines: plan → code → eval
 

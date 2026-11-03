@@ -1,6 +1,6 @@
 # amf — autonomous mini factory
 
-One stdlib-only Go binary that turns GitHub issues into pull requests with a
+One pure-Go binary (no cgo) that turns GitHub issues into pull requests with a
 coding agent (Claude Code, Codex or opencode, whichever you have), or with a
 plan → code → eval pipeline of them. For a solo developer or small team that wants coding agents without
 running a platform.
@@ -29,6 +29,7 @@ running a platform.
 | `amf run` | process one issue into a PR (alias of `issue run`) |
 | `amf watch` | process `amf:ready` issues as they arrive (alias of `issue watch`) |
 | `amf auto` | plan one sentence into up to 5 issues and merge their PRs, pausing after the first by default |
+| `amf memory` | the repo's memory of issues, PRs and runs: sync, similar, show |
 | `amf pipeline` | check the plan/code/eval pipeline in this checkout's `AGENTS.md` |
 | `amf doctor` | check the setup here, changing nothing |
 | `amf update` | replace this amf binary with the latest (or given) release |
@@ -258,6 +259,12 @@ amf auto "Add a dark mode toggle" --approve # approve the checkpoint without a t
 amf auto "Add a dark mode toggle" --no-checkpoint # merge all issues without pausing
 amf auto --continue        # approve the checkpoint and resume
 amf run 42 --dry-run        # make the change locally and show the PR, touching nothing on GitHub
+
+amf memory sync             # backfill the repo's memory from GitHub (then only what changed)
+amf memory similar 42       # past issues, PRs and runs like issue 42
+amf memory similar "flaky login test" --json
+amf memory show 42          # issue 42's PRs and every run
+amf watch --memory-backend markdown --memory-dir ~/amf-notes  # keep memory as Markdown files elsewhere
 ```
 
 See [docs/COMMANDS.md](docs/COMMANDS.md) for the details:
@@ -267,6 +274,7 @@ See [docs/COMMANDS.md](docs/COMMANDS.md) for the details:
 - [Merge methods](docs/COMMANDS.md#merge-methods): how `--merge`, `--merge=squash` and `--merge=rebase` shape history
 - [What `amf run N` does](docs/COMMANDS.md#what-amf-run-n-does), [logs](docs/COMMANDS.md#logs) and [logs in PostgreSQL](docs/COMMANDS.md#logs-in-postgresql)
 - [Pipelines](docs/COMMANDS.md#pipelines-plan--code--eval) and [labels](docs/COMMANDS.md#labels)
+- [Repo memory](docs/COMMANDS.md#repo-memory): similar past work, backends and where memory lives
 
 ## Security
 

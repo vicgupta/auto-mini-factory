@@ -6,7 +6,7 @@ a single agent: the one `--agent` names, or else the primary agent
 (`AMF_PRIMARY_AGENT`, default Codex), falling back to the secondary
 (`AMF_SECONDARY_AGENT`, default Claude Code) if the primary fails. A repo can instead declare a plan → code → eval pipeline in its
 `AGENTS.md`, with a skill, agent and model for each stage. amf is a single Go
-binary that uses only the standard library, for one developer or a small team
+binary (pure Go, no cgo; its one dependency is the SQLite driver for repo memory), for one developer or a small team
 that doesn't want to run a platform.
 
 **Needs:** `git`, a GitHub token for one repository, and an agent amf can
@@ -607,6 +607,45 @@ Checks that need GitHub, the repo or a checkout are `skip` without them.
 Claude's and Codex's own logins aren't checked: their CLIs can't report them
 reliably.
 
+## Repo memory
+
+`amf memory sync|similar|show` and the memory hooks in `run`, `watch` and
+`auto`. See [COMMANDS.md](COMMANDS.md#repo-memory) for usage.
+
+- **Store.** A `MemoryStore` interface with three peer backends, chosen per
+  invocation by `--memory-backend sqlite|markdown|logfiles` (default
+  `sqlite`; any other value is an error naming the three). No environment
+  variable selects or locates memory.
+- **Location and isolation.** `--memory-dir` (default `os.Getwd()`, made
+  absolute) holds `amf-memory/<host>/<owner>/<repo>/`. The key is the
+  lowercased host (`api.github.com` → `github.com`) and `GITHUB_REPO`; with no
+  repo, `local/<hash of the repo root>`. A key with unusual characters is
+  stored under `amf-memory/_hash/<hash>/`. The store records its key (SQLite
+  `meta` table, a header line in each log file, front matter in `index.md`
+  and a field in `index.json`); every record carries `repo`; opening a store
+  recorded for another key fails; every read filters by key.
+- **Records.** Issues (number, title, body, state, labels, timestamps); pull
+  requests (number, title, body, state, merged, head branch, linked issue);
+  runs (id, issue, command, start, finish, outcome, agent(s), exit code, PR,
+  error, log tail); explicit issue↔PR and run↔issue/PR links. Label history
+  is not kept.
+- **SQLite schema.** Versioned by `schema_migrations`; tables `meta`,
+  `issues`, `pull_requests`, `issue_prs`, `runs` and the FTS5 table
+  `memory_fts` (bm25, title weighted ×2). Pure Go (`modernc.org/sqlite`), no
+  cgo.
+- **Markdown and logfiles** search with a pure-Go TF-IDF scorer (title tokens
+  count twice) over the same records.
+- **Sync** pages through issues (`since` the last sync, by `updated_at`) and
+  pull requests (newest updated first, stopping at the cursor). Pull requests
+  link to issues by `amf/issue-N` head branch or a closing keyword.
+- **Similarity** ranks issues, PRs and runs, best first, excluding the issue
+  itself. A hit is a duplicate signal when it is merged work and its title
+  shares at least 60% of its words with the new title (Jaccard); amf only
+  warns (`memory.duplicate`) and never closes anything.
+- **Failure tolerance.** For `run`, `watch` and `auto`, any memory error
+  (including a repo mismatch) is a `memory.error` warning; memory is then off
+  for that process. `amf memory` commands fail on errors.
+
 ## Configuration (`.env`)
 
 `amf help env` prints these settings. amf reads one `.env`: `./.env`, or else `.env` at the top of the git
@@ -971,6 +1010,7 @@ redirect to a URL ending in the tag, and serve the archive and
 | `.amf/runs/<run_id>/events.jsonl` | The event log of one `run` or `watch` process, unless `--log-file` says otherwise |
 | `.amf/runs/<run_id>/summary.json` | That process's summary, rewritten after each issue and at exit |
 | `.amf/opencode.json` | The config amf runs opencode with |
+| `<memory-dir>/amf-memory/<host>/<owner>/<repo>/` | The repo's memory (see [Repo memory](#repo-memory)) |
 
 amf only ever adds to `.git/info/exclude`. It never edits a tracked `.gitignore`.
 
