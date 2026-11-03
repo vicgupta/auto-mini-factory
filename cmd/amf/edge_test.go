@@ -373,6 +373,9 @@ func TestCommandLineErrors(t *testing.T) {
 		{[]string{"list", "--state", "bogus"}, "--state must be"},
 		{[]string{"issue"}, ""},
 		{[]string{"issue", "create"}, "usage"},
+		{[]string{"issue", "create", "T", "--unknown"}, "usage"},
+		{[]string{"issue", "create", "T", "--unknown", "--help"}, "usage"},
+		{[]string{"issue", "create", "T", "-f"}, "usage"},
 		{[]string{"issue", "   "}, "usage"},
 		{[]string{"issue", "A", "B"}, "usage"},
 		{[]string{"issue", "T", "-b", "x", "-f", "y.md"}, "use -b or -f"},
@@ -417,6 +420,41 @@ func TestListHelp(t *testing.T) {
 				t.Fatalf("stdout = %q, stderr = %q; want empty stdout and list flag help on stderr", stdout.String(), stderr.String())
 			}
 		})
+	}
+}
+
+func TestIssueCreateHelp(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("GITHUB_REPO", "")
+	// Loading configuration would fail even before checking credentials.
+	if err := os.Mkdir(".env", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, prefix := range [][]string{
+		{"issue", "create"},
+		{"issue", "create", "Title"},
+		{"issue", "Title"},
+		{"issue", "create", "Title", "-f", "missing.md"},
+		{"issue", "Title", "-f", "missing.md"},
+		{"issue", "create", "Title", "-f", "-"},
+	} {
+		for _, help := range []string{"-h", "--help"} {
+			args := append(slices.Clone(prefix), help)
+			t.Run(strings.Join(args, " "), func(t *testing.T) {
+				var stdout, stderr bytes.Buffer
+				stdin := &trackedReader{}
+				if err := run(context.Background(), args, stdin, &stdout, &stderr); err != nil {
+					t.Fatalf("help: %v", err)
+				}
+				if stdout.Len() != 0 || !strings.Contains(stderr.String(), "Usage of issue:") || !strings.Contains(stderr.String(), "-no-label") {
+					t.Fatalf("stdout = %q, stderr = %q; want empty stdout and creation flag help on stderr", stdout.String(), stderr.String())
+				}
+				if stdin.reads != 0 {
+					t.Fatalf("help read stdin %d times", stdin.reads)
+				}
+			})
+		}
 	}
 }
 

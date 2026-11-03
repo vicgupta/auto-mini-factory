@@ -124,6 +124,9 @@ func cmdIssueCreate(ctx context.Context, args []string, stdin io.Reader, stdout,
 	noLabel := fs.Bool("no-label", false, "don't label the issue for amf")
 	pos, err := parseArgs(fs, args)
 	if err != nil {
+		if err == flag.ErrHelp {
+			return nil
+		}
 		return errUsage
 	}
 	if len(pos) != 1 || strings.TrimSpace(pos[0]) == "" {
