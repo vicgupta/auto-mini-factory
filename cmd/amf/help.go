@@ -18,7 +18,6 @@ Commands:
   init       write .env and create amf's labels
   issue      manage issues: create, list, run, watch
   pr         manage pull requests: list, merge, view, diff, close, reopen, ready, draft
-  list       list issues, newest first (alias of issue list)
   run        process one issue into a PR (alias of issue run)
   watch      process amf:ready issues as they arrive (alias of issue watch)
   pipeline   check the plan/code/eval pipeline in this checkout's AGENTS.md
@@ -66,10 +65,9 @@ amf help agents says which agent runs; amf help env lists the settings.
 `
 
 const listHelp = `Usage:
-  amf list [--state open|closed|all] [--label L] [--search TEXT] [--limit N] [--json]
+  amf issue list [--state open|closed|all] [--label L] [--search TEXT] [--limit N] [--json]
 
-Lists issues, newest first, with their amf labels (alias of amf issue list;
-also takes --json).
+Lists issues, newest first, with their amf labels.
 `
 
 const initHelp = `Usage:
@@ -166,7 +164,7 @@ var helpTopics = map[string]string{
 func topicNames() []string {
 	names := append([]string{}, topCommands...)
 	for k := range helpTopics {
-		if !slices.Contains(names, k) {
+		if k != "list" && !slices.Contains(names, k) { // amf help list still works, unlisted
 			names = append(names, k)
 		}
 	}

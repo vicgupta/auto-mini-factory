@@ -66,7 +66,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return cmdInit(ctx, rest, stdout, stderr)
 	case "pr":
 		return cmdPR(ctx, rest, stdout, stderr)
-	case "list":
+	case "list": // undocumented alias of amf issue list, kept for existing scripts
 		return cmdList(ctx, rest, stdout, stderr)
 	case "issue":
 		return cmdIssueGroup(ctx, rest, stdin, stdout, stderr)
@@ -579,11 +579,18 @@ func isTerminal(r io.Reader) bool {
 	return err == nil && st.Mode()&os.ModeCharDevice != 0
 }
 
-var topCommands = []string{"init", "issue", "pr", "list", "run", "watch", "pipeline", "doctor", "update", "version", "help"}
+var topCommands = []string{"init", "issue", "pr", "run", "watch", "pipeline", "doctor", "update", "version", "help"}
 
 // suggestCommand returns the command closest to a mistyped one, or "" when
 // nothing is close enough to be a likely typo.
-func suggestCommand(cmd string) string { return suggestFrom(cmd, topCommands) }
+// The hidden top-level list alias is suggested as issue list.
+func suggestCommand(cmd string) string {
+	s := suggestFrom(cmd, append([]string{"list"}, topCommands...))
+	if s == "list" {
+		return "issue list"
+	}
+	return s
+}
 
 // suggestFrom returns the entry of names closest to cmd, or "" when none is
 // within two edits.
