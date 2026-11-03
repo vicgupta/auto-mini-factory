@@ -50,6 +50,9 @@ type Issue struct {
 	// UpdatedAt is when the issue last changed; the stale sweep falls back
 	// to it when the events don't say when amf:in-progress was added.
 	UpdatedAt time.Time `json:"updated_at"`
+	// CreatedAt and ClosedAt are for amf's memory; GitHub sends RFC 3339.
+	CreatedAt string `json:"created_at,omitempty"`
+	ClosedAt  string `json:"closed_at,omitempty"`
 }
 
 func (is Issue) HasLabel(name string) bool {

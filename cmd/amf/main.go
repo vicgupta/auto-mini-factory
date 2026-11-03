@@ -78,6 +78,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return cmdWatch(ctx, rest, stderr)
 	case "auto":
 		return cmdAuto(ctx, rest, stdin, stdout, stderr)
+	case "memory":
+		return cmdMemory(ctx, rest, stdout, stderr)
 	case "pipeline":
 		return cmdPipeline(ctx, rest, stdout, stderr)
 	case "doctor":
@@ -201,6 +203,7 @@ func cmdRun(ctx context.Context, args []string, stderr io.Writer) (err error) {
 	dryRun := fs.Bool("dry-run", false, "make the change on the local branch only: no label, comment, push, PR or merge")
 	force := fs.Bool("force", false, "run even if the issue already has an open PR or an amf/issue-N branch, updating that PR")
 	lo := addLogFlags(fs)
+	mo := addMemoryFlags(fs)
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return errUsage
@@ -226,6 +229,9 @@ func cmdRun(ctx context.Context, args []string, stderr io.Writer) (err error) {
 	if err := lo.check(); err != nil {
 		return err
 	}
+	if err := mo.check(); err != nil {
+		return err
+	}
 	defer func() {
 		if err != nil {
 			fmt.Fprintln(stderr, "amf: troubleshooting:", troubleshootingURL)
@@ -242,6 +248,10 @@ func cmdRun(ctx context.Context, args []string, stderr io.Writer) (err error) {
 	r.Force = *force
 	if err := r.lockRepo("run"); err != nil {
 		return err
+	}
+	r.Command = "run"
+	if !*dryRun {
+		r.openMemory(*mo)
 	}
 	err = redactErr(r.Redact, r.Run(ctx, n))
 	r.DB.logError(err)
@@ -263,6 +273,7 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 	merge := addMergeFlag(fs)
 	staleFlag := fs.String("stale-timeout", "", "put amf:in-progress issues no amf works on back to amf:ready after this long (default AMF_STALE_TIMEOUT, else max(2x agent timeout, 2h); off disables)")
 	lo := addLogFlags(fs)
+	mo := addMemoryFlags(fs)
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		if err == flag.ErrHelp {
@@ -301,11 +312,16 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 	if err := lo.check(); err != nil {
 		return err
 	}
+	if err := mo.check(); err != nil {
+		return err
+	}
 	r, err := newRunner(ctx, timeout, *evalRounds, *agent, *lo, stderr)
 	if err != nil {
 		return err
 	}
 	defer r.Close()
+	r.Command = "watch"
+	r.openMemory(*mo)
 	r.Draft = *draft
 	r.ExcludeLabels = exclude
 	r.Merge = merge.value
@@ -613,7 +629,7 @@ func isTerminal(r io.Reader) bool {
 	return err == nil && st.Mode()&os.ModeCharDevice != 0
 }
 
-var topCommands = []string{"init", "issue", "pr", "run", "watch", "auto", "pipeline", "doctor", "update", "version", "help"}
+var topCommands = []string{"init", "issue", "pr", "run", "watch", "auto", "memory", "pipeline", "doctor", "update", "version", "help"}
 
 // suggestCommand returns the command closest to a mistyped one, or "" when
 // nothing is close enough to be a likely typo.

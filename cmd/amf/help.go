@@ -21,6 +21,7 @@ Commands:
   run        process one issue into a PR (alias of issue run)
   watch      process amf:ready issues as they arrive (alias of issue watch)
   auto       plan one sentence into up to 5 issues and merge their PRs, pausing after the first by default
+  memory     the repo's memory of issues, PRs and runs: sync, similar, show
   pipeline   check the plan/code/eval pipeline in this checkout's AGENTS.md
   doctor     check the setup here, changing nothing
   update     replace this amf binary with the latest (or given) release
@@ -35,7 +36,7 @@ Run amf help <command> or amf <command> -h for details.
 `
 
 const runHelp = `Usage:
-  amf run <issue-number> [--agent A] [--agent-timeout 60m] [--eval-rounds 2] [--dry-run] [--force] [--draft] [--merge[=squash|rebase]] [--log-level L] [--log-file P]
+  amf run <issue-number> [--agent A] [--agent-timeout 60m] [--eval-rounds 2] [--dry-run] [--force] [--draft] [--merge[=squash|rebase]] [--log-level L] [--log-file P] [--memory-backend sqlite|markdown|logfiles] [--memory-dir D]
 
 Processes one issue into a pull request (alias of amf issue run; also takes
 --draft, --dry-run, --merge, --eval-rounds, --log-level, --log-file).
@@ -61,11 +62,16 @@ never share a checkout; a lock left by a dead amf is taken over.
 run and watch work in the enclosing git checkout. Started anywhere else, they
 clone GITHUB_REPO into ./<name> (or reuse that clone) and work there.
 
+run, watch and auto record each attempt in the repo's memory and note
+similar past work: --memory-backend picks sqlite (default), markdown or
+logfiles, and --memory-dir where the amf-memory folder goes (default: the
+current directory). See amf help memory.
+
 amf help agents says which agent runs; amf help env lists the settings.
 `
 
 const watchHelp = `Usage:
-  amf watch [--agent A] [--interval 60s] [--label amf:ready] [--exclude-label L]... [--agent-timeout 60m] [--stale-timeout 2h] [--eval-rounds 2] [--draft] [--merge[=squash|rebase]] [--log-level L] [--log-file P]
+  amf watch [--agent A] [--interval 60s] [--label amf:ready] [--exclude-label L]... [--agent-timeout 60m] [--stale-timeout 2h] [--eval-rounds 2] [--draft] [--merge[=squash|rebase]] [--log-level L] [--log-file P] [--memory-backend sqlite|markdown|logfiles] [--memory-dir D]
 
 Processes amf:ready issues as they arrive, one at a time, until interrupted
 (alias of amf issue watch; also takes --exclude-label, --draft, --merge,
@@ -210,7 +216,7 @@ amf doctor checks the configuration.
 // helpTopics maps each amf help <topic> to its text: every command, plus
 // the agents and env topics.
 var helpTopics = map[string]string{
-	"issue": issueUsage, "pr": prUsage, "list": listHelp, "run": runHelp, "watch": watchHelp, "auto": autoHelp,
+	"issue": issueUsage, "pr": prUsage, "list": listHelp, "run": runHelp, "watch": watchHelp, "auto": autoHelp, "memory": memoryUsage,
 	"init": initHelp, "pipeline": pipelineHelp, "doctor": doctorHelp, "update": updateHelp,
 	"version": versionHelp, "help": helpHelp, "agents": agentsHelp, "env": envHelp,
 }

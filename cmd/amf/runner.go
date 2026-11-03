@@ -151,6 +151,11 @@ type Runner struct {
 	noFallback string
 	// lock is the repo's .amf/watch.lock while this process holds it.
 	lock *repoLock
+	// Memory, when set, is the repo's memory: Run records each attempt in
+	// it and looks up similar past work. Its failures are only warnings.
+	Memory MemoryStore
+	// Command is run, watch or auto, for the runs memory records.
+	Command string
 }
 
 // Close writes out the event file and sends the logs still queued for
@@ -162,6 +167,9 @@ func (r *Runner) Close() {
 		fmt.Fprintf(r.Log, "amf: could not write the event log: %v\n", err)
 	}
 	r.DB.Close(15 * time.Second)
+	if r.Memory != nil {
+		r.memWarn(0, "close", r.Memory.Close())
+	}
 }
 
 // Run processes one issue end to end. On failure the issue is labeled
@@ -219,6 +227,14 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 		return err
 	}
 	wasDone := issue.HasLabel(labelDone)
+	if r.Memory != nil {
+		r.memWarn(n, "record the issue", r.Memory.UpsertIssue(memIssueFrom(issue)))
+		if note := r.memTriage(n, issue.Title, issue.Body); note != "" {
+			issue.Body = strings.TrimSpace(issue.Body) + "\n\n---\n" + note
+		}
+		started := time.Now()
+		defer func() { r.memRecordRun(n, started, err) }()
+	}
 	if err := r.setStatus(ctx, n, labelInProgress); err != nil {
 		return err
 	}
@@ -601,10 +617,10 @@ func (r *Runner) prepareWorktree(ctx context.Context, wt, branch, base string) e
 // commitAll commits whatever the agent changed and fails if the branch ends
 // up changing nothing relative to base.
 func commitAll(ctx context.Context, wt, title string, n int, base, agent string) error {
-	if _, err := git(ctx, wt, "add", "-A"); err != nil {
+	if _, err := git(ctx, wt, "add", "-A", "--", ".", memoryExclude); err != nil {
 		return err
 	}
-	status, err := git(ctx, wt, "status", "--porcelain")
+	status, err := git(ctx, wt, "status", "--porcelain", "--", ".", memoryExclude)
 	if err != nil {
 		return err
 	}
