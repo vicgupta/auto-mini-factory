@@ -221,6 +221,8 @@ are not picked up by the default `amf watch`, including while auto waits at
 its checkpoint. Before processing any remaining issues after the first
 merge, it stops for approval; without terminal approval, `amf auto --continue`
 approves the checkpoint and resumes.
+Issues carrying `amf:auto` are trusted regardless of author, so the token
+user need not be in `AMF_TRUSTED`: the plan came from a trusted sentence.
 `--dry-run` prints the plan without creating issues or saving a new run.
 
 Before creating any issue, amf saves the full plan to `.amf/auto/state.json`:
@@ -552,7 +554,7 @@ space, a trailing comment. A leading byte order mark is ignored.
 | `OPENAI_API_KEY` | unset | OpenAI API key, passed to Codex. Makes `codex` usable without `--agent` |
 | `OPENCODE_API_KEY` | unset | OpenCode Console API key (`oc_sk_...`), passed to opencode only. One key covers pay-as-you-go `opencode/<id>` models (with credits) and, for a workspace subscribed to OpenCode Go, `opencode-go/<id>` models. Makes `opencode` usable without `--agent` with a paid `OPENCODE_MODEL`. Never written to a file |
 | `OPENCODE_MODEL` | `opencode/big-pickle` | The model opencode runs with: always without a pipeline, and for pipeline stages that name no model. `opencode/<id>` is a free or pay-as-you-go model, `opencode-go/<id>` an OpenCode Go one. `opencode models` lists the choices |
-| `AMF_TRUSTED` | unset | GitHub logins, separated by commas or spaces (a leading `@` is allowed, case is ignored). When set, amf only works on issues they opened. Unset means anyone's |
+| `AMF_TRUSTED` | unset | GitHub logins, separated by commas or spaces (a leading `@` is allowed, case is ignored). When set, amf only works on issues they opened, except issues labeled `amf:auto`, which are always trusted. Unset means anyone's |
 | `AMF_POSTGRES_URL` | unset | A PostgreSQL server that `run` and `watch` also write their logs to. See [Logging to PostgreSQL](#logging-to-postgresql) |
 | `AMF_CLAUDE` | `claude` | Path to the Claude CLI |
 | `AMF_PRIMARY_AGENT` | `codex` | The agent for issues without a pipeline: `claudecode` (or `claude`), `codex` or `opencode`, ignoring case. `--agent` and a pipeline override it |
@@ -639,7 +641,8 @@ work. Starter skills are in this repo under `skills/`.
    stops the run here without changing the issue. `watch` then logs the
    error and tries again on its next poll.
 4. **Claim.** Label the issue `amf:in-progress` and remove `amf:ready`.
-   - **Trust:** with `AMF_TRUSTED` set, an issue whose author (`user.login`,
+   - **Trust:** issues labeled `amf:auto` bypass the author check. For all
+     other issues, with `AMF_TRUSTED` set, an issue whose author (`user.login`,
      ignoring case) isn't listed fails here, before any worktree or agent.
      The comment names the author and says to reopen it from a trusted
      account or add the author to `AMF_TRUSTED`, then add `amf:ready`. Being
@@ -801,8 +804,8 @@ amf only reads from GitHub: the issue, the repo and the branch's open PR.
    run in the same cases.
 2. **No claim.** The issue's labels aren't touched, so it stays as it was
    (`amf:ready`, say). The trust check of step 4 still runs, since the
-   agent still runs the issue's text, and an untrusted author fails the
-   run.
+   agent still runs the issue's text. Issues labeled `amf:auto` bypass it;
+   otherwise an untrusted author fails the run.
 3. **Worktree, Agent and Commit** (steps 5 to 7, or the pipeline's steps)
    run as usual, with the same logs and files in `.amf/`, the same
    `.github/` refusal, and the change committed on the local
@@ -1010,8 +1013,10 @@ get without it. Other commands don't log there.
   `--dry-run` changes nothing on GitHub, but runs the agents just the same.
 - Labels need triage access, but amf reads the issue's text when it runs,
   not when it was labeled, so its author can change it in between.
-  `AMF_TRUSTED` limits amf to issues opened by the listed users. Other
-  people can't edit those, apart from collaborators with write access.
+  `AMF_TRUSTED` limits amf to issues opened by the listed users, except
+  issues labeled `amf:auto`, which are trusted regardless of author because
+  the plan came from a trusted sentence. Other people can't edit issues
+  opened by the listed users, apart from collaborators with write access.
   Comments are never read.
 - A skill is instructions run the same way. Reference only skills you
   control or have reviewed, at a tag or commit, ideally with a `sha256` pin.

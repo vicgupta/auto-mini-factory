@@ -286,10 +286,10 @@ func (r *Runner) statusEvent(n int, from, to string) {
 	r.event(slog.LevelDebug, "issue.status", n, fmt.Sprintf("#%d: %s -> %s", n, from, to), "from", from, "to", to)
 }
 
-// checkAuthor fails an issue whose author isn't in Trusted. It runs after
-// Claim, so the issue is marked failed once and watch doesn't retry it.
+// checkAuthor exempts amf:auto issues and fails other authors not in Trusted.
+// It runs after Claim, so the issue is marked failed once and watch doesn't retry it.
 func (r *Runner) checkAuthor(issue Issue) error {
-	if r.Trusted == nil || slices.Contains(r.Trusted, strings.ToLower(issue.User.Login)) {
+	if issue.HasLabel(labelAuto) || r.Trusted == nil || slices.Contains(r.Trusted, strings.ToLower(issue.User.Login)) {
 		return nil
 	}
 	who := "@" + issue.User.Login

@@ -1852,6 +1852,29 @@ func TestParsePipelineAfterALongLine(t *testing.T) {
 
 // --- AMF_TRUSTED ---
 
+func TestAutoTrustsIssuesFromTokenUser(t *testing.T) {
+	t.Setenv("AMF_TRUSTED", "someone-else")
+	r, gh, log := newAutoRunner(t, autoClaude)
+	r.Trusted = parseTrusted(os.Getenv("AMF_TRUSTED"))
+	var out bytes.Buffer
+	approve := func(string) (bool, bool) { return true, true }
+	if err := r.Auto(context.Background(), "do three things", autoOptions{MaxIssues: 5, Merge: "merge"}, approve, &out); err != nil {
+		t.Fatalf("Auto: %v\nout:\n%s\nlog:\n%s", err, &out, log)
+	}
+	if n := merges(gh); n != 3 {
+		t.Fatalf("%d PRs merged, want 3", n)
+	}
+	for n := 1; n <= 3; n++ {
+		is := gh.issues[n]
+		if is.User.Login != "vic" || slices.Contains(r.Trusted, is.User.Login) {
+			t.Fatalf("#%d author = %q, want token user outside AMF_TRUSTED", n, is.User.Login)
+		}
+		if !is.HasLabel(labelAuto) || !is.HasLabel(labelDone) || is.HasLabel(labelFailed) {
+			t.Fatalf("#%d labels = %v, want auto and done", n, gh.labels(n))
+		}
+	}
+}
+
 func TestParseTrusted(t *testing.T) {
 	if got := parseTrusted(" @Vic, teammate  other,,"); !reflect.DeepEqual(got, []string{"vic", "teammate", "other"}) {
 		t.Errorf("parseTrusted = %q", got)
