@@ -26,6 +26,13 @@ running a platform.
 For common failures and fixes, see the
 [troubleshooting guide](docs/TROUBLESHOOTING.md).
 
+## Topics
+
+| Topic | What it covers |
+|---|---|
+| `amf help agents` | [Choosing the agent](docs/COMMANDS.md#choosing-the-agent) and its fallback |
+| `amf help env` | [Configuration (.env)](#configuration-env), including defaults |
+
 ## Quick start
 
 ```sh
@@ -285,6 +292,10 @@ go test -race ./...
 
 CI runs `gofmt`, `go vet` and these tests on Linux and macOS for every push
 and PR, and builds every release platform.
+
+The documentation tests compare command, help topic and configuration variable
+names in the built-in help with the documentation tables, ignoring wording,
+whitespace and ordering.
 
 Tests use `httptest` for GitHub, real git repos in temp dirs, and shell
 scripts standing in for `claude`, `codex` and `opencode`.

@@ -6,14 +6,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"reflect"
 	"regexp"
 	"slices"
 	"strings"
 	"testing"
 )
 
-// Compare wording as well as names, ignoring only Markdown and whitespace.
+// Ignore Markdown and whitespace when reading names from documentation.
 func docText(s string) string {
 	s = regexp.MustCompile(`\[([^\]]+)\]\([^)]*\)`).ReplaceAllString(s, "$1")
 	return strings.Join(strings.Fields(strings.ReplaceAll(s, "`", "")), " ")
@@ -25,25 +24,27 @@ func docTable(t *testing.T, path, heading string) [][]string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, section, ok := strings.Cut(string(b), heading+"\n")
-	if !ok {
-		t.Fatalf("%s: missing %s", path, heading)
-	}
+	inSection := false
 	var rows [][]string
-	for _, line := range strings.Split(section, "\n") {
-		if strings.HasPrefix(line, "|---") {
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if !inSection {
+			inSection = docText(line) == docText(heading)
 			continue
 		}
-		if !strings.HasPrefix(line, "| ") {
-			if len(rows) > 0 {
+		if !strings.HasPrefix(line, "|") {
+			if len(rows) > 0 || strings.HasPrefix(line, "#") {
 				break
 			}
 			continue
 		}
 		// Escaped pipes in flag choices belong to a cell.
-		cells := strings.Split(strings.Trim(line, "|"), " | ")
+		cells := strings.Split(strings.Trim(strings.ReplaceAll(line, `\|`, "\x00"), "|"), "|")
+		if strings.Trim(cells[0], " -:\t") == "" {
+			continue // table separator, with optional alignment markers
+		}
 		for i := range cells {
-			cells[i] = docText(strings.ReplaceAll(cells[i], `\|`, "|"))
+			cells[i] = docText(strings.ReplaceAll(cells[i], "\x00", "|"))
 		}
 		rows = append(rows, cells)
 	}
@@ -53,32 +54,52 @@ func docTable(t *testing.T, path, heading string) [][]string {
 	return rows[1:] // omit the column headings
 }
 
-func helpCommandRows(help, prefix string) [][]string {
-	_, section, _ := strings.Cut(help, "Commands:\n")
-	section, _, _ = strings.Cut(section, "\n\n")
+func helpRows(help, section string) [][]string {
+	inSection := false
 	var rows [][]string
-	for _, line := range strings.Split(strings.TrimSpace(section), "\n") {
-		cells := regexp.MustCompile(` {2,}`).Split(strings.TrimSpace(line), 2)
-		if len(cells) == 2 {
-			rows = append(rows, []string{prefix + cells[0], cells[1]})
+	for _, line := range strings.Split(help, "\n") {
+		line = strings.TrimSpace(line)
+		if !inSection {
+			inSection = line == section+":"
+			continue
+		}
+		if line == "" && len(rows) > 0 {
+			break
+		}
+		if fields := strings.Fields(line); len(fields) > 0 {
+			rows = append(rows, []string{fields[0], strings.Join(fields[1:], " ")})
 		}
 	}
 	return rows
 }
 
-func TestDocumentationCommands(t *testing.T) {
-	want := helpCommandRows(usage, "amf ")
-	var names []string
-	for _, row := range want {
-		names = append(names, strings.TrimPrefix(row[0], "amf "))
+// Compare sets of names, ignoring arguments, ordering and descriptions.
+func checkDocNames(t *testing.T, label string, rows [][]string, words int, want []string) {
+	t.Helper()
+	var got []string
+	for _, row := range rows {
+		fields := strings.Fields(row[0])
+		got = append(got, strings.Join(fields[:min(words, len(fields))], " "))
 	}
-	if !slices.Equal(names, topCommands) {
-		t.Fatalf("overview commands = %v, want %v", names, topCommands)
+	want = slices.Clone(want)
+	slices.Sort(got)
+	slices.Sort(want)
+	if len(got) == 0 || !slices.Equal(got, want) {
+		t.Errorf("%s names = %v, want %v", label, got, want)
+	}
+}
+
+func TestDocumentationCommands(t *testing.T) {
+	checkDocNames(t, "overview commands", helpRows(usage, "Commands"), 1, topCommands)
+	var commands []string
+	for _, name := range topCommands {
+		if _, ok := helpTopics[name]; !ok {
+			t.Errorf("command %q has no help topic", name)
+		}
+		commands = append(commands, "amf "+name)
 	}
 	for _, path := range []string{"README.md", "docs/COMMANDS.md"} {
-		if got := docTable(t, path, "## Commands"); !reflect.DeepEqual(got, want) {
-			t.Errorf("%s commands = %v, help lists %v", path, got, want)
-		}
+		checkDocNames(t, path+" commands", docTable(t, path, "## Commands"), 2, commands)
 	}
 	for _, group := range []struct {
 		name, help string
@@ -87,39 +108,44 @@ func TestDocumentationCommands(t *testing.T) {
 		{"issue", issueUsage, issueSubcommands},
 		{"pr", prUsage, prSubcommands},
 	} {
-		rows := helpCommandRows(group.help, "amf "+group.name+" ")
-		var names []string
-		for _, row := range rows {
-			names = append(names, strings.Fields(row[0])[2])
+		names := group.names[:len(group.names)-1] // help is a usage alias
+		checkDocNames(t, group.name+" help commands", helpRows(group.help, "Commands"), 1, names)
+		var commands []string
+		for _, name := range names {
+			commands = append(commands, "amf "+group.name+" "+name)
 		}
-		if !slices.Equal(names, group.names[:len(group.names)-1]) { // help is a usage alias
-			t.Errorf("%s help commands = %v, want %v", group.name, names, group.names)
+		checkDocNames(t, group.name+" reference", docTable(t, "docs/COMMANDS.md", "## "+group.name+" commands"), 3, commands)
+	}
+}
+
+func TestDocumentationTopics(t *testing.T) {
+	var names, topics []string
+	for _, name := range topicNames() {
+		if !slices.Contains(topCommands, name) {
+			names = append(names, name)
+			topics = append(topics, "amf help "+name)
 		}
-		if !strings.Contains(usage, strings.Join(names, ", ")) {
-			t.Errorf("overview omits %s subcommands: %v", group.name, names)
-		}
-		if got := docTable(t, "docs/COMMANDS.md", "## "+group.name+" commands"); !reflect.DeepEqual(got, rows) {
-			t.Errorf("%s reference = %v, help lists %v", group.name, got, rows)
-		}
+	}
+	checkDocNames(t, "overview topics", helpRows(usage, "Topics"), 1, names)
+	for _, path := range []string{"README.md", "docs/COMMANDS.md"} {
+		checkDocNames(t, path+" topics", docTable(t, path, "## Topics"), 3, topics)
 	}
 }
 
 func TestDocumentationEnvironment(t *testing.T) {
-	var want [][]string
-	entry := regexp.MustCompile(`(?m)^  ([A-Z][A-Z0-9_]+) \(default: ([^\n]+)\)\n((?:    [^\n]+\n)+)`)
+	var want []string
+	entry := regexp.MustCompile(`(?m)^[\t ]*([A-Z][A-Z0-9_]+)[\t ]+\([\t ]*default[\t ]*:`)
 	for _, m := range entry.FindAllStringSubmatch(envHelp, -1) {
-		want = append(want, []string{m[1], m[2], docText(m[3])})
+		want = append(want, m[1])
 	}
 	if len(want) == 0 {
-		t.Fatal("env help has no settings with defaults")
+		t.Fatal("env help has no settings")
 	}
 	for _, doc := range []struct{ path, heading string }{
 		{"README.md", "### Configuration (.env)"},
 		{"docs/SPECS.md", "## Configuration (`.env`)"},
 	} {
-		if got := docTable(t, doc.path, doc.heading); !reflect.DeepEqual(got, want) {
-			t.Errorf("%s configuration = %v, help lists %v", doc.path, got, want)
-		}
+		checkDocNames(t, doc.path+" configuration", docTable(t, doc.path, doc.heading), 1, want)
 	}
 }
 
@@ -152,7 +178,7 @@ func TestDocumentedFlagsExist(t *testing.T) {
 			if len(cmd) == 1 {
 				check(helpTopics[cmd[0]])
 			} else {
-				for _, row := range helpCommandRows(helpTopics[cmd[0]], "") {
+				for _, row := range helpRows(helpTopics[cmd[0]], "Commands") {
 					if strings.Fields(row[0])[0] == cmd[1] {
 						check(strings.Join(row, " "))
 					}

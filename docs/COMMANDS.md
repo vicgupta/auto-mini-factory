@@ -24,6 +24,13 @@ For common failures and fixes, see the [troubleshooting guide](TROUBLESHOOTING.m
 | `amf version` | print amf's version |
 | `amf help` | show help for a command or topic |
 
+## Topics
+
+| Topic | What it covers |
+|---|---|
+| `amf help agents` | [Choosing the agent](#choosing-the-agent) and its fallback |
+| `amf help env` | [Configuration (.env)](../README.md#configuration-env), including defaults |
+
 ## issue commands
 
 | Command | What it does |
