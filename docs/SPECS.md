@@ -53,7 +53,7 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened, and merged
 | `amf doctor` | Checks the whole setup, one line per check, changing nothing. See below. |
 | `amf update [--version vX.Y.Z] [--check]` | Replaces the running binary with the latest release, or with the given one, which can be a downgrade; surrounding whitespace on `--version` is trimmed. Needs no `.env`. See below. |
 | `amf version` | Prints `amf <version>`: the release tag, or the module version for `go install`. `amf --version` is the same. |
-| `amf help` | Prints the usage, as `-h` and `--help` do. `amf help issue` and `amf help pr` print that command group's usage instead, as `amf issue help` and `amf pr help` do; any other command name after `help` is ignored and the usage is printed, and a word that is no command is an error: `amf: unknown help topic "x"`, a `Did you mean` suggestion when one is close, then the usage on stderr, exit code 2. |
+| `amf help` | Prints the usage, as `-h` and `--help` do. `amf help <command>` prints that command's help; for `issue` and `pr` it prints the group usage, as `amf issue help` and `amf pr help` do. `amf help agents` describes agent selection, and `amf help env` lists every configuration setting with its default and purpose, matching the README configuration table. The overview command names and descriptions match the README and command reference. An unknown topic is an error: `amf: unknown help topic "x"`, a `Did you mean` suggestion when one is close, then the usage on stderr, exit code 2. |
 
 - `--agent-timeout` limits each agent run, not the whole issue; the old
   `--timeout` is accepted as a deprecated alias of it. Both must be at least
@@ -525,10 +525,12 @@ permission) fails with its first message and leaves the PR as it was.
 
 1. Builds `.env` from a template of `GITHUB_TOKEN`, `GITHUB_REPO`,
    `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
-   `OPENCODE_API_KEY`, `OPENCODE_MODEL`, `AMF_AGENT_TIMEOUT`,
-   `AMF_LOG_LEVEL`, `AMF_TRUSTED` and `AMF_POSTGRES_URL`.
-   - `OPENCODE_API_KEY`, `OPENCODE_MODEL`, `AMF_AGENT_TIMEOUT`,
-     `AMF_LOG_LEVEL` and `AMF_POSTGRES_URL` are written
+   `OPENCODE_API_KEY`, `OPENCODE_MODEL`, `AMF_PRIMARY_AGENT`,
+   `AMF_SECONDARY_AGENT`, `AMF_AGENT_TIMEOUT`, `AMF_LOG_LEVEL`,
+   `AMF_TRUSTED` and `AMF_POSTGRES_URL`.
+   - `OPENCODE_API_KEY`, `OPENCODE_MODEL`, `AMF_PRIMARY_AGENT`,
+     `AMF_SECONDARY_AGENT`, `AMF_AGENT_TIMEOUT`, `AMF_LOG_LEVEL`
+     and `AMF_POSTGRES_URL` are written
      commented out, as `# OPENCODE_MODEL=opencode/big-pickle   # opencode/<id> for free and pay-as-you-go models, opencode-go/<id> for Go; 'opencode models' lists them`
      until they have a real value. None is one of the values `init` asks
      you to fill in.
@@ -620,19 +622,19 @@ space, a trailing comment. A leading byte order mark is ignored.
 | `CLAUDE_CODE_OAUTH_TOKEN` | unset | Claude subscription token, passed to Claude. Makes `claude` usable without `--agent` |
 | `ANTHROPIC_API_KEY` | unset | Claude API key, passed to Claude when there's no `CLAUDE_CODE_OAUTH_TOKEN`. Makes `claude` usable without `--agent` |
 | `OPENAI_API_KEY` | unset | OpenAI API key, passed to Codex. Makes `codex` usable without `--agent` |
-| `OPENCODE_API_KEY` | unset | OpenCode Console API key (`oc_sk_...`), passed to opencode only. One key covers pay-as-you-go `opencode/<id>` models (with credits) and, for a workspace subscribed to OpenCode Go, `opencode-go/<id>` models. Makes `opencode` usable without `--agent` with a paid `OPENCODE_MODEL`. Never written to a file |
+| `OPENCODE_API_KEY` | unset | OpenCode Console API key (`oc_sk_...`), passed to opencode only. One key covers pay-as-you-go `opencode/<id>` models (with credits) and, for a workspace subscribed to OpenCode Go, `opencode-go/<id>` models. Makes `opencode` usable without `--agent` with a paid `OPENCODE_MODEL`. Passed through the environment, never written to an agent configuration file; `amf init` preserves it in `.env` |
 | `OPENCODE_MODEL` | `opencode/big-pickle` | The model opencode runs with: always without a pipeline, and for pipeline stages that name no model. `opencode/<id>` is a free or pay-as-you-go model, `opencode-go/<id>` an OpenCode Go one. `opencode models` lists the choices |
 | `AMF_TRUSTED` | unset | GitHub logins, separated by commas or spaces (a leading `@` is allowed, case is ignored). When set, amf only works on issues they opened, except issues labeled `amf:auto`, which are always trusted. Unset means anyone's |
-| `AMF_POSTGRES_URL` | unset | A PostgreSQL server that `run` and `watch` also write their logs to. See [Logging to PostgreSQL](#logging-to-postgresql) |
+| `AMF_POSTGRES_URL` | unset | A PostgreSQL server that `run` and `watch` also write their logs to, in the `amflogs` database |
 | `AMF_CLAUDE` | `claude` | Path to the Claude CLI |
 | `AMF_PRIMARY_AGENT` | `codex` | The agent for issues without a pipeline: `claudecode` (or `claude`), `codex` or `opencode`, ignoring case. `--agent` and a pipeline override it |
 | `AMF_SECONDARY_AGENT` | `claudecode` | The agent amf falls back to when the primary fails, in a fresh worktree; the same values, or `none` for no fallback |
-| `AMF_AGENT_TIMEOUT` | `60m` | How long each agent run may take, as a Go duration; `--agent-timeout` (or its alias `--timeout`) overrides it. Must be at least 1m and at most 24h |
+| `AMF_AGENT_TIMEOUT` | `60m` | How long each agent run may take, as a Go duration; `--agent-timeout` (or its deprecated alias `--timeout`) overrides it. Must be at least 1m and at most 24h |
 | `AMF_LOG_LEVEL` | `info` (terminal), `debug` (event log) | `debug`, `info`, `warn` or `error`, for both the terminal and the event log of `run` and `watch`; `--log-level` overrides it |
 | `AMF_CODEX` | `codex` | Path to the Codex CLI |
 | `AMF_OPENCODE` | `opencode` | Path to the opencode CLI |
 | `AMF_API_URL` | `https://api.github.com` | GitHub API base URL. `amf pr ready` and `amf pr draft` derive their GraphQL endpoint from it: `…/graphql` appended, or a GitHub Enterprise Server `…/api/v3` becomes `…/api/graphql` |
-| `AMF_CLONE_URL` | `https://github.com/<repo>.git` | Where to clone the repo from |
+| `AMF_CLONE_URL` | `https://github.com/<repo>.git` | Where to clone `GITHUB_REPO` from |
 
 ## Pipelines (`AGENTS.md`)
 
