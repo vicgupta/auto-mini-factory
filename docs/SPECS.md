@@ -35,9 +35,9 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened, and merged
 | Command | Behavior |
 |---|---|
 | `amf init` | Writes `./.env` and creates the labels (see below). |
-| `amf issue <command>` | Groups issue operations: `create`, `list`, `run`, `watch`. Bare `amf issue`, `amf issue help`, `amf issue -h` and `amf issue --help` print the same group usage to stdout and exit 0, leaving stderr empty, without reading configuration, contacting GitHub or reading stdin. A stdout write failure follows the normal error path (exit 1). `amf issue create` without a title remains a usage error (exit 2). A single-word title within two edits of a subcommand, such as `amf issue lst`, creates nothing: it prints `amf: unknown issue command "lst"`, `Did you mean "list"?` and the way to create it anyway (`amf issue create "lst"`), then the group usage, to stderr and exits 2. The top-level `amf issue "Title"`, `amf list`, `amf run` and `amf watch` forms are aliases for `amf issue create`, `amf issue list`, `amf issue run` and `amf issue watch`. |
+| `amf issue <command>` | Groups issue operations: `create`, `list`, `run`, `watch`. Bare `amf issue`, `amf issue help`, `amf issue -h` and `amf issue --help` print the same group usage to stdout and exit 0, leaving stderr empty, without reading configuration, contacting GitHub or reading stdin. A stdout write failure follows the normal error path (exit 1). `amf issue create` without a title remains a usage error (exit 2). A single-word title within two edits of a subcommand, such as `amf issue lst`, creates nothing: it prints `amf: unknown issue command "lst"`, `Did you mean "list"?` and the way to create it anyway (`amf issue create "lst"`), then the group usage, to stderr and exits 2. The top-level `amf issue "Title"`, `amf run` and `amf watch` forms are aliases for `amf issue create`, `amf issue run` and `amf issue watch`. Top-level `amf list` still runs `amf issue list` as an undocumented alias, kept for existing scripts, and is not listed in the help overview; a mistyped top-level `lst` suggests `issue list`. |
 | `amf issue "Title" [-b body \| -f file \| -f -] [--label L] [--no-label]` | Creates an issue labeled `amf:ready` (or `--label`'s label; none with `--no-label`). The title's and the label's surrounding whitespace are trimmed before posting. The body can also come from stdin when it's piped; an explicitly supplied `-b`, including an empty value, selects that body and `-b` and nonempty `-f` together are an error. An explicit `-f -` reads stdin. An explicit `--label` with `--no-label` is an error. An empty or whitespace-only `--label` (without `--no-label`) fails with `--label can't be empty`, before anything is read or fetched. Prints `#N <url>`. |
-| `amf list [--state open\|closed\|all] [--label L] [--search TEXT] [--limit N] [--json]` | Lists issues, newest first (highest number first), with every page fetched and PRs left out. `-h` and `--help` print the flag help to stderr, leave stdout empty, and exit 0 before reading configuration or contacting GitHub. Surrounding whitespace on `--state` and `--label` is trimmed, and `--state` ignores letter case; whitespace inside a label name is preserved. An omitted, empty or whitespace-only label applies no label filter. `--search TEXT` (default empty) keeps only issues whose title contains the trimmed text, ignoring case; an empty or whitespace-only value applies no filter, and the filter runs before `--limit`. Columns: `ISSUE`, `STATE` (with `--state all` only), `AMF` (the issue's `amf` and `amf:*` labels, or `-`) and `TITLE`. `--limit N` (default `0`, no limit) prints only the first N issues after filtering, and when that hides some, the table output is followed on stderr by `Showing N of M issues; use --limit 0 to list them all.` (stdout is unchanged, and `--json` prints no hint); a negative value errors with `--limit must be 0 or more, got N`. Tabs in a title print as spaces. `--state` takes only `open`, `closed` or `all`, in any letter case, after trimming surrounding whitespace. Prints `No … in owner/name.` when nothing matches, using the trimmed label when one is set, and `with "TEXT" in the title` after it when `--search` is set. `--json` (default `false`) prints instead one JSON array and a newline, with no header: one object per issue, in the same order and after the same filters and limit, with exactly `number` (integer), `title`, `state`, `url` (the issue's GitHub page) and `labels` (every label name, in GitHub's order, `[]` when none); titles are kept as GitHub sent them, tabs included. Nothing matching prints `[]`. Argument, configuration and API errors leave stdout empty. A failure to write stdout, including the no-matching-issues message, is returned as an error and exits 1. Needs no git checkout. |
+| `amf issue list [--state open\|closed\|all] [--label L] [--search TEXT] [--limit N] [--json]` | Lists issues, newest first (highest number first), with every page fetched and PRs left out. `-h` and `--help` print the flag help to stderr, leave stdout empty, and exit 0 before reading configuration or contacting GitHub. Surrounding whitespace on `--state` and `--label` is trimmed, and `--state` ignores letter case; whitespace inside a label name is preserved. An omitted, empty or whitespace-only label applies no label filter. `--search TEXT` (default empty) keeps only issues whose title contains the trimmed text, ignoring case; an empty or whitespace-only value applies no filter, and the filter runs before `--limit`. Columns: `ISSUE`, `STATE` (with `--state all` only), `AMF` (the issue's `amf` and `amf:*` labels, or `-`) and `TITLE`. `--limit N` (default `0`, no limit) prints only the first N issues after filtering, and when that hides some, the table output is followed on stderr by `Showing N of M issues; use --limit 0 to list them all.` (stdout is unchanged, and `--json` prints no hint); a negative value errors with `--limit must be 0 or more, got N`. Tabs in a title print as spaces. `--state` takes only `open`, `closed` or `all`, in any letter case, after trimming surrounding whitespace. Prints `No … in owner/name.` when nothing matches, using the trimmed label when one is set, and `with "TEXT" in the title` after it when `--search` is set. `--json` (default `false`) prints instead one JSON array and a newline, with no header: one object per issue, in the same order and after the same filters and limit, with exactly `number` (integer), `title`, `state`, `url` (the issue's GitHub page) and `labels` (every label name, in GitHub's order, `[]` when none); titles are kept as GitHub sent them, tabs included. Nothing matching prints `[]`. Argument, configuration and API errors leave stdout empty. A failure to write stdout, including the no-matching-issues message, is returned as an error and exits 1. Needs no git checkout. |
 | `amf pr` | Prints the pull request command group's usage to stdout, as `amf pr help`, `amf pr -h` and `amf pr --help` do. An unknown subcommand prints `amf: unknown pr command "<word>"` and then that usage to stderr and exits 2; one close to a real subcommand, such as `lst`, also prints `Did you mean "list"?` before the usage. |
 | `amf pr list [--state open\|closed\|merged\|all] [--limit N] [--issue N] [--json]` | Lists pull requests, including drafts, newest first. See [Pull requests](#pull-requests). |
 | `amf pr merge <N> [--squash \| --rebase] [--delete-branch]` | Merges a chosen PR (`42` or `#42`); no git checkout needed. See below. |
@@ -214,7 +214,7 @@ expiry; the issue is still marked failed.
 
 ### Pull requests
 
-`amf pr list` reads `.env` like `amf list`, checks that GitHub can access
+`amf pr list` reads `.env` like `amf issue list`, checks that GitHub can access
 `GITHUB_REPO` first, and needs no git checkout. It fetches every page of
 `GET /repos/{repo}/pulls` with `sort=created` and `direction=desc`, then sorts
 by number descending so the highest number is first even when creation times tie.
@@ -255,7 +255,7 @@ by number descending so the highest number is first even when creation times tie
 
 ### `amf pr merge`
 
-Reads `.env` and the environment and checks repository access, as `amf list`
+Reads `.env` and the environment and checks repository access, as `amf issue list`
 does. Merges with a merge commit by default; `--squash` squashes and
 `--rebase` rebases. Both flags together fail before any GitHub call with
 `--squash and --rebase can't be used together`. Exactly one positive PR
@@ -288,7 +288,7 @@ left alone. The PR's closing references close issues as usual.
 
 ### `amf pr view`
 
-`amf pr view <N> [--json]` reads `.env` like `amf list`, checks that GitHub can
+`amf pr view <N> [--json]` reads `.env` like `amf issue list`, checks that GitHub can
 access `GITHUB_REPO` first, fetches `GET /repos/{repo}/pulls/N`, and needs no
 git checkout. `N` may be `57` or `#57`, must be positive, and its surrounding
 whitespace is trimmed. Missing or extra
@@ -332,7 +332,7 @@ nothing is written to stdout, and a failure to write stdout is an error.
 
 ### `amf pr diff`
 
-`amf pr diff <N> [--name-only]` reads `.env` like `amf list`, checks that
+`amf pr diff <N> [--name-only]` reads `.env` like `amf issue list`, checks that
 GitHub can access `GITHUB_REPO` first, and needs no git checkout. `N` may be
 `57` or `#57`, must be positive, and its surrounding whitespace is trimmed.
 Missing, extra or non-number arguments

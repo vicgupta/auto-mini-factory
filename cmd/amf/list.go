@@ -37,7 +37,7 @@ func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		return errUsage
 	}
 	if len(pos) != 0 {
-		fmt.Fprintln(stderr, "usage: amf list [--state open|closed|all] [--label L] [--search TEXT] [--limit N] [--json]")
+		fmt.Fprintln(stderr, "usage: amf issue list [--state open|closed|all] [--label L] [--search TEXT] [--limit N] [--json]")
 		return errUsage
 	}
 	if *limit < 0 {

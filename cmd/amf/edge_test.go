@@ -2779,7 +2779,7 @@ func TestUnknownCommandSuggestion(t *testing.T) {
 	if !errors.Is(err, errUsage) {
 		t.Fatalf("err = %v, want errUsage", err)
 	}
-	if !strings.Contains(errb.String(), `Did you mean "list"?`) {
+	if !strings.Contains(errb.String(), `Did you mean "issue list"?`) {
 		t.Errorf("no suggestion in %q", errb.String())
 	}
 	errb.Reset()
@@ -2870,14 +2870,14 @@ func TestHelpUnknownTopic(t *testing.T) {
 // Every flag amf list takes appears in its help, --json included.
 func TestUsageListMentionsJSON(t *testing.T) {
 	for _, line := range strings.Split(listHelp, "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "amf list ") {
+		if strings.HasPrefix(strings.TrimSpace(line), "amf issue list ") {
 			if !strings.Contains(line, "--json") {
-				t.Errorf("amf list usage line omits --json: %q", line)
+				t.Errorf("amf issue list usage line omits --json: %q", line)
 			}
 			return
 		}
 	}
-	t.Error("no amf list line in amf help list")
+	t.Error("no amf issue list line in amf help list")
 }
 
 // The overview lists each command and topic on one line, with no flags,
@@ -2893,6 +2893,9 @@ func TestUsageIsOverview(t *testing.T) {
 		if !regexp.MustCompile(`(?m)^  ` + name + ` +\S`).MatchString(usage) {
 			t.Errorf("overview has no line for %s", name)
 		}
+	}
+	if regexp.MustCompile(`(?m)^  list `).MatchString(usage) {
+		t.Errorf("overview still lists the hidden list alias:\n%s", usage)
 	}
 	if strings.Contains(usage, "--") || !strings.Contains(usage, "Run amf help <command> or amf <command> -h for details.") {
 		t.Errorf("overview:\n%s", usage)
