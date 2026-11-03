@@ -692,14 +692,17 @@ func cmdAuto(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 // GitHub nor agents, and must not clone a repo or create logs.
 func cmdAutoState(ctx context.Context, status, closeIssues bool, stdout io.Writer) error {
 	root, err := git(ctx, ".", "rev-parse", "--show-toplevel")
-	if err != nil {
-		// Outside a checkout, auto uses ./<repo name>. Locate that state
-		// without invoking checkoutRoot, which could create a new clone.
+	if err != nil || paths.CloneDir != "" {
+		// Outside a checkout (or with --clone-dir), auto uses the clone
+		// dir. Locate that state without invoking checkoutRoot, which
+		// could create a new clone.
 		cfg, err := loadConfig(envPaths(ctx)...)
 		if err != nil {
 			return err
 		}
-		_, root, _ = strings.Cut(cfg.Repo, "/")
+		if root, err = cloneDirFor(cfg.Repo); err != nil {
+			return err
+		}
 	}
 	path := autoStatePath(root)
 	if !status && !closeIssues {

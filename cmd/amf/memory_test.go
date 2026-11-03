@@ -262,6 +262,7 @@ func TestSQLiteSchema(t *testing.T) {
 }
 
 func TestMemoryOptions(t *testing.T) {
+	paths = pathOptions{} // a prior run() leaves Start set
 	if err := (memoryOptions{Backend: "log"}).check(); err == nil || !strings.Contains(err.Error(), "sqlite, markdown or logfiles") {
 		t.Fatalf("bad backend err = %v", err)
 	}

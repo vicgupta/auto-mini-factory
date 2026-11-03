@@ -155,7 +155,7 @@ func (mo memoryOptions) baseDir() (string, error) {
 		}
 		d = wd
 	}
-	return filepath.Abs(d)
+	return absFlag(d)
 }
 
 // repoKey is the repo's memory key, host/owner/repo lower-cased, from the

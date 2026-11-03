@@ -54,6 +54,26 @@ holds your `.env`. There, amf clones the repo into `./<name>` the first time
 (using your git credentials) and reuses that clone afterwards. amf checks
 `GITHUB_REPO` against GitHub first, so a typo fails with a clear message.
 
+### Paths default to the current directory
+
+Every file or folder amf reads or writes defaults to the directory you run it
+in (`os.Getwd`, never `$HOME` or `/tmp`), unless a command-line flag says
+otherwise. Every command accepts these path flags, before or after the
+command name (`amf --dir ~/work run 42` or `amf run 42 --dir ~/work`):
+
+| Flag | Default | What it sets |
+|---|---|---|
+| `--dir DIR` | the current directory | where amf works, as if started there: the checkout, `./.env`, `./<name>` and `.amf/` all follow it |
+| `--env-file FILE` | `./.env`, then `.env` at the top of the enclosing checkout | the only `.env` amf reads, and the one `amf init` writes |
+| `--clone-dir DIR` | the enclosing checkout, else `./<name>` | the checkout run, watch and auto use (cloning `GITHUB_REPO` there if it is missing); it wins over the enclosing checkout |
+| `--log-file FILE` (run, watch, auto) | `<checkout>/.amf/runs/<run_id>/events.jsonl` | the event log; `off` for none |
+
+Relative flag values resolve against the directory amf was started in, before
+`--dir` changes into its folder. amf's own state stays under `<checkout>/.amf/`
+(worktrees, `logs/`, `runs/`, `auto/state.json`, `watch.lock`); `--memory-dir` (default: the current directory) holds `amf-memory/`, also excluded from git, which amf adds to
+`.git/info/exclude`, so it is never committed. `amf update` still replaces the
+running binary where it is, and its temporary download sits next to it.
+
 ```sh
 amf issue "Add dark mode" -b "Use CSS variables for the palette"
 amf issue "Fix login bug" -f bug.md
