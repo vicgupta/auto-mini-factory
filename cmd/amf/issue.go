@@ -9,13 +9,13 @@ import (
 const issueUsage = `usage: amf issue <command>
 
 Commands:
-  create "Title" [-b body | -f file.md] [--label L] [--no-label]  create an issue (body may also come from stdin)
-  list [--state open|closed|all] [--label L] [--search TEXT] [--limit N]       list issues, newest first, with their amf labels (also takes --json)
-  run <N> [--agent A] [--agent-timeout 60m]                       process one issue into a PR (also takes --draft, --dry-run, --merge, --eval-rounds, --log-level, --log-file)
-  watch [--agent A] [--interval 60s] [--label amf:ready]          process amf:ready issues as they arrive (also takes --exclude-label, --draft, --merge, --agent-timeout, --eval-rounds, --log-level, --log-file)
+  create "Title" [--body text | --file path] [--label name] [--no-label]  create an issue (the body may also come from stdin)
+  list [--state open|closed|all] [--label name] [--search text] [--limit n] [--json]  list issues, newest first, with their amf labels
+  run <N> [flags]  process one issue into a PR: see amf help run
+  watch [flags]  process amf:ready issues as they arrive: see amf help watch
 
 amf issue "Title" … is a shortcut for amf issue create "Title" …
-Run amf help list, amf help run or amf help watch for each one's details.
+Run amf help issue <command> or amf issue <command> --help for its flags.
 `
 
 var issueSubcommands = []string{"create", "list", "run", "watch", "help"}

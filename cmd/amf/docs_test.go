@@ -124,7 +124,7 @@ func TestDocumentationEnvironment(t *testing.T) {
 }
 
 func TestDocumentedFlagsExist(t *testing.T) {
-	flagName := regexp.MustCompile(`(?:^|[\s\[|])--?([a-z][a-z-]*)`)
+	flagName := regexp.MustCompile(`(?:^|[\s\[|(])--?([a-zA-Z][a-z-]*)`)
 	for _, cmd := range [][]string{
 		{"init"}, {"issue", "create"}, {"issue", "list"}, {"issue", "run"}, {"issue", "watch"},
 		{"pr", "list"}, {"pr", "merge"}, {"pr", "view"}, {"pr", "diff"}, {"pr", "close"},
@@ -137,9 +137,15 @@ func TestDocumentedFlagsExist(t *testing.T) {
 			if err := run(context.Background(), args, nil, io.Discard, &stderr); err != nil && !errors.Is(err, errUsage) {
 				t.Fatal(err)
 			}
-			accepted := map[string]bool{"h": true, "help": true}
-			for _, m := range regexp.MustCompile(`(?m)^  -([a-z][a-z-]*)\b`).FindAllStringSubmatch(stderr.String(), -1) {
-				accepted[m[1]] = true
+			accepted := map[string]bool{"h": true, "help": true, "dir": true, "env-file": true, "clone-dir": true} // path flags: every command
+			for _, f := range helpFlags(stderr.String()) {
+				accepted[f.long] = true
+				if f.short != "" {
+					accepted[f.short] = true
+				}
+			}
+			if accepted["agent-timeout"] {
+				accepted["timeout"] = true // hidden, deprecated alias
 			}
 			check := func(text string) {
 				t.Helper()

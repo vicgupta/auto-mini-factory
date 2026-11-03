@@ -36,8 +36,11 @@ running a platform.
 | `amf version` | print amf's version |
 | `amf help` | show help for a command or topic |
 
-`amf help <command>` or `amf <command> -h` prints a command's details, and
-[docs/COMMANDS.md](docs/COMMANDS.md) has the full reference.
+`amf help <command>` or `amf <command> --help` (`-h`) prints a command's details, and
+[docs/COMMANDS.md](docs/COMMANDS.md) has the full reference. Every flag has a long
+`--full-word` form, used in all examples here; common ones also have a one-letter
+short form, such as `-a` for `--agent` (see
+[Flag conventions](docs/COMMANDS.md#flag-conventions) or `amf help flags`).
 For common failures and fixes, see the
 [troubleshooting guide](docs/TROUBLESHOOTING.md).
 
@@ -54,7 +57,7 @@ amf init                 # writes .env; fills GITHUB_REPO from origin
 # Edit .env: set GITHUB_TOKEN, check GITHUB_REPO and configure your agent.
 amf init                 # creates any missing amf labels once configured
 amf doctor               # check the setup
-amf issue "Add dark mode" -b "Use CSS variables for the palette"
+amf issue "Add dark mode" --body "Use CSS variables for the palette"
 amf run 42               # replace 42 with the issue number in the URL printed above
 ```
 
@@ -264,10 +267,10 @@ command name (`amf --dir ~/work run 42` or `amf run 42 --dir ~/work`):
 
 | Flag | Default | What it sets |
 |---|---|---|
-| `--dir DIR` | the current directory | where amf works, as if started there: the checkout, `./.env`, `./<name>` and `.amf/` all follow it |
-| `--env-file FILE` | `./.env`, then `.env` at the top of the enclosing checkout | the only `.env` amf reads, and the one `amf init` writes |
-| `--clone-dir DIR` | the enclosing checkout, else `./<name>` | the checkout run, watch and auto use (cloning `GITHUB_REPO` there if it is missing); it wins over the enclosing checkout |
-| `--log-file FILE` (run, watch, auto) | `<checkout>/.amf/runs/<run_id>/events.jsonl` | the event log; `off` for none |
+| `--dir <folder>` | the current directory | where amf works, as if started there: the checkout, `./.env`, `./<name>` and `.amf/` all follow it |
+| `--env-file <file>` | `./.env`, then `.env` at the top of the enclosing checkout | the only `.env` amf reads, and the one `amf init` writes |
+| `--clone-dir <folder>` | the enclosing checkout, else `./<name>` | the checkout run, watch and auto use (cloning `GITHUB_REPO` there if it is missing); it wins over the enclosing checkout |
+| `--log-file <path>` (run, watch, auto) | `<checkout>/.amf/runs/<run_id>/events.jsonl` | the event log; `off` for none |
 
 Relative flag values resolve against the directory amf was started in, before
 `--dir` changes into its folder. amf's own state stays under `<checkout>/.amf/`
@@ -276,8 +279,8 @@ Relative flag values resolve against the directory amf was started in, before
 running binary where it is, and its temporary download sits next to it.
 
 ```sh
-amf issue "Add dark mode" -b "Use CSS variables for the palette"
-amf issue "Fix login bug" -f bug.md
+amf issue "Add dark mode" --body "Use CSS variables for the palette"
+amf issue "Fix login bug" --file bug.md
 echo "details" | amf issue "Title"     # body from stdin
 amf issue "Just a note" --no-label     # won't be picked up by watch
 

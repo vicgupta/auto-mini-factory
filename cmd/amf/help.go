@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 )
 
 // usage is the short overview amf, amf help, -h and --help print: one line
@@ -31,21 +32,23 @@ Commands:
 Topics:
   agents     which coding agent amf runs, and when it falls back to another
   env        configuration: every .env setting, with its default
+  flags      flag conventions: long and short forms, shared letters
 
 Paths default to the current directory; amf help run lists the path flags
 every command takes.
 
 Run amf help <command> or amf <command> -h for details.
+Every flag has a long form and common ones a short one: see amf help flags.
 `
 
 const runHelp = `Usage:
-  amf run <issue-number> [--agent A] [--agent-timeout 60m] [--eval-rounds 2] [--dry-run] [--force] [--draft] [--merge[=squash|rebase]] [--log-level L] [--log-file P] [--memory-backend sqlite|markdown|logfiles] [--memory-dir D]
+  amf run <issue-number> [flags]
 
-Processes one issue into a pull request (alias of amf issue run; also takes
---draft, --dry-run, --merge, --eval-rounds, --log-level, --log-file).
+Processes one issue into a pull request (alias of amf issue run).
 
 --merge makes run and watch merge each PR they open or update, without
-review: a merge commit, or --merge=squash or --merge=rebase. A merge GitHub
+review: a merge commit, or --merge=squash or --merge=rebase (also written
+--merge squash, -m squash or -m=squash). A merge GitHub
 refuses (a conflict, required checks or reviews) leaves the PR open.
 See diagrams and tradeoffs for --merge at:
 https://github.com/vicgupta/auto-mini-factory/blob/main/docs/COMMANDS.md#merge-methods
@@ -82,12 +85,11 @@ amf help agents says which agent runs; amf help env lists the settings.
 `
 
 const watchHelp = `Usage:
-  amf watch [--agent A] [--interval 60s] [--label amf:ready] [--exclude-label L]... [--agent-timeout 60m] [--stale-timeout 2h] [--eval-rounds 2] [--draft] [--merge[=squash|rebase]] [--log-level L] [--log-file P] [--memory-backend sqlite|markdown|logfiles] [--memory-dir D]
+  amf watch [flags]
 
 Processes amf:ready issues as they arrive, one at a time, until interrupted
-(alias of amf issue watch; also takes --exclude-label, --draft, --merge,
---agent-timeout, --eval-rounds, --log-level, --log-file). --merge, the
-checkout and the agent work as for amf run: see amf help run.
+(alias of amf issue watch). --merge, the checkout and the agent work as for
+amf run: see amf help run.
 
 Each poll, watch also puts amf:in-progress issues that no amf is working on
 back to amf:ready once they have been in progress longer than
@@ -100,20 +102,20 @@ amf help agents says which agent runs; amf help env lists the settings.
 `
 
 const listHelp = `Usage:
-  amf issue list [--state open|closed|all] [--label L] [--search TEXT] [--limit N] [--json]
+  amf issue list [flags]
 
 Lists issues, newest first, with their amf labels.
 `
 
 const initHelp = `Usage:
-  amf init
+  amf init [flags]
 
 Writes .env (backing up an existing one) and creates amf's labels.
 amf help env lists every setting .env can hold.
 `
 
 const pipelineHelp = `Usage:
-  amf pipeline [--fetch]
+  amf pipeline [flags]
 
 Checks the plan/code/eval pipeline in this checkout's AGENTS.md.
 
@@ -124,28 +126,29 @@ github.com/vicgupta/auto-mini-factory.
 `
 
 const doctorHelp = `Usage:
-  amf doctor
+  amf doctor [flags]
 
 Checks the setup here, one line per check, changing nothing.
 `
 
 const updateHelp = `Usage:
-  amf update [--version vX.Y.Z] [--check]
+  amf update [flags]
 
 Replaces this amf binary with the latest (or given) release.
 `
 
 const versionHelp = `Usage:
-  amf version
+  amf version [flags]
 
 Prints amf's version (also amf --version).
 `
 
 const helpHelp = `Usage:
-  amf help [command | topic]
+  amf help [command [subcommand] | topic]
 
 Without an argument, prints the overview of commands and topics. With one,
-prints that command's or topic's details.
+prints that command's or topic's details: amf help run prints the same as
+amf run --help, and amf help pr merge the same as amf pr merge --help.
 `
 
 const agentsHelp = `Choosing the agent
@@ -229,7 +232,7 @@ amf doctor checks the configuration.
 var helpTopics = map[string]string{
 	"issue": issueUsage, "pr": prUsage, "list": listHelp, "run": runHelp, "watch": watchHelp, "auto": autoHelp, "memory": memoryUsage,
 	"init": initHelp, "pipeline": pipelineHelp, "doctor": doctorHelp, "update": updateHelp,
-	"version": versionHelp, "help": helpHelp, "agents": agentsHelp, "env": envHelp,
+	"version": versionHelp, "help": helpHelp, "agents": agentsHelp, "env": envHelp, "flags": flagsHelp,
 }
 
 // topicNames is every help topic, for typo suggestions.
@@ -244,9 +247,10 @@ func topicNames() []string {
 	return names
 }
 
-// withHelp makes -h and --help on fs print the command's help topic before
-// the flag list.
-func withHelp(fs *flag.FlagSet, w io.Writer, topic string) {
+// withHelp makes -h and --help on fs print the help for key: its topic
+// text, its flags in one aligned column, and examples. amf help <key> prints
+// the same, by running the command with --help.
+func withHelp(fs *flag.FlagSet, w io.Writer, key string) {
 	// run strips the path flags before the command parses its own, so these
 	// are only listed here; see paths.go.
 	if fs.Lookup("dir") == nil {
@@ -254,10 +258,49 @@ func withHelp(fs *flag.FlagSet, w io.Writer, topic string) {
 		fs.String("env-file", "", "read only this .env `file` (default: ./.env, then the checkout's top-level .env)")
 		fs.String("clone-dir", "", "use, or clone GITHUB_REPO into, this `folder` (default: the enclosing checkout, else ./<repo name>)")
 	}
-	fs.Usage = func() {
-		fmt.Fprintf(w, "%s\nUsage of %s:\n", topic, fs.Name())
-		fs.PrintDefaults()
+	fs.Usage = func() { fmt.Fprint(w, commandHelp(fs, key)) }
+}
+
+// commandHelp is the full help for key, with fs's flags.
+func commandHelp(fs *flag.FlagSet, key string) string {
+	var b strings.Builder
+	b.WriteString(strings.TrimRight(helpText(key), "\n"))
+	b.WriteString("\n\nFlags:\n")
+	printFlags(&b, fs)
+	b.WriteString("\nGlobal flags (any command, before --):\n")
+	printGlobalFlags(&b)
+	if ex := helpExamples[key]; ex != "" {
+		b.WriteString("\nExamples:\n" + ex)
 	}
+	return b.String()
+}
+
+// helpText is the topic text for a command or a two-word subcommand.
+func helpText(key string) string {
+	if t, ok := subHelp[key]; ok {
+		return t
+	}
+	return helpTopics[key]
+}
+
+// newCommandFlags starts the FlagSet for the command key, wired to print its
+// help to w.
+func newCommandFlags(key string, w io.Writer) *flag.FlagSet {
+	fs := flag.NewFlagSet(key, flag.ContinueOnError)
+	fs.SetOutput(w)
+	withHelp(fs, w, key)
+	return fs
+}
+
+// helpArgs maps each amf help <topic> that is a command with flags to the
+// arguments that run it, so amf help run prints what amf run --help does.
+var helpArgs = map[string][]string{
+	"init": {"init"}, "run": {"run"}, "watch": {"watch"}, "auto": {"auto"}, "list": {"issue", "list"},
+	"pipeline": {"pipeline"}, "doctor": {"doctor"}, "update": {"update"}, "version": {"version"},
+	"issue create": {"issue", "create"}, "issue list": {"issue", "list"}, "issue run": {"run"}, "issue watch": {"watch"},
+	"pr list": {"pr", "list"}, "pr merge": {"pr", "merge"}, "pr view": {"pr", "view"}, "pr diff": {"pr", "diff"},
+	"memory sync": {"memory", "sync"}, "memory similar": {"memory", "similar"}, "memory show": {"memory", "show"},
+	"pr close": {"pr", "close"}, "pr reopen": {"pr", "reopen"}, "pr ready": {"pr", "ready"}, "pr draft": {"pr", "draft"},
 }
 
 // isHelpArgs reports whether args ask for help: exactly -h or --help.

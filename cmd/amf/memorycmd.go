@@ -145,9 +145,9 @@ func syncMemory(ctx context.Context, gh *GitHub, s MemoryStore, full bool) (sync
 }
 
 const memoryUsage = `Usage:
-  amf memory sync [--full] [--memory-backend B] [--memory-dir D]
-  amf memory similar <issue-number | "text"> [--limit 5] [--json] [--memory-backend B] [--memory-dir D]
-  amf memory show <issue-number> [--json] [--memory-backend B] [--memory-dir D]
+  amf memory sync [--full] [flags]
+  amf memory similar <issue-number | "text"> [--limit n] [--json] [flags]
+  amf memory show <issue-number> [--json] [flags]
 
 amf keeps a per-repo memory of issues, pull requests and runs, so it can
 point a new issue at similar past work.
@@ -191,9 +191,11 @@ func cmdMemory(ctx context.Context, args []string, stdout, stderr io.Writer) err
 		return nil
 	}
 	sub, rest := args[0], args[1:]
-	fs := flag.NewFlagSet("memory "+sub, flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	withHelp(fs, stderr, memoryUsage)
+	if sub != "sync" && sub != "similar" && sub != "show" {
+		fmt.Fprintf(stderr, "amf memory: unknown subcommand %q\n\n%s", sub, memoryUsage)
+		return errUsage
+	}
+	fs := newCommandFlags("memory "+sub, stderr)
 	mo := addMemoryFlags(fs)
 	asJSON := fs.Bool("json", false, "print JSON")
 	limit := fs.Int("limit", 5, "how many results similar prints")
@@ -218,9 +220,6 @@ func cmdMemory(ctx context.Context, args []string, stdout, stderr io.Writer) err
 			fmt.Fprint(stderr, memoryUsage)
 			return errUsage
 		}
-	default:
-		fmt.Fprintf(stderr, "amf memory: unknown subcommand %q\n\n%s", sub, memoryUsage)
-		return errUsage
 	}
 	if *limit < 1 {
 		return errors.New("--limit must be at least 1")

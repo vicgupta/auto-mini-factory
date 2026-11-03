@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"strconv"
@@ -15,14 +14,16 @@ import (
 const prUsage = `usage: amf pr <command>
 
 Commands:
-  list [--state open|closed|merged|all] [--limit N] [--issue N] [--json]  list pull requests, newest first
+  list [--state open|closed|merged|all] [--limit n] [--issue n] [--json]  list pull requests, newest first
   merge <N> [--squash | --rebase] [--delete-branch]  merge a pull request
   view <N> [--json]  show a pull request
   diff <N> [--name-only]  show a pull request's diff, or one changed path per line
   close <N> [--comment text] [--delete-branch]  close a pull request
-  reopen <N>                                      reopen a pull request
-  ready <N>                                       mark a draft pull request ready for review
-  draft <N>                                       convert a pull request to a draft
+  reopen <N>  reopen a pull request
+  ready <N>  mark a draft pull request ready for review
+  draft <N>  convert a pull request to a draft
+
+Run amf help pr <command> or amf pr <command> --help for its flags.
 `
 
 func cmdPR(ctx context.Context, args []string, stdout, stderr io.Writer) error {
@@ -86,8 +87,7 @@ type listedPR struct {
 }
 
 func cmdPRList(ctx context.Context, args []string, stdout, stderr io.Writer) error {
-	fs := flag.NewFlagSet("pr list", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs := newCommandFlags("pr list", stderr)
 	state := fs.String("state", "open", "open, closed, merged or all")
 	limit := fs.Int("limit", 0, "print at most N pull requests, 0 means no limit")
 	issue := fs.Int("issue", 0, "only pull requests opened for issue N, 0 means no filter")
@@ -185,8 +185,7 @@ func cmdPRList(ctx context.Context, args []string, stdout, stderr io.Writer) err
 }
 
 func cmdPRMerge(ctx context.Context, args []string, stdout, stderr io.Writer) error {
-	fs := flag.NewFlagSet("pr merge", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs := newCommandFlags("pr merge", stderr)
 	squash := fs.Bool("squash", false, "squash and merge")
 	rebase := fs.Bool("rebase", false, "rebase and merge")
 	deleteBranch := fs.Bool("delete-branch", false, "delete the head branch after merging, if it is in this repository")
@@ -273,8 +272,7 @@ type viewedPR struct {
 }
 
 func cmdPRView(ctx context.Context, args []string, stdout, stderr io.Writer) error {
-	fs := flag.NewFlagSet("pr view", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs := newCommandFlags("pr view", stderr)
 	asJSON := fs.Bool("json", false, "print one JSON object")
 	pos, err := parseArgs(fs, args)
 	if err != nil {
@@ -369,8 +367,7 @@ func cmdPRView(ctx context.Context, args []string, stdout, stderr io.Writer) err
 // cmdPRDiff prints a pull request's unified diff, or one changed path per
 // line with --name-only.
 func cmdPRDiff(ctx context.Context, args []string, stdout, stderr io.Writer) error {
-	fs := flag.NewFlagSet("pr diff", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs := newCommandFlags("pr diff", stderr)
 	nameOnly := fs.Bool("name-only", false, "print one changed path per line instead of the diff")
 	pos, err := parseArgs(fs, args)
 	if err != nil {
@@ -468,8 +465,7 @@ func textMergeable(pr prViewResponse) string {
 // cmdPRClose closes pull request n, optionally commenting first and deleting
 // its head branch after. It never touches the linked issue's labels.
 func cmdPRClose(ctx context.Context, args []string, stdout, stderr io.Writer) error {
-	fs := flag.NewFlagSet("pr close", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs := newCommandFlags("pr close", stderr)
 	comment := fs.String("comment", "", "post a comment on the issue before closing")
 	deleteBranch := fs.Bool("delete-branch", false, "delete the head branch after closing, if it is in this repository")
 	pos, err := parseArgs(fs, args)
@@ -527,8 +523,7 @@ func cmdPRClose(ctx context.Context, args []string, stdout, stderr io.Writer) er
 // cmdPRReopen reopens a closed pull request n. It never touches the linked
 // issue's labels.
 func cmdPRReopen(ctx context.Context, args []string, stdout, stderr io.Writer) error {
-	fs := flag.NewFlagSet("pr reopen", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs := newCommandFlags("pr reopen", stderr)
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return errUsage
@@ -592,8 +587,7 @@ func cmdPRDraftState(ctx context.Context, args []string, stdout, stderr io.Write
 	if ready {
 		name = "ready"
 	}
-	fs := flag.NewFlagSet("pr "+name, flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs := newCommandFlags("pr "+name, stderr)
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return errUsage
