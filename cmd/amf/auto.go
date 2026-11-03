@@ -24,6 +24,8 @@ var autoLabel = LabelSpec{labelAuto, "5319e7", "Planned by amf auto from one sen
 // defaultAutoMaxIssues is how many issues amf auto plans at most.
 const defaultAutoMaxIssues = 5
 
+const autoStateVersion = 1
+
 const autoHelp = `Usage:
   amf auto "<one simple sentence>" [--agent A] [--max-issues 5] [--merge[=squash|rebase]] [--agent-timeout 60m] [--eval-rounds 2] [--dry-run] [--log-level L] [--log-file P]
   amf auto --continue [--agent A] [--agent-timeout 60m] [--eval-rounds 2] [--log-level L] [--log-file P]
@@ -57,6 +59,7 @@ Remove .amf/auto/state.json to abandon a run and start another.
 // autoState is what amf auto saves in .amf/auto/state.json, so --continue
 // can resume where it stopped.
 type autoState struct {
+	Version  int         `json:"version"`
 	Sentence string      `json:"sentence"`
 	Repo     string      `json:"repo"`
 	Merge    string      `json:"merge"`
@@ -66,16 +69,18 @@ type autoState struct {
 }
 
 // autoIssue is one planned issue and how far amf got with it: pending,
-// merged or failed.
+// merged or failed. Number is zero until the issue has been created.
 type autoIssue struct {
-	Number int    `json:"number"`
-	Title  string `json:"title"`
-	URL    string `json:"url"`
-	Status string `json:"status"`
-	PR     string `json:"pr,omitempty"`
-	Commit string `json:"commit,omitempty"`
-	Agent  string `json:"agent,omitempty"`
-	Error  string `json:"error,omitempty"`
+	Number     int      `json:"number"`
+	Title      string   `json:"title"`
+	Scope      string   `json:"scope"`
+	Acceptance []string `json:"acceptance_criteria"`
+	URL        string   `json:"url"`
+	Status     string   `json:"status"`
+	PR         string   `json:"pr,omitempty"`
+	Commit     string   `json:"commit,omitempty"`
+	Agent      string   `json:"agent,omitempty"`
+	Error      string   `json:"error,omitempty"`
 }
 
 func (st *autoState) merged() int {
@@ -108,6 +113,9 @@ func loadAutoState(path string) (*autoState, error) {
 	var st autoState
 	if err := json.Unmarshal(b, &st); err != nil {
 		return nil, fmt.Errorf("%s: %v", path, err)
+	}
+	if st.Version != autoStateVersion {
+		return nil, fmt.Errorf("%s: unsupported amf auto state version %d (expected %d)", path, st.Version, autoStateVersion)
 	}
 	return &st, nil
 }
@@ -303,6 +311,36 @@ func terminalApprover(stdin io.Reader, stdout io.Writer) approver {
 		a := strings.ToLower(strings.TrimSpace(line))
 		return true, a == "y" || a == "yes"
 	}
+}
+
+// autoCreateIssues creates only the issues not yet assigned a number,
+// saving the full plan after each successful creation before continuing.
+func (r *Runner) autoCreateIssues(ctx context.Context, st *autoState, path string, stdout io.Writer) error {
+	ensuredLabel := false
+	for i := range st.Issues {
+		is := &st.Issues[i]
+		if is.Number != 0 {
+			continue
+		}
+		if !ensuredLabel {
+			if _, err := r.GH.EnsureLabel(ctx, autoLabel); err != nil {
+				return err
+			}
+			ensuredLabel = true
+		}
+		p := plannedIssue{Title: is.Title, Scope: is.Scope, Acceptance: is.Acceptance}
+		body := r.Redact.Redact(autoIssueBody(p, st.Sentence, i+1, len(st.Issues)))
+		created, err := r.GH.CreateIssue(ctx, is.Title, body, []string{labelReady, labelAuto})
+		if err != nil {
+			return fmt.Errorf("creating issue %d (%s): %w", i+1, is.Title, err)
+		}
+		is.Number, is.URL = created.Number, created.HTMLURL
+		if err := saveAutoState(path, st); err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "#%d %s\n", is.Number, is.URL)
+	}
+	return nil
 }
 
 // autoWork processes st's issues in order, saving st to path after each.
@@ -506,6 +544,9 @@ func (r *Runner) Auto(ctx context.Context, sentence string, o autoOptions, appro
 		if saved == nil {
 			return fmt.Errorf("no amf auto run to continue (%s doesn't exist)", shownPath(r.Root, path))
 		}
+		if saved.Repo != r.Repo {
+			return fmt.Errorf("cannot continue amf auto: state's repo %q differs from GITHUB_REPO %q", saved.Repo, r.Repo)
+		}
 		r.Merge = saved.Merge
 		if saved.merged() > 0 && !saved.Approved {
 			saved.Approved = true
@@ -516,6 +557,9 @@ func (r *Runner) Auto(ctx context.Context, sentence string, o autoOptions, appro
 		}
 		r.event(slog.LevelInfo, "auto.resume", 0, fmt.Sprintf("resuming amf auto: %q, %s", saved.Sentence, remainingLine(saved)),
 			"sentence", saved.Sentence, "remaining", len(saved.remaining()))
+		if err := r.autoCreateIssues(ctx, saved, path, stdout); err != nil {
+			return err
+		}
 		return r.autoWork(ctx, saved, path, approve, stdout)
 	}
 	if saved != nil && !o.DryRun {
@@ -534,26 +578,19 @@ func (r *Runner) Auto(ctx context.Context, sentence string, o autoOptions, appro
 		}
 		return nil
 	}
-	if _, err := r.GH.EnsureLabel(ctx, autoLabel); err != nil {
-		return err
-	}
-	st := &autoState{Sentence: sentence, Repo: r.Repo, Merge: r.Merge, Created: time.Now().UTC()}
-	var numbers []int
-	for i, p := range issues {
-		body := r.Redact.Redact(autoIssueBody(p, sentence, i+1, len(issues)))
-		is, err := r.GH.CreateIssue(ctx, p.Title, body, []string{labelReady, labelAuto})
-		if err != nil {
-			if len(st.Issues) > 0 {
-				saveAutoState(path, st)
-			}
-			return fmt.Errorf("creating issue %d (%s): %w", i+1, p.Title, err)
-		}
-		st.Issues = append(st.Issues, autoIssue{Number: is.Number, Title: p.Title, URL: is.HTMLURL, Status: "pending"})
-		numbers = append(numbers, is.Number)
-		fmt.Fprintf(stdout, "#%d %s\n", is.Number, is.HTMLURL)
+	st := &autoState{Version: autoStateVersion, Sentence: sentence, Repo: r.Repo, Merge: r.Merge, Created: time.Now().UTC()}
+	for _, p := range issues {
+		st.Issues = append(st.Issues, autoIssue{Title: p.Title, Scope: p.Scope, Acceptance: p.Acceptance, Status: "pending"})
 	}
 	if err := saveAutoState(path, st); err != nil {
 		return err
+	}
+	if err := r.autoCreateIssues(ctx, st, path, stdout); err != nil {
+		return err
+	}
+	var numbers []int
+	for _, is := range st.Issues {
+		numbers = append(numbers, is.Number)
 	}
 	r.event(slog.LevelInfo, "auto.plan", 0, fmt.Sprintf("planned %d %s with %s: %v", len(numbers), plural(len(numbers), "issue", "issues"), r.lastAgent, numbers),
 		"action", "created", "issues", numbers, "agent", r.lastAgent, "sentence", sentence, "merge", r.Merge)

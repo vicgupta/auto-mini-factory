@@ -33,6 +33,140 @@ import (
 	"unicode/utf8"
 )
 
+func TestAutoCrashAfterFirstCreate(t *testing.T) {
+	r, gh, log := newAutoRunner(t, autoClaude)
+	ctx := context.Background()
+	func() {
+		defer func() {
+			if got := recover(); got != "crash after creation" {
+				t.Fatalf("panic = %v, want simulated crash", got)
+			}
+		}()
+		// Printing the first created issue simulates a crash before the next
+		// creation, without letting Auto's error handling save the state.
+		r.Auto(ctx, "do three things", autoOptions{MaxIssues: 5, Merge: "squash"}, nil, writerFunc(func([]byte) (int, error) {
+			panic("crash after creation")
+		}))
+		t.Fatal("Auto returned without printing a created issue")
+	}()
+	path := autoStatePath(r.Root)
+	st, err := loadAutoState(path)
+	if err != nil {
+		t.Fatalf("state after crash: %v", err)
+	}
+	if len(gh.issues) != 1 || len(st.Issues) != 3 || st.Issues[0].Number != 1 || st.Issues[0].URL != gh.issues[1].HTMLURL || st.Issues[1].Number != 0 || st.Issues[2].Number != 0 {
+		t.Fatalf("state after crash = %+v, created %d issues", st, len(gh.issues))
+	}
+	want := []plannedIssue{
+		{Title: "One", Scope: "s1", Acceptance: []string{"c1"}},
+		{Title: "Two", Scope: "s2", Acceptance: []string{"c2"}},
+		{Title: "Three", Scope: "s3", Acceptance: []string{"c3"}},
+	}
+	if st.Version != autoStateVersion {
+		t.Fatalf("state version = %d, want %d", st.Version, autoStateVersion)
+	}
+	for i, p := range want {
+		is := st.Issues[i]
+		if is.Title != p.Title || is.Scope != p.Scope || !slices.Equal(is.Acceptance, p.Acceptance) {
+			t.Errorf("saved issue %d = %+v, want full plan %+v", i+1, is, p)
+		}
+	}
+	noTTY := func(string) (bool, bool) { return false, false }
+	var out bytes.Buffer
+	if err := r.Auto(ctx, "", autoOptions{Continue: true}, noTTY, &out); err != nil {
+		t.Fatalf("continue: %v\nlog:\n%s", err, log)
+	}
+	if len(gh.issues) != 3 || merges(gh) != 1 {
+		t.Fatalf("created %d issues, merged %d; want 3 and 1", len(gh.issues), merges(gh))
+	}
+	for i, p := range want {
+		is := gh.issues[i+1]
+		if is.Title != p.Title || is.Body != autoIssueBody(p, "do three things", i+1, len(want)) {
+			t.Errorf("issue %d = %+v, want original plan and ordering", i+1, is)
+		}
+	}
+	if err := r.Auto(ctx, "", autoOptions{Continue: true}, noTTY, &out); err != nil {
+		t.Fatalf("continue after checkpoint: %v\nlog:\n%s", err, log)
+	}
+	if len(gh.issues) != 3 || merges(gh) != 3 {
+		t.Fatalf("created %d issues, merged %d; want 3 each", len(gh.issues), merges(gh))
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("state left behind: %v", err)
+	}
+}
+
+func TestAutoResumesAfterCreationError(t *testing.T) {
+	for _, failAt := range []int{1, 2} {
+		t.Run(fmt.Sprintf("issue%d", failAt), func(t *testing.T) {
+			root, _ := setupRepo(t)
+			gh, srv := newFakeGitHub(t)
+			var creates atomic.Int32
+			flaky := failingGitHub(t, srv, func(r *http.Request) bool {
+				return r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/issues") && int(creates.Add(1)) == failAt
+			})
+			r, log := newTestRunner(t, flaky, root, fakeClaude(t, autoClaude))
+			var out bytes.Buffer
+			err := r.Auto(context.Background(), "do three things", autoOptions{MaxIssues: 5, Merge: "merge"}, nil, &out)
+			if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("creating issue %d", failAt)) {
+				t.Fatalf("creation error = %v", err)
+			}
+			st, err := loadAutoState(autoStatePath(root))
+			if err != nil || len(st.Issues) != 3 || len(gh.issues) != failAt-1 || len(gh.prs) != 0 {
+				t.Fatalf("state = %+v, error %v; created %d issues, %d PRs", st, err, len(gh.issues), len(gh.prs))
+			}
+			for i, is := range st.Issues {
+				wantNumber := 0
+				if i < failAt-1 {
+					wantNumber = i + 1
+				}
+				if is.Number != wantNumber {
+					t.Errorf("saved issue %d number = %d, want %d", i+1, is.Number, wantNumber)
+				}
+			}
+			noTTY := func(string) (bool, bool) { return false, false }
+			if err := r.Auto(context.Background(), "", autoOptions{Continue: true}, noTTY, &out); err != nil {
+				t.Fatalf("continue: %v\nlog:\n%s", err, log)
+			}
+			if len(gh.issues) != 3 || merges(gh) != 1 {
+				t.Fatalf("created %d issues, merged %d; want 3 and 1", len(gh.issues), merges(gh))
+			}
+		})
+	}
+}
+
+func TestAutoContinueRejectsRepoMismatch(t *testing.T) {
+	r, gh, _ := newAutoRunner(t, autoClaude)
+	path := autoStatePath(r.Root)
+	if err := saveAutoState(path, &autoState{Version: autoStateVersion, Repo: "other/repo", Merge: "squash"}); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = r.Auto(context.Background(), "", autoOptions{Continue: true}, nil, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "other/repo") || !strings.Contains(err.Error(), "GITHUB_REPO") || !strings.Contains(err.Error(), r.Repo) {
+		t.Fatalf("repo mismatch error = %v", err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(after, b) || len(gh.writes) != 0 {
+		t.Fatalf("mismatch changed state or GitHub: state error %v, writes %v", err, gh.writes)
+	}
+}
+
+func TestLoadAutoStateRejectsUnknownVersion(t *testing.T) {
+	for _, state := range []string{`{"version":99}`, `{"version":0}`, `{}`} {
+		path := filepath.Join(t.TempDir(), "state.json")
+		if err := os.WriteFile(path, []byte(state), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := loadAutoState(path); err == nil || !strings.Contains(err.Error(), "version") {
+			t.Errorf("loadAutoState(%s) error = %v, want unsupported version", state, err)
+		}
+	}
+}
+
 // shResult defines result(), which prints a successful stream-json result
 // message. Its argument must not contain quotes; \n is a newline.
 const shResult = `result() { printf '{"type":"result","subtype":"success","is_error":false,"result":"%s"}\n' "$1"; }

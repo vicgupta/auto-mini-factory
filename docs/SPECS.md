@@ -212,6 +212,33 @@ stderr. SIGINT and
 SIGTERM cancel the current step, with the run's process group killed as on
 expiry; the issue is still marked failed.
 
+### `amf auto`
+
+`amf auto "<sentence>"` plans a few issues, creates them labeled `amf:ready`
+and `amf:auto`, and processes them in order, merging each PR. Before processing
+any remaining issues after the first merge, it stops for approval; without
+terminal approval, `amf auto --continue` approves the checkpoint and resumes.
+`--dry-run` prints the plan without creating issues or saving a new run.
+
+Before creating any issue, amf saves the full plan to `.amf/auto/state.json`:
+schema `version` (currently 1), sentence, repository, merge method, creation
+time, approval status, and every planned issue's title, scope, acceptance
+criteria and progress. An issue's `number` is 0 and its URL is empty until it
+is created. After each successful creation, amf saves its assigned number and
+URL before printing them or creating the next issue. Writes use a temporary
+file and rename it over the state file.
+
+`amf auto --continue` creates only the saved issues whose number is still 0,
+using their original scope, criteria and position in the plan, then resumes
+processing. A creation error stops the run with the full plan saved for retry.
+Loading an unsupported state version (including an old file without a
+version) fails with `unsupported amf auto state version`. Continuing a run
+whose saved repository differs from `GITHUB_REPO` fails with a message naming
+both repositories, before changing the state or creating or processing issues.
+An unfinished run blocks a new run unless `--dry-run` is set; remove
+`.amf/auto/state.json` to abandon it and start over. The state file is removed
+after all issues merge.
+
 ### Pull requests
 
 `amf pr list` reads `.env` like `amf issue list`, checks that GitHub can access
@@ -845,6 +872,7 @@ redirect to a URL ending in the tag, and serve the archive and
 | Path | Contents |
 |---|---|
 | `.env`, `.env.NNNN` | Configuration and its backups (permissions 0600, git-excluded) |
+| `.amf/auto/state.json` | Versioned full `amf auto` plan and progress, saved before creation and after each created or processed issue |
 | `.amf/worktrees/issue-N/` | Working copy for an issue in progress or failed |
 | `.amf/logs/issue-N.log` | The agent's output for the latest run of issue N, without a pipeline (stream-json for Claude) |
 | `.amf/logs/issue-N-<agent>.log` | The secondary agent's output, when amf fell back to it |
