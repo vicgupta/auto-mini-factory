@@ -247,6 +247,7 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
 		defer f.mu.Unlock()
 		n := len(f.issues) + 1
 		is := &Issue{Number: n, Title: in.Title, Body: in.Body, State: "open", HTMLURL: fmt.Sprintf("https://github.com/vic/demo/issues/%d", n)}
+		is.User.Login = "vic"
 		for _, l := range in.Labels {
 			is.Labels = append(is.Labels, Label{Name: l})
 		}
