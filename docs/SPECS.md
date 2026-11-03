@@ -247,10 +247,36 @@ Loading an unsupported state version (including an old file without a
 version) fails with `unsupported amf auto state version`. Continuing a run
 whose saved repository differs from `GITHUB_REPO` fails with a message naming
 both repositories, before changing the state or creating or processing issues.
-An unfinished run blocks a new run unless `--dry-run` is set; remove
-`.amf/auto/state.json` to abandon it and start over. Add `amf:ready` to any
-remaining issues to recover them for processing by `amf watch`. The state
-file is removed after all issues merge.
+An unfinished run blocks a new run unless `--dry-run` is set; the error
+directs users to `amf auto --continue` to resume or `amf auto --abort` to
+start over. Add `amf:ready` to any remaining issues to recover them for
+processing by `amf watch`. The state file is removed after all issues merge.
+
+`amf auto status` reads the saved state and prints its sentence, merge method,
+and each planned issue's number (or `not created`), title, status, PR URL and
+commit. PR and commit fields are empty when not yet recorded. This is a
+snapshot: it does not reconcile with GitHub, change state, run agents or
+create logs. With no state file it prints `No amf auto run saved.` and exits 0.
+Malformed or unsupported state is an error.
+
+`amf auto --abort` removes the state file, including corrupt or unsupported
+state, so a new sentence can start. It prints
+`Aborted amf auto run; saved state removed.` and leaves GitHub issues and PRs
+unchanged. With `--close-issues`, it first loads the saved plan and closes
+each numbered issue whose saved status is not `merged` using
+`PATCH /repos/{repo}/issues/{number}` with `state=closed`. It skips uncreated
+and merged issues, requires configured GitHub credentials, and rejects a
+saved repository different from `GITHUB_REPO` before changing issues. Any
+close failure keeps the state unchanged for retry; issues already closed
+before a failure stay closed. State is removed only after all closes succeed.
+With no state file, either abort form prints the same no-run message and exits
+0. Abort does not stop an active auto process; stop it before aborting.
+
+Status and abort take no sentence or execution flags, and `--close-issues`
+requires `--abort`. Inside a checkout, status and plain abort need no
+configuration or GitHub access. Outside a checkout, they read configuration
+as usual and locate state under `./<repo name>/.amf/auto/state.json`; neither
+command clones a repository or creates logs.
 
 ### Pull requests
 

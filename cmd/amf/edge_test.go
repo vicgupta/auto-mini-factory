@@ -33,6 +33,143 @@ import (
 	"unicode/utf8"
 )
 
+func TestAutoAbortCloseIssues(t *testing.T) {
+	for _, scenario := range []string{"success", "close fails", "wrong repo"} {
+		t.Run(scenario, func(t *testing.T) {
+			root, _ := setupRepo(t)
+			t.Chdir(root)
+			gh, srv := newFakeGitHub(t)
+			apiURL := srv.URL
+			if scenario == "close fails" {
+				flaky := failingGitHub(t, srv, func(r *http.Request) bool {
+					return r.Method == "PATCH" && strings.HasSuffix(r.URL.Path, "/issues/3")
+				})
+				apiURL = flaky.URL
+			}
+			t.Setenv("GITHUB_TOKEN", "test-token")
+			t.Setenv("GITHUB_REPO", "vic/demo")
+			t.Setenv("AMF_API_URL", apiURL)
+			gh.issues[1] = &Issue{Number: 1, State: "closed"}
+			gh.issues[2] = &Issue{Number: 2, State: "open"}
+			gh.issues[3] = &Issue{Number: 3, State: "open"}
+			st := &autoState{Version: autoStateVersion, Repo: "vic/demo", Issues: []autoIssue{
+				{Number: 1, Status: "merged"},
+				{Number: 2, Status: "failed"},
+				{Number: 3, Status: "pending"},
+				{Status: "pending"}, // Not yet created: no issue #0 to close.
+			}}
+			if scenario == "wrong repo" {
+				st.Repo = "other/repo"
+			}
+			path := autoStatePath(root)
+			if err := saveAutoState(path, st); err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var out bytes.Buffer
+			err = cmdAuto(context.Background(), []string{"--abort", "--close-issues"}, nil, &out, &bytes.Buffer{})
+			if scenario != "success" {
+				want := "differs from GITHUB_REPO"
+				if scenario == "close fails" {
+					want = "closing issue #3"
+				}
+				if err == nil || !strings.Contains(err.Error(), want) {
+					t.Fatalf("error = %v, want %q", err, want)
+				}
+				after, err := os.ReadFile(path)
+				if err != nil || !bytes.Equal(before, after) {
+					t.Fatalf("failed abort changed state: %v", err)
+				}
+				if scenario == "wrong repo" {
+					if len(gh.writes) != 0 {
+						t.Fatalf("wrong repo changed GitHub: %v", gh.writes)
+					}
+					return
+				}
+				// Retry after a partial failure must tolerate issue #2 already closed.
+				t.Setenv("AMF_API_URL", srv.URL)
+				if err := cmdAuto(context.Background(), []string{"--abort", "--close-issues"}, nil, &out, &bytes.Buffer{}); err != nil {
+					t.Fatal(err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(path); !os.IsNotExist(err) {
+				t.Fatalf("state left after abort: %v", err)
+			}
+			for _, n := range []int{2, 3} {
+				if gh.issues[n].State != "closed" {
+					t.Errorf("issue #%d left open", n)
+				}
+			}
+			for _, write := range gh.writes {
+				if strings.HasSuffix(write, "/issues/1") {
+					t.Error("abort changed merged issue")
+				}
+			}
+		})
+	}
+}
+
+func TestAutoStateInvalidOrAbsent(t *testing.T) {
+	root, _ := setupRepo(t)
+	t.Chdir(root)
+	t.Setenv("GITHUB_TOKEN", "")
+	path := autoStatePath(root)
+	for _, data := range []string{"not json", `{"version":999}`} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		for _, args := range [][]string{{"status"}, {"--abort", "--close-issues"}} {
+			if err := cmdAuto(context.Background(), args, nil, &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
+				t.Fatalf("%v accepted invalid state %q", args, data)
+			}
+		}
+		if err := cmdAuto(context.Background(), []string{"--abort"}, nil, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+			t.Fatalf("plain abort of invalid state: %v", err)
+		}
+	}
+	for _, args := range [][]string{{"--abort"}, {"--abort", "--close-issues"}} {
+		var out bytes.Buffer
+		if err := cmdAuto(context.Background(), args, nil, &out, &bytes.Buffer{}); err != nil || !strings.Contains(out.String(), "No amf auto run") {
+			t.Fatalf("%v with no run: %v, output: %s", args, err, &out)
+		}
+	}
+}
+
+func TestAutoStateOutsideCheckout(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	t.Setenv("GITHUB_REPO", "vic/demo")
+	var out bytes.Buffer
+	if err := cmdAuto(context.Background(), []string{"status"}, nil, &out, &bytes.Buffer{}); err != nil || !strings.Contains(out.String(), "No amf auto run") {
+		t.Fatalf("status without clone: %v, output: %s", err, &out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "demo")); !os.IsNotExist(err) {
+		t.Fatalf("status created a clone: %v", err)
+	}
+	path := autoStatePath(filepath.Join(dir, "demo"))
+	if err := saveAutoState(path, &autoState{Version: autoStateVersion, Sentence: "saved outside", Merge: "rebase"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmdAuto(context.Background(), []string{"status"}, nil, &out, &bytes.Buffer{}); err != nil || !strings.Contains(out.String(), "saved outside") {
+		t.Fatalf("status: %v, output: %s", err, &out)
+	}
+	if err := cmdAuto(context.Background(), []string{"--abort"}, nil, &out, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("state left after abort: %v", err)
+	}
+}
+
 func TestAutoCrashAfterFirstCreate(t *testing.T) {
 	r, gh, log := newAutoRunner(t, autoClaude)
 	ctx := context.Background()

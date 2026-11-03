@@ -42,6 +42,9 @@ amf run 42 --dry-run        # make the change locally and show the PR, touching 
 amf auto "Add a dark mode toggle to the settings page"
 amf auto --dry-run "..."    # print the plan, create nothing
 amf auto --continue         # approve the checkpoint and resume
+amf auto status             # inspect saved progress without doing work
+amf auto --abort            # forget the run, leaving GitHub issues unchanged
+amf auto --abort --close-issues  # close unmerged issues, then forget the run
 ```
 
 `amf auto` asks the agent to plan the sentence into at most `--max-issues`
@@ -59,9 +62,27 @@ no, the rest stay open and labeled. Without a terminal it saves its state to
 runs the rest. If the first merge fails, auto stops. A failed later issue
 stops the run too; `--continue` retries it. While state exists, a new
 `amf auto` is refused. The remaining issues stay labeled `amf:auto` only,
-so the default `amf watch` does not pick them up while auto waits. To abandon
-the run, remove `.amf/auto/state.json`; add `amf:ready` to any remaining
-issues to let watch process them. Events are logged as `auto.plan`,
+so the default `amf watch` does not pick them up while auto waits.
+
+`amf auto status` prints the saved sentence, merge method and every planned
+issue's title, status, PR URL and commit, marking issues not yet created.
+It reads local state without contacting GitHub, running agents or creating
+logs. With no saved run it prints `No amf auto run saved.` and exits 0.
+
+To abandon a run, stop any active auto process, then run `amf auto --abort`.
+It removes `.amf/auto/state.json`, allowing a new sentence to start cleanly,
+and leaves GitHub issues unchanged. Add `--close-issues` to first close the
+created, unmerged issues in the saved plan. If any close fails, state stays
+in place; retry the same command after fixing the cause. Already merged
+issues and planned issues not yet created are skipped. `--close-issues`
+requires `--abort`; status and abort cannot be combined with execution flags
+or a sentence. Neither command creates a checkout: outside a checkout they
+read configuration to find state under `./<repo name>/.amf/auto/state.json`.
+Plain abort also removes corrupt or unsupported state; with no saved run,
+abort prints the same no-run message and exits 0.
+
+Add `amf:ready` to any remaining open issues to let watch process them.
+Events are logged as `auto.plan`,
 `auto.checkpoint`, `auto.approved`, `auto.declined`, `auto.resume`,
 `auto.stopped` and `auto.done`.
 
