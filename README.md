@@ -12,14 +12,14 @@ running a platform.
 | `amf init` | write `.env` and create amf's labels |
 | `amf issue` | manage issues: `create`, `list`, `run`, `watch` |
 | `amf pr` | manage pull requests: `list`, `merge`, `view`, `diff`, `close`, `reopen`, `ready`, `draft` |
-| `amf run N` | process one issue into a PR (alias of `issue run`) |
+| `amf run` | process one issue into a PR (alias of `issue run`) |
 | `amf watch` | process `amf:ready` issues as they arrive (alias of `issue watch`) |
-| `amf auto` | plan one sentence into up to 5 issues and merge their PRs, pausing for approval after the first merge by default |
-| `amf pipeline` | check the plan/code/eval pipeline in `AGENTS.md` |
+| `amf auto` | plan one sentence into up to 5 issues and merge their PRs, pausing after the first by default |
+| `amf pipeline` | check the plan/code/eval pipeline in this checkout's `AGENTS.md` |
 | `amf doctor` | check the setup here, changing nothing |
 | `amf update` | replace this amf binary with the latest (or given) release |
 | `amf version` | print amf's version |
-| `amf help` | show help for a command, or the `agents` and `env` topics |
+| `amf help` | show help for a command or topic |
 
 `amf help <command>` or `amf <command> -h` prints a command's details, and
 [docs/COMMANDS.md](docs/COMMANDS.md) has the full reference.
@@ -87,7 +87,7 @@ of the running one. It needs write access to the folder `amf` is in.
 ## Configure
 
 In a clone of the repo you want amf to work on, run `amf init`. It writes
-`.env` with every setting amf uses (listed in
+`.env` with the common settings (listed in
 [Configuration (.env)](#configuration-env)) and creates amf's labels.
 
 - **Backups:** if `.env` already exists, `amf init` first copies it to the next
@@ -108,9 +108,9 @@ Keep `.env` out of git: add it to the target repo's `.gitignore`.
 
 ### Configuration (.env)
 
-Every setting amf reads, from `.env` or the environment (`amf help env`
+Every configuration setting amf reads from `.env` or the environment (`amf help env`
 prints the same list). Real environment variables win over the file, and
-placeholders ending in `...` count as unset.
+placeholders ending in `...`, and `owner/name`, count as unset.
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -119,21 +119,21 @@ placeholders ending in `...` count as unset.
 | `CLAUDE_CODE_OAUTH_TOKEN` | unset | Claude subscription token, passed to Claude. Makes `claude` usable without `--agent` |
 | `ANTHROPIC_API_KEY` | unset | Claude API key, passed to Claude when there's no `CLAUDE_CODE_OAUTH_TOKEN`. Makes `claude` usable without `--agent` |
 | `OPENAI_API_KEY` | unset | OpenAI API key, passed to Codex. Makes `codex` usable without `--agent` |
-| `OPENCODE_API_KEY` | unset | OpenCode Console API key (`oc_sk_...`), passed to opencode only. One key covers pay-as-you-go `opencode/<id>` models (with credits) and, for a workspace subscribed to OpenCode Go, `opencode-go/<id>` models. Makes `opencode` usable without `--agent` with a paid `OPENCODE_MODEL`. Never written to a file |
+| `OPENCODE_API_KEY` | unset | OpenCode Console API key (`oc_sk_...`), passed to opencode only. One key covers pay-as-you-go `opencode/<id>` models (with credits) and, for a workspace subscribed to OpenCode Go, `opencode-go/<id>` models. Makes `opencode` usable without `--agent` with a paid `OPENCODE_MODEL`. Passed through the environment, never written to an agent configuration file; `amf init` preserves it in `.env` |
 | `OPENCODE_MODEL` | `opencode/big-pickle` | The model opencode runs with: always without a pipeline, and for pipeline stages that name no model. `opencode/<id>` is a free or pay-as-you-go model, `opencode-go/<id>` an OpenCode Go one. `opencode models` lists the choices |
-| `AMF_TRUSTED` | unset | GitHub logins, separated by commas or spaces (a leading `@` is allowed, case is ignored). When set, amf only works on issues they opened. Unset means anyone's |
-| `AMF_POSTGRES_URL` | unset | A PostgreSQL server that `run` and `watch` also write their logs to. See [Logging to PostgreSQL](docs/COMMANDS.md#logs-in-postgresql) |
+| `AMF_TRUSTED` | unset | GitHub logins, separated by commas or spaces (a leading `@` is allowed, case is ignored). When set, amf only works on issues they opened, except issues labeled `amf:auto`, which are always trusted. Unset means anyone's |
+| `AMF_POSTGRES_URL` | unset | A PostgreSQL server that `run` and `watch` also write their logs to, in the `amflogs` database |
 | `AMF_CLAUDE` | `claude` | Path to the Claude CLI |
 | `AMF_PRIMARY_AGENT` | `codex` | The agent for issues without a pipeline: `claudecode` (or `claude`), `codex` or `opencode`, ignoring case. `--agent` and a pipeline override it |
 | `AMF_SECONDARY_AGENT` | `claudecode` | The agent amf falls back to when the primary fails, in a fresh worktree; the same values, or `none` for no fallback |
-| `AMF_AGENT_TIMEOUT` | `60m` | How long each agent run may take, as a Go duration; `--agent-timeout` (or its alias `--timeout`) overrides it. Must be at least 1m and at most 24h |
+| `AMF_AGENT_TIMEOUT` | `60m` | How long each agent run may take, as a Go duration; `--agent-timeout` (or its deprecated alias `--timeout`) overrides it. Must be at least 1m and at most 24h |
 | `AMF_LOG_LEVEL` | `info` (terminal), `debug` (event log) | `debug`, `info`, `warn` or `error`, for both the terminal and the event log of `run` and `watch`; `--log-level` overrides it |
 | `AMF_CODEX` | `codex` | Path to the Codex CLI |
 | `AMF_OPENCODE` | `opencode` | Path to the opencode CLI |
 | `AMF_API_URL` | `https://api.github.com` | GitHub API base URL. `amf pr ready` and `amf pr draft` derive their GraphQL endpoint from it: `…/graphql` appended, or a GitHub Enterprise Server `…/api/v3` becomes `…/api/graphql` |
-| `AMF_CLONE_URL` | `https://github.com/<repo>.git` | Where to clone the repo from |
+| `AMF_CLONE_URL` | `https://github.com/<repo>.git` | Where to clone `GITHUB_REPO` from |
 
-`amf init` writes them like this, the optional ones commented out:
+`amf init` writes the common settings like this, the optional ones commented out:
 
 ```sh
 GITHUB_TOKEN=github_pat_...   # Contents, Issues, Pull requests: read & write

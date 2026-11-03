@@ -8,6 +8,44 @@ prints the same in the terminal. Every setting is in
 For complete command sequences, see the [examples cookbook](EXAMPLES.md).
 For common failures and fixes, see the [troubleshooting guide](TROUBLESHOOTING.md).
 
+## Commands
+
+| Command | What it does |
+|---|---|
+| `amf init` | write `.env` and create amf's labels |
+| `amf issue` | manage issues: `create`, `list`, `run`, `watch` |
+| `amf pr` | manage pull requests: `list`, `merge`, `view`, `diff`, `close`, `reopen`, `ready`, `draft` |
+| `amf run` | process one issue into a PR (alias of `issue run`) |
+| `amf watch` | process `amf:ready` issues as they arrive (alias of `issue watch`) |
+| `amf auto` | plan one sentence into up to 5 issues and merge their PRs, pausing after the first by default |
+| `amf pipeline` | check the plan/code/eval pipeline in this checkout's `AGENTS.md` |
+| `amf doctor` | check the setup here, changing nothing |
+| `amf update` | replace this amf binary with the latest (or given) release |
+| `amf version` | print amf's version |
+| `amf help` | show help for a command or topic |
+
+## issue commands
+
+| Command | What it does |
+|---|---|
+| `amf issue create "Title" [-b body \| -f file.md] [--label L] [--no-label]` | create an issue (body may also come from stdin) |
+| `amf issue list [--state open\|closed\|all] [--label L] [--search TEXT] [--limit N]` | list issues, newest first, with their amf labels (also takes --json) |
+| `amf issue run <N> [--agent A] [--agent-timeout 60m]` | process one issue into a PR (also takes --draft, --dry-run, --merge, --eval-rounds, --log-level, --log-file) |
+| `amf issue watch [--agent A] [--interval 60s] [--label amf:ready]` | process amf:ready issues as they arrive (also takes --exclude-label, --draft, --merge, --agent-timeout, --eval-rounds, --log-level, --log-file) |
+
+## pr commands
+
+| Command | What it does |
+|---|---|
+| `amf pr list [--state open\|closed\|merged\|all] [--limit N] [--issue N] [--json]` | list pull requests, newest first |
+| `amf pr merge <N> [--squash \| --rebase] [--delete-branch]` | merge a pull request |
+| `amf pr view <N> [--json]` | show a pull request |
+| `amf pr diff <N> [--name-only]` | show a pull request's diff, or one changed path per line |
+| `amf pr close <N> [--comment text] [--delete-branch]` | close a pull request |
+| `amf pr reopen <N>` | reopen a pull request |
+| `amf pr ready <N>` | mark a draft pull request ready for review |
+| `amf pr draft <N>` | convert a pull request to a draft |
+
 ## Run and watch
 
 Run `run` and `watch` inside a clone of `GITHUB_REPO`, or from any folder that
@@ -29,7 +67,7 @@ amf issue list --json --label amf:failed | jq -r '.[].url'  # as JSON: number, t
 
 amf run 42                  # process one issue now
 amf watch --interval 60s    # process issues labeled `amf:ready`, one at a time
-amf watch --agent codex     # ...with Codex, even if Claude Code is installed
+amf watch --agent codex     # ...with Codex only, no fallback
 amf watch --exclude-label blocked --exclude-label needs-human  # ...leaving issues with either label alone until it's removed
 amf run 42 --draft          # open the PR as a draft
 amf watch --draft           # ...opening each new PR as a draft

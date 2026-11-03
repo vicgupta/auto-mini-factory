@@ -20,7 +20,7 @@ Commands:
   pr         manage pull requests: list, merge, view, diff, close, reopen, ready, draft
   run        process one issue into a PR (alias of issue run)
   watch      process amf:ready issues as they arrive (alias of issue watch)
-  auto       plan one sentence into issues and merge their PRs, pausing after the first
+  auto       plan one sentence into up to 5 issues and merge their PRs, pausing after the first by default
   pipeline   check the plan/code/eval pipeline in this checkout's AGENTS.md
   doctor     check the setup here, changing nothing
   update     replace this amf binary with the latest (or given) release
@@ -133,28 +133,62 @@ A pipeline in AGENTS.md names each stage's agent, and wins over --agent and
 both settings: see amf help pipeline. amf help env lists the settings.
 `
 
-const envHelp = `Configuration is read from .env (or the environment):
-  GITHUB_TOKEN   token with contents, issues and pull-requests write access
-  GITHUB_REPO    owner/name
-  CLAUDE_CODE_OAUTH_TOKEN  optional subscription token for Claude Code (claude setup-token)
-  ANTHROPIC_API_KEY        optional Claude API key; with it or the token above, claude is usable
-  OPENAI_API_KEY           optional OpenAI API key; with it, codex is usable
-  OPENCODE_API_KEY         optional OpenCode Console API key, for paid opencode/ and Go opencode-go/ models
-  OPENCODE_MODEL           model for opencode (default opencode/big-pickle); see opencode models
-  AMF_PRIMARY_AGENT        agent for issues without a pipeline: claudecode, codex or opencode (default codex)
-  AMF_SECONDARY_AGENT      agent amf falls back to if the primary fails, or none (default claudecode)
-  AMF_AGENT_TIMEOUT        how long each agent run may take, a Go duration (default 60m);
-                           --agent-timeout, or its deprecated alias --timeout, overrides it
-  AMF_LOG_LEVEL            debug, info, warn or error (default info, and debug in .amf/runs/); --log-level overrides it
-  AMF_POSTGRES_URL         optional postgres:// URL; run and watch also log to its amflogs database
-  AMF_CLAUDE     path to the claude binary (default "claude")
-  AMF_CODEX      path to the codex binary (default "codex")
-  AMF_OPENCODE   path to the opencode binary (default "opencode")
-  AMF_TRUSTED    optional GitHub logins, comma-separated; amf only works on their issues
-  AMF_API_URL    GitHub API base URL (default https://api.github.com)
-  AMF_CLONE_URL  URL to clone GITHUB_REPO from (default https://github.com/GITHUB_REPO.git)
+const envHelp = `Configuration is read from .env (or the environment; environment variables win).
+Placeholders ending in ..., and owner/name, count as unset.
 
-amf init writes .env with these; amf doctor checks them.
+  GITHUB_TOKEN (default: required)
+    API access: Contents, Issues, Pull requests (read & write)
+  GITHUB_REPO (default: required)
+    owner/name; github.com URLs are accepted
+  CLAUDE_CODE_OAUTH_TOKEN (default: unset)
+    Claude subscription token, passed to Claude. Makes claude usable without --agent
+  ANTHROPIC_API_KEY (default: unset)
+    Claude API key, passed to Claude when there's no CLAUDE_CODE_OAUTH_TOKEN. Makes claude
+    usable without --agent
+  OPENAI_API_KEY (default: unset)
+    OpenAI API key, passed to Codex. Makes codex usable without --agent
+  OPENCODE_API_KEY (default: unset)
+    OpenCode Console API key (oc_sk_...), passed to opencode only. One key covers
+    pay-as-you-go opencode/<id> models (with credits) and, for a workspace subscribed to
+    OpenCode Go, opencode-go/<id> models. Makes opencode usable without --agent with a
+    paid OPENCODE_MODEL. Passed through the environment, never written to an agent
+    configuration file; amf init preserves it in .env
+  OPENCODE_MODEL (default: opencode/big-pickle)
+    The model opencode runs with: always without a pipeline, and for pipeline stages that
+    name no model. opencode/<id> is a free or pay-as-you-go model, opencode-go/<id> an
+    OpenCode Go one. opencode models lists the choices
+  AMF_TRUSTED (default: unset)
+    GitHub logins, separated by commas or spaces (a leading @ is allowed, case is
+    ignored). When set, amf only works on issues they opened, except issues labeled
+    amf:auto, which are always trusted. Unset means anyone's
+  AMF_POSTGRES_URL (default: unset)
+    A PostgreSQL server that run and watch also write their logs to, in the amflogs database
+  AMF_CLAUDE (default: claude)
+    Path to the Claude CLI
+  AMF_PRIMARY_AGENT (default: codex)
+    The agent for issues without a pipeline: claudecode (or claude), codex or opencode,
+    ignoring case. --agent and a pipeline override it
+  AMF_SECONDARY_AGENT (default: claudecode)
+    The agent amf falls back to when the primary fails, in a fresh worktree; the same
+    values, or none for no fallback
+  AMF_AGENT_TIMEOUT (default: 60m)
+    How long each agent run may take, as a Go duration; --agent-timeout (or its deprecated
+    alias --timeout) overrides it. Must be at least 1m and at most 24h
+  AMF_LOG_LEVEL (default: info (terminal), debug (event log))
+    debug, info, warn or error, for both the terminal and the event log of run and watch;
+    --log-level overrides it
+  AMF_CODEX (default: codex)
+    Path to the Codex CLI
+  AMF_OPENCODE (default: opencode)
+    Path to the opencode CLI
+  AMF_API_URL (default: https://api.github.com)
+    GitHub API base URL. amf pr ready and amf pr draft derive their GraphQL endpoint from
+    it: …/graphql appended, or a GitHub Enterprise Server …/api/v3 becomes …/api/graphql
+  AMF_CLONE_URL (default: https://github.com/<repo>.git)
+    Where to clone GITHUB_REPO from
+
+amf init writes the common settings to .env and preserves existing values;
+amf doctor checks the configuration.
 `
 
 // helpTopics maps each amf help <topic> to its text: every command, plus
