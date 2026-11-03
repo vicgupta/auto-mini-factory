@@ -216,6 +216,9 @@ expiry; the issue is still marked failed.
 
 ### `amf auto`
 
+For the step-by-step flow and `auto.*` events, see the
+[`amf auto` walkthrough](AMF-PROCESS.md#from-a-sentence-amf-auto).
+
 `amf auto "<sentence>"` plans a few issues, creates them labeled `amf:auto`
 only, and processes them in order, merging each PR. It adds `amf:ready`
 immediately before running each issue. Auto-owned issues waiting their turn
