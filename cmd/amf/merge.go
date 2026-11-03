@@ -109,6 +109,7 @@ func (r *Runner) tryMerge(ctx context.Context, n int, base string, pr PullReques
 			"action", "retry", "method", r.Merge, "number", pr.Number, "attempt", attempt, "error", err)
 	})
 	if err == nil {
+		r.lastCommit = commit
 		r.event(slog.LevelInfo, "issue.merge", n, fmt.Sprintf("#%d: %s %s", n, mergedVerb[r.Merge], pr.HTMLURL),
 			"action", "merged", "method", r.Merge, "number", pr.Number, "commit", commit, "attempts", attempts)
 	}

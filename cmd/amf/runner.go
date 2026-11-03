@@ -114,6 +114,12 @@ type Runner struct {
 	// summaryPath ("" for none) after each issue and at Close.
 	stats       *statsHandler
 	summaryPath string
+	// lastPR, lastCommit and lastAgent describe the latest Run: the PR it
+	// opened or updated, the merge commit (with --merge) and the agent that
+	// made the change. amf auto reports them at its checkpoint.
+	lastPR     PullRequest
+	lastCommit string
+	lastAgent  string
 }
 
 // Close writes out the event file and sends the logs still queued for
@@ -134,6 +140,7 @@ func (r *Runner) Close() {
 func (r *Runner) Run(ctx context.Context, n int) (err error) {
 	defer r.summarize(false)           // runs last, after the deferred failure handling
 	ctx = withEvents(ctx, r.Events, n) // git, GitHub and skill calls log there
+	r.lastPR, r.lastCommit, r.lastAgent = PullRequest{}, "", ""
 	issue, err := r.GH.GetIssue(ctx, n)
 	if err != nil {
 		return err
@@ -230,6 +237,7 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 		return err
 	}
 
+	r.lastPR = pr
 	// The PR exists, so the issue is done even if GitHub fails from here on.
 	verb := "opened"
 	if updated {
@@ -375,6 +383,7 @@ func (r *Runner) build(ctx context.Context, issue Issue, base string, p *Pipelin
 	if p == nil {
 		return r.buildFallback(ctx, issue, base, plan)
 	}
+	r.lastAgent = "pipeline from AGENTS.md"
 	branch, wt := issueBranch(n), r.worktreePath(n)
 
 	r.event(slog.LevelInfo, "issue.worktree", n, fmt.Sprintf("#%d: creating worktree %s on %s from origin/%s", n, wt, branch, base),
@@ -443,6 +452,7 @@ func (r *Runner) buildFallback(ctx context.Context, issue Issue, base string, pl
 		}
 		summary, err = r.buildOne(ctx, issue, base, agent, log)
 		if err == nil {
+			r.lastAgent = agentName(agent)
 			if len(failed) > 0 {
 				r.fellBack = fmt.Sprintf("%s made the change, after amf fell back from %s.", agentName(agent), strings.Join(failed, ", then "))
 				return summary, "_" + r.fellBack + "_", nil

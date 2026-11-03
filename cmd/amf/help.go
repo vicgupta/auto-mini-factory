@@ -20,6 +20,7 @@ Commands:
   pr         manage pull requests: list, merge, view, diff, close, reopen, ready, draft
   run        process one issue into a PR (alias of issue run)
   watch      process amf:ready issues as they arrive (alias of issue watch)
+  auto       plan one sentence into issues and merge their PRs, pausing after the first
   pipeline   check the plan/code/eval pipeline in this checkout's AGENTS.md
   doctor     check the setup here, changing nothing
   update     replace this amf binary with the latest (or given) release
@@ -155,7 +156,7 @@ amf init writes .env with these; amf doctor checks them.
 // helpTopics maps each amf help <topic> to its text: every command, plus
 // the agents and env topics.
 var helpTopics = map[string]string{
-	"issue": issueUsage, "pr": prUsage, "list": listHelp, "run": runHelp, "watch": watchHelp,
+	"issue": issueUsage, "pr": prUsage, "list": listHelp, "run": runHelp, "watch": watchHelp, "auto": autoHelp,
 	"init": initHelp, "pipeline": pipelineHelp, "doctor": doctorHelp, "update": updateHelp,
 	"version": versionHelp, "help": helpHelp, "agents": agentsHelp, "env": envHelp,
 }

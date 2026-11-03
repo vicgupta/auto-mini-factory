@@ -651,3 +651,19 @@ func (g *GitHub) graphql(ctx context.Context, query string, vars map[string]any,
 	}
 	return json.Unmarshal(resp.Data, out)
 }
+
+// checkRun is one GitHub check run on a commit.
+type checkRun struct {
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion"`
+}
+
+// CheckRuns lists the check runs on a commit (the first 100).
+func (g *GitHub) CheckRuns(ctx context.Context, sha string) ([]checkRun, error) {
+	var out struct {
+		CheckRuns []checkRun `json:"check_runs"`
+	}
+	err := g.do(ctx, "GET", g.repoPath("/commits/%s/check-runs?per_page=100", url.PathEscape(sha)), nil, &out)
+	return out.CheckRuns, err
+}
