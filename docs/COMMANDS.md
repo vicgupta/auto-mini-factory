@@ -32,8 +32,35 @@ amf run 42 --draft          # open the PR as a draft
 amf watch --draft           # ...opening each new PR as a draft
 amf run 42 --merge          # ...and merge its PR with a merge commit
 amf watch --merge=squash    # squash and merge each PR (or --merge=rebase)
+amf auto "Add a dark mode toggle"  # plan issues, merge the first PR, then ask before the rest
 amf run 42 --dry-run        # make the change locally and show the PR, touching nothing on GitHub
 ```
+
+## Auto: one sentence to merged PRs
+
+```sh
+amf auto "Add a dark mode toggle to the settings page"
+amf auto --dry-run "..."    # print the plan, create nothing
+amf auto --continue         # approve the checkpoint and resume
+```
+
+`amf auto` asks the agent to plan the sentence into at most `--max-issues`
+issues (default 5, at most 10), each with a title, scope and acceptance
+criteria. A plan with more issues, or an unusable one, is an error and creates
+nothing. The issues are created labeled `amf:ready` and `amf:auto`, their URLs
+are printed, and they run one at a time like `amf run`, each PR merged
+(`--merge=merge` by default, or `squash` / `rebase`).
+
+After the first merge amf stops at a checkpoint and shows the PR, its merge
+commit, the agent and the checks. On a terminal it asks `Continue? [y/N]`; on
+no, the rest stay open and labeled. Without a terminal it saves its state to
+`.amf/auto/state.json` and exits; `amf auto --continue` is the approval and
+runs the rest. If the first merge fails, auto stops. A failed later issue
+stops the run too; `--continue` retries it. While state exists, a new
+`amf auto` is refused. A running `amf watch` may pick up the remaining
+`amf:ready` issues while auto waits. Events are logged as `auto.plan`,
+`auto.checkpoint`, `auto.approved`, `auto.declined`, `auto.resume`,
+`auto.stopped` and `auto.done`.
 
 ## Choosing the agent
 
