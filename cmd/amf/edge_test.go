@@ -423,6 +423,46 @@ func TestListHelp(t *testing.T) {
 	}
 }
 
+func TestWatchHelp(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("GITHUB_REPO", "")
+	// Loading configuration would fail even before checking credentials.
+	if err := os.Mkdir(".env", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, prefix := range [][]string{{"watch"}, {"issue", "watch"}} {
+		for _, tc := range []struct {
+			args []string
+			want error
+		}{
+			{[]string{"-h"}, nil},
+			{[]string{"--help"}, nil},
+			{[]string{"--unknown"}, errUsage},
+			{[]string{"--interval"}, errUsage},
+			{[]string{"--unknown", "--help"}, errUsage},
+		} {
+			args := append(slices.Clone(prefix), tc.args...)
+			t.Run(strings.Join(args, " "), func(t *testing.T) {
+				var stdout, stderr bytes.Buffer
+				if err := run(context.Background(), args, nil, &stdout, &stderr); !errors.Is(err, tc.want) {
+					t.Fatalf("error = %v, want %v", err, tc.want)
+				}
+				if stdout.Len() != 0 {
+					t.Fatalf("stdout = %q, want empty stdout", stdout.String())
+				}
+				if tc.want == nil {
+					for _, want := range []string{watchHelp, "Usage of watch:", "-interval duration", "-label string"} {
+						if !strings.Contains(stderr.String(), want) {
+							t.Errorf("stderr = %q, want watch help containing %q", stderr.String(), want)
+						}
+					}
+				}
+			})
+		}
+	}
+}
+
 func TestIssueCreateHelp(t *testing.T) {
 	t.Chdir(t.TempDir())
 	t.Setenv("GITHUB_TOKEN", "")
@@ -2434,10 +2474,14 @@ func TestDraftFlag(t *testing.T) {
 }
 
 func TestDraftFlagHelp(t *testing.T) {
-	for _, cmd := range []string{"run", "watch"} {
+	for _, tc := range []struct {
+		cmd  string
+		want error
+	}{{"run", errUsage}, {"watch", nil}} {
+		cmd := tc.cmd
 		var stderr bytes.Buffer
-		if err := run(context.Background(), []string{cmd, "-h"}, nil, io.Discard, &stderr); !errors.Is(err, errUsage) {
-			t.Errorf("amf %s -h: %v", cmd, err)
+		if err := run(context.Background(), []string{cmd, "-h"}, nil, io.Discard, &stderr); !errors.Is(err, tc.want) {
+			t.Errorf("amf %s -h: error = %v, want %v", cmd, err, tc.want)
 		}
 		if !strings.Contains(stderr.String(), "-draft") || !strings.Contains(stderr.String(), "open new pull requests as drafts") {
 			t.Errorf("amf %s -h doesn't describe --draft:\n%s", cmd, stderr.String())

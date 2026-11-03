@@ -252,6 +252,9 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 	lo := addLogFlags(fs)
 	pos, err := parseArgs(fs, args)
 	if err != nil {
+		if err == flag.ErrHelp {
+			return nil
+		}
 		return errUsage
 	}
 	if err := merge.check(pos); err != nil {
