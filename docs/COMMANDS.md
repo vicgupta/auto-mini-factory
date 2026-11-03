@@ -47,18 +47,21 @@ amf auto --continue         # approve the checkpoint and resume
 `amf auto` asks the agent to plan the sentence into at most `--max-issues`
 issues (default 5, at most 10), each with a title, scope and acceptance
 criteria. A plan with more issues, or an unusable one, is an error and creates
-nothing. The issues are created labeled `amf:ready` and `amf:auto`, their URLs
-are printed, and they run one at a time like `amf run`, each PR merged
+nothing. The issues are created labeled `amf:auto` only, their URLs are
+printed, and `amf:ready` is added immediately before each issue runs. They
+run one at a time like `amf run`, each PR merged
 (`--merge=merge` by default, or `squash` / `rebase`).
 
 After the first merge amf stops at a checkpoint and shows the PR, its merge
-commit, the agent and the checks. On a terminal it asks `Continue? [y/N]`; on
+commit, the agent and the checks. On a terminal it asks for approval; on
 no, the rest stay open and labeled. Without a terminal it saves its state to
 `.amf/auto/state.json` and exits; `amf auto --continue` is the approval and
 runs the rest. If the first merge fails, auto stops. A failed later issue
 stops the run too; `--continue` retries it. While state exists, a new
-`amf auto` is refused. A running `amf watch` may pick up the remaining
-`amf:ready` issues while auto waits. Events are logged as `auto.plan`,
+`amf auto` is refused. The remaining issues stay labeled `amf:auto` only,
+so the default `amf watch` does not pick them up while auto waits. To abandon
+the run, remove `.amf/auto/state.json`; add `amf:ready` to any remaining
+issues to let watch process them. Events are logged as `auto.plan`,
 `auto.checkpoint`, `auto.approved`, `auto.declined`, `auto.resume`,
 `auto.stopped` and `auto.done`.
 

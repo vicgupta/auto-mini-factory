@@ -34,9 +34,10 @@ Turns one sentence into a few issues and works through them, merging each PR.
 
 1. Plan: the agent (picked as for amf run: see amf help agents) reads the
    repo and splits the sentence into at most --max-issues issues, each with a
-   title, scope and acceptance criteria. amf creates them labeled amf:ready
-   and amf:auto and prints their URLs.
-2. Build: amf processes the issues in order exactly as amf run --merge does:
+   title, scope and acceptance criteria. amf creates them labeled amf:auto
+   only and prints their URLs.
+2. Build: amf adds amf:ready immediately before processing each issue in
+   order exactly as amf run --merge does:
    branch, agent, PR, merge (a merge commit by default, or --merge=squash or
    --merge=rebase). The safety rules hold: a change under .github/ is never
    pushed, and one that edits AGENTS.md is never merged.
@@ -47,13 +48,15 @@ Turns one sentence into a few issues and works through them, merging each PR.
      - otherwise (or after answering no), amf saves its state in
        .amf/auto/state.json and exits; run amf auto --continue to approve
        and resume.
-   The remaining issues stay labeled amf:ready and amf:auto meanwhile.
+   The remaining issues stay labeled amf:auto only, so amf watch does not
+   pick them up while auto waits.
 
 If an issue fails or its PR can't be merged, amf auto stops there and says
 so; amf auto --continue retries that issue. --dry-run only plans: it prints
 the issues it would create and creates nothing.
 
 Remove .amf/auto/state.json to abandon a run and start another.
+Add amf:ready to any remaining issues to let amf watch process them.
 `
 
 // autoState is what amf auto saves in .amf/auto/state.json, so --continue
@@ -331,7 +334,7 @@ func (r *Runner) autoCreateIssues(ctx context.Context, st *autoState, path strin
 		}
 		p := plannedIssue{Title: is.Title, Scope: is.Scope, Acceptance: is.Acceptance}
 		body := r.Redact.Redact(autoIssueBody(p, st.Sentence, i+1, len(st.Issues)))
-		created, err := r.GH.CreateIssue(ctx, is.Title, body, []string{labelReady, labelAuto})
+		created, err := r.GH.CreateIssue(ctx, is.Title, body, []string{labelAuto})
 		if err != nil {
 			return fmt.Errorf("creating issue %d (%s): %w", i+1, is.Title, err)
 		}
@@ -372,6 +375,9 @@ func (r *Runner) autoWork(ctx context.Context, st *autoState, path string, appro
 			if !r.autoCheckpoint(ctx, st, path, approve, stdout) {
 				return nil
 			}
+		}
+		if err := r.GH.AddLabels(ctx, is.Number, labelReady); err != nil {
+			return fmt.Errorf("marking issue #%d ready: %w", is.Number, err)
 		}
 		is.Status, is.Error = "pending", ""
 		err := r.Run(ctx, is.Number)
@@ -445,8 +451,8 @@ func (r *Runner) autoCheckpoint(ctx context.Context, st *autoState, path string,
 	}
 	if asked {
 		r.event(slog.LevelInfo, "auto.declined", 0, "not approved: stopping", "remaining", len(left))
-		fmt.Fprintf(stdout, "Stopped. The remaining issues stay labeled %s and %s, unprocessed.\n"+
-			"To approve and resume later, run: amf auto --continue\n", labelReady, labelAuto)
+		fmt.Fprintf(stdout, "Stopped. The remaining issues stay labeled %s only, unprocessed.\n"+
+			"To approve and resume later, run: amf auto --continue\n", labelAuto)
 		return false
 	}
 	fmt.Fprintf(stdout, "Waiting for approval (no terminal to ask on). State is saved in %s.\n"+

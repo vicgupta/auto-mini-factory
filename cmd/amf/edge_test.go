@@ -57,6 +57,9 @@ func TestAutoCrashAfterFirstCreate(t *testing.T) {
 	if len(gh.issues) != 1 || len(st.Issues) != 3 || st.Issues[0].Number != 1 || st.Issues[0].URL != gh.issues[1].HTMLURL || st.Issues[1].Number != 0 || st.Issues[2].Number != 0 {
 		t.Fatalf("state after crash = %+v, created %d issues", st, len(gh.issues))
 	}
+	if got := gh.labels(1); !slices.Equal(got, []string{labelAuto}) {
+		t.Fatalf("created issue labels = %v, want only %s", got, labelAuto)
+	}
 	want := []plannedIssue{
 		{Title: "One", Scope: "s1", Acceptance: []string{"c1"}},
 		{Title: "Two", Scope: "s2", Acceptance: []string{"c2"}},
@@ -93,6 +96,99 @@ func TestAutoCrashAfterFirstCreate(t *testing.T) {
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("state left behind: %v", err)
+	}
+}
+
+func TestAutoCheckpointWithWatch(t *testing.T) {
+	root, _ := setupRepo(t)
+	gh, srv := newFakeGitHub(t)
+	agent := fakeClaude(t, autoClaude)
+	r, log := newTestRunner(t, srv, root, agent)
+	watch, _ := newTestRunner(t, srv, root, agent)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	polls := 0
+	watch.Events = newEventLogger(io.Discard, slog.LevelInfo, writerFunc(func(p []byte) (int, error) {
+		if bytes.Contains(p, []byte(`"event":"watch.tick"`)) {
+			polls++
+			if polls == 3 {
+				cancel()
+			}
+		}
+		return len(p), nil
+	}), slog.LevelDebug, nil, "watch")
+	approve := func(string) (bool, bool) {
+		// Keep auto waiting at its checkpoint while watch polls repeatedly.
+		done := make(chan error, 1)
+		go func() { done <- watch.Watch(ctx, labelReady, time.Millisecond) }()
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		if polls != 3 {
+			t.Fatalf("watch completed %d polls, want 3", polls)
+		}
+		for _, n := range []int{2, 3} {
+			if got := gh.labels(n); !slices.Equal(got, []string{labelAuto}) {
+				t.Errorf("watch changed pending issue #%d: labels = %v", n, got)
+			}
+		}
+		return true, false
+	}
+	if err := r.Auto(context.Background(), "do three things", autoOptions{MaxIssues: 5, Merge: "merge"}, approve, &bytes.Buffer{}); err != nil {
+		t.Fatalf("Auto: %v\nlog:\n%s", err, log)
+	}
+	if len(gh.prs) != 1 {
+		t.Fatalf("created %d PRs before approval, want 1", len(gh.prs))
+	}
+
+	// An abandoned run's issues can be handed to watch by adding amf:ready.
+	recoverCtx, recoverCancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer recoverCancel()
+	watch.Events = newEventLogger(io.Discard, slog.LevelInfo, writerFunc(func(p []byte) (int, error) {
+		if bytes.Contains(p, []byte(`"event":"issue.done"`)) {
+			recoverCancel()
+		}
+		return len(p), nil
+	}), slog.LevelDebug, nil, "recovery")
+	if err := r.GH.AddLabels(recoverCtx, 2, labelReady); err != nil {
+		t.Fatal(err)
+	}
+	if err := watch.Watch(recoverCtx, labelReady, time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if got := gh.labels(2); !slices.Equal(got, []string{labelAuto, labelDone}) {
+		t.Fatalf("recovered issue labels = %v", got)
+	}
+	if got := gh.labels(3); !slices.Equal(got, []string{labelAuto}) {
+		t.Fatalf("watch changed remaining issue #3: labels = %v", got)
+	}
+}
+
+func TestAutoResumesAfterReadyLabelError(t *testing.T) {
+	root, _ := setupRepo(t)
+	gh, srv := newFakeGitHub(t)
+	var failed atomic.Bool
+	flaky := failingGitHub(t, srv, func(r *http.Request) bool {
+		return r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/issues/2/labels") && !failed.Swap(true)
+	})
+	r, log := newTestRunner(t, flaky, root, fakeClaude(t, autoClaude))
+	approve := func(string) (bool, bool) { return true, true }
+	err := r.Auto(context.Background(), "do three things", autoOptions{MaxIssues: 5, Merge: "merge"}, approve, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "marking issue #2 ready") {
+		t.Fatalf("ready label error = %v", err)
+	}
+	st, err := loadAutoState(autoStatePath(root))
+	if err != nil || st.merged() != 1 || st.Issues[1].Status != "pending" || len(gh.prs) != 1 {
+		t.Fatalf("state = %+v, error %v; created %d PRs", st, err, len(gh.prs))
+	}
+	if got := gh.labels(2); !slices.Equal(got, []string{labelAuto}) {
+		t.Fatalf("issue labels after failed ready update = %v", got)
+	}
+	if err := r.Auto(context.Background(), "", autoOptions{Continue: true}, approve, &bytes.Buffer{}); err != nil {
+		t.Fatalf("continue: %v\nlog:\n%s", err, log)
+	}
+	if n := merges(gh); n != 3 {
+		t.Fatalf("merged %d PRs, want 3", n)
 	}
 }
 

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"log/slog"
 	"os"
 	"slices"
 	"strings"
@@ -76,6 +77,8 @@ func newAutoRunner(t *testing.T, script string) (*Runner, *fakeGitHub, *bytes.Bu
 
 func TestAutoStopsAtCheckpointWithoutTerminal(t *testing.T) {
 	r, gh, log := newAutoRunner(t, autoClaude)
+	var events bytes.Buffer
+	r.Events = newEventLogger(log, slog.LevelInfo, &events, slog.LevelDebug, nil, "auto")
 	var out bytes.Buffer
 	noTTY := func(string) (bool, bool) { return false, false }
 	opts := autoOptions{MaxIssues: 5, Merge: "merge"}
@@ -91,8 +94,8 @@ func TestAutoStopsAtCheckpointWithoutTerminal(t *testing.T) {
 		}
 	}
 	for _, n := range []int{2, 3} {
-		if !gh.issues[n].HasLabel(labelReady) {
-			t.Fatalf("#%d labels %v, want it left %s", n, gh.labels(n), labelReady)
+		if gh.issues[n].HasLabel(labelReady) {
+			t.Fatalf("#%d labels %v, want it held without %s", n, gh.labels(n), labelReady)
 		}
 	}
 	if !strings.Contains(out.String(), "amf auto --continue") || !strings.Contains(out.String(), "checkpoint") {
@@ -122,6 +125,15 @@ func TestAutoStopsAtCheckpointWithoutTerminal(t *testing.T) {
 	if _, err := os.Stat(autoStatePath(r.Root)); !os.IsNotExist(err) {
 		t.Fatalf("state left behind: %v", err)
 	}
+	picked := eventsByName(eventLines(t, events.String()))["issue.picked"]
+	if len(picked) != 3 {
+		t.Fatalf("picked %d issues, want 3", len(picked))
+	}
+	for _, ev := range picked {
+		if !slices.Contains(ev["labels"].([]any), any(labelReady)) {
+			t.Errorf("issue started without %s: %v", labelReady, ev)
+		}
+	}
 	for _, ev := range []string{"approved with --continue", "amf auto is done"} {
 		if !strings.Contains(log.String()+out.String(), ev) {
 			t.Fatalf("missing %q:\n%s\n%s", ev, log, &out)
@@ -148,7 +160,7 @@ func TestAutoPromptDeclinedAndApproved(t *testing.T) {
 		if gh.prs[0]["merge_method"] != "squash" {
 			t.Fatalf("merge method %q", gh.prs[0]["merge_method"])
 		}
-		if !yes && !strings.Contains(out.String(), "Stopped.") {
+		if !yes && !strings.Contains(out.String(), "Stopped. The remaining issues stay labeled amf:auto only, unprocessed.") {
 			t.Fatalf("decline not reported:\n%s", &out)
 		}
 	}
