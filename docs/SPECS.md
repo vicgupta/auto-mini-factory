@@ -218,22 +218,58 @@ expiry; the issue is still marked failed.
 only, and processes them in order, merging each PR. It adds `amf:ready`
 immediately before running each issue. Auto-owned issues waiting their turn
 are not picked up by the default `amf watch`, including while auto waits at
-its checkpoint. Before processing any remaining issues after the first
-merge, it stops for approval; without terminal approval, `amf auto --continue`
-approves the checkpoint and resumes.
+its checkpoint. By default, before processing any remaining issues after the
+first merge, it prints the merged issue, PR, commit, agent, checks and remaining
+issues, then stops for approval. In a terminal, `y` or `yes` approves; any other
+answer stops. Without terminal approval, `amf auto --continue` approves a reached
+checkpoint and resumes.
+
+- `--checkpoint-after N` delays the single checkpoint until N merges (default
+  1). N must be positive; otherwise the command fails with
+  `--checkpoint-after must be at least 1`. The checkpoint reports the latest
+  merged issue and its commit. There is no checkpoint if no issues remain,
+  including when N is at least the number of planned issues.
+- `--no-checkpoint` skips the checkpoint entirely and merges all issues without
+  prompting or recording approval. It takes precedence over the other
+  checkpoint controls. Recovery progress is still saved and removed on success.
+- `--approve` accepts the checkpoint without prompting, including when stdin
+  is not a terminal. It still prints the checkpoint and records approval.
+- `--wait-for-checks` is off by default. At the checkpoint, it polls `CheckRuns`
+  on the latest merge commit every 10 seconds, for up to 5 minutes (including
+  API requests), until at least one check run appears and all returned runs
+  complete. It reports `passed` when every conclusion is `success`, `neutral`
+  or `skipped`, and `failed` otherwise. Timeout reports the last observed
+  checks; an API error or missing commit reports checks as unavailable.
+  These results are printed before approval and do not prevent approval.
+  Cancellation stops the wait without approving. Without the flag, checks
+  are fetched once and summarized without waiting. `CheckRuns` returns the
+  first 100 check runs; commit status contexts are not included.
+
+The threshold, checkpoint-disabled setting and CI wait setting are saved for
+retries. On `--continue`, `--checkpoint-after N` overrides the saved threshold;
+`--no-checkpoint` and `--wait-for-checks` enable the respective saved setting.
+If the checkpoint has not yet been reached, `--continue` resumes processing
+without granting early approval. When it has been reached, `--continue`
+prints the checkpoint again (including the CI wait if enabled) and approves
+without a prompt. `--approve` applies to the current invocation only; once
+approval is recorded, there are no further checkpoints.
+
 Issues carrying `amf:auto` are trusted regardless of author, so the token
 user need not be in `AMF_TRUSTED`: the plan came from a trusted sentence.
 `--dry-run` prints the plan without creating issues or saving a new run.
 
 Before creating any issue, amf saves the full plan to `.amf/auto/state.json`:
 schema `version` (currently 1), sentence, repository, merge method, creation
-time, approval status, and every planned issue's title, scope, acceptance
+time, approval status, checkpoint settings (`no_checkpoint`, `checkpoint_after`,
+`wait_for_checks`), and every planned issue's title, scope, acceptance
 criteria and progress. An issue's `number` is 0 and its URL is empty until it
 is created. After each successful creation, amf saves its assigned number and
 URL before printing them or creating the next issue. Writes use a temporary
 file and rename it over the state file.
 After processing an issue, the state also records its PR URL and `pr_number`.
 Older version 1 files without `pr_number` still load, with the number set to 0.
+Older files without checkpoint settings retain the default checkpoint after
+one merge and no CI wait.
 
 `amf auto --continue` creates only the saved issues whose number is still 0,
 using their original scope, criteria and position in the plan, then resumes

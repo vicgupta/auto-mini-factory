@@ -14,7 +14,7 @@ running a platform.
 | `amf pr` | manage pull requests: `list`, `merge`, `view`, `diff`, `close`, `reopen`, `ready`, `draft` |
 | `amf run N` | process one issue into a PR (alias of `issue run`) |
 | `amf watch` | process `amf:ready` issues as they arrive (alias of `issue watch`) |
-| `amf auto` | plan one sentence into up to 5 issues and merge their PRs, pausing for approval after the first merge |
+| `amf auto` | plan one sentence into up to 5 issues and merge their PRs, pausing for approval after the first merge by default |
 | `amf pipeline` | check the plan/code/eval pipeline in `AGENTS.md` |
 | `amf doctor` | check the setup here, changing nothing |
 | `amf update` | replace this amf binary with the latest (or given) release |
@@ -233,6 +233,9 @@ amf watch --draft           # ...opening each new PR as a draft
 amf run 42 --merge          # ...and merge its PR with a merge commit
 amf watch --merge=squash    # squash and merge each PR (or --merge=rebase)
 amf auto "Add a dark mode toggle"  # plan issues, merge the first PR, then ask before the rest
+amf auto "Add a dark mode toggle" --checkpoint-after 2 --wait-for-checks # review CI after two merges
+amf auto "Add a dark mode toggle" --approve # approve the checkpoint without a terminal
+amf auto "Add a dark mode toggle" --no-checkpoint # merge all issues without pausing
 amf auto --continue        # approve and resume when there was no terminal to ask on
 amf run 42 --dry-run        # make the change locally and show the PR, touching nothing on GitHub
 ```
