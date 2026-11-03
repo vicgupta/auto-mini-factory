@@ -387,6 +387,14 @@ func excludeMemory(root string, mo memoryOptions) error {
 	if err != nil || root == "" {
 		return err
 	}
+	// Compare real paths: on macOS a temp dir and git's view of it can differ
+	// by a /private symlink.
+	if r, err := filepath.EvalSymlinks(root); err == nil {
+		root = r
+	}
+	if b, err := filepath.EvalSymlinks(base); err == nil {
+		base = b
+	}
 	rel, err := filepath.Rel(root, filepath.Join(base, memoryDirName))
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return nil

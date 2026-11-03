@@ -605,3 +605,23 @@ func TestRunMemoryBackendFlag(t *testing.T) {
 		})
 	}
 }
+
+// The checkout may be reached through a symlink (macOS's /var), and memory
+// inside it must still be excluded from git.
+func TestExcludeMemoryThroughSymlink(t *testing.T) {
+	root, _ := setupRepo(t)
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(root, link); err != nil {
+		t.Skip(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, memoryDirName, "x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(root, memoryDirName, "x", "memory.db"), []byte("x"), 0o644)
+	if err := excludeMemory(root, memoryOptions{Dir: link}); err != nil {
+		t.Fatal(err)
+	}
+	if st := mustGit(t, root, "status", "--porcelain"); st != "" {
+		t.Fatalf("git status = %q", st)
+	}
+}
