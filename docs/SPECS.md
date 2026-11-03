@@ -214,10 +214,13 @@ expiry; the issue is still marked failed.
 
 ### `amf auto`
 
-`amf auto "<sentence>"` plans a few issues, creates them labeled `amf:ready`
-and `amf:auto`, and processes them in order, merging each PR. Before processing
-any remaining issues after the first merge, it stops for approval; without
-terminal approval, `amf auto --continue` approves the checkpoint and resumes.
+`amf auto "<sentence>"` plans a few issues, creates them labeled `amf:auto`
+only, and processes them in order, merging each PR. It adds `amf:ready`
+immediately before running each issue. Auto-owned issues waiting their turn
+are not picked up by the default `amf watch`, including while auto waits at
+its checkpoint. Before processing any remaining issues after the first
+merge, it stops for approval; without terminal approval, `amf auto --continue`
+approves the checkpoint and resumes.
 `--dry-run` prints the plan without creating issues or saving a new run.
 
 Before creating any issue, amf saves the full plan to `.amf/auto/state.json`:
@@ -236,15 +239,16 @@ processing. Before retrying an issue with a saved PR number, amf checks the PR
 with GitHub. If it is already merged, amf marks the issue `merged`, clears its
 saved error, logs `auto.reconciled` and skips running it, even if the issue is
 closed. A closed issue without a confirmed merged PR still fails. A PR lookup
-error stops the run without discarding the saved PR. A creation error stops
-the run with the full plan saved for retry.
+error stops the run without discarding the saved PR. A creation error or an
+error adding `amf:ready` stops the run with the full plan saved for retry.
 Loading an unsupported state version (including an old file without a
 version) fails with `unsupported amf auto state version`. Continuing a run
 whose saved repository differs from `GITHUB_REPO` fails with a message naming
 both repositories, before changing the state or creating or processing issues.
 An unfinished run blocks a new run unless `--dry-run` is set; remove
-`.amf/auto/state.json` to abandon it and start over. The state file is removed
-after all issues merge.
+`.amf/auto/state.json` to abandon it and start over. Add `amf:ready` to any
+remaining issues to recover them for processing by `amf watch`. The state
+file is removed after all issues merge.
 
 ### Pull requests
 
