@@ -33,6 +33,58 @@ import (
 	"unicode/utf8"
 )
 
+func TestRunTroubleshooting(t *testing.T) {
+	for _, scenario := range []string{"configuration", "agent unavailable", "merge refused", "success", "help"} {
+		t.Run(scenario, func(t *testing.T) {
+			root, origin := setupRepo(t)
+			gh, srv := newFakeGitHub(t)
+			gh.issues[1] = readyIssue(1, "One")
+			t.Chdir(root)
+			t.Setenv("GITHUB_TOKEN", "test-token")
+			t.Setenv("GITHUB_REPO", "vic/demo")
+			t.Setenv("AMF_API_URL", srv.URL)
+			t.Setenv("AMF_CLONE_URL", origin)
+			t.Setenv("AMF_PRIMARY_AGENT", "claudecode")
+			t.Setenv("AMF_SECONDARY_AGENT", "none")
+			t.Setenv("AMF_CLAUDE", fakeAgent(t, "claude", shResult+"cat >/dev/null\necho x > x.txt\nresult 'Done.'\n"))
+			t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+			args := []string{"run", "1", "--log-file", "off"}
+			wantErr := ""
+			switch scenario {
+			case "configuration":
+				t.Setenv("GITHUB_TOKEN", "")
+				wantErr = "GITHUB_TOKEN is not set"
+			case "agent unavailable":
+				t.Setenv("AMF_CLAUDE", "amf-test-no-such-agent")
+				t.Setenv("AMF_CODEX", "amf-test-no-such-agent")
+				t.Setenv("AMF_OPENCODE", "amf-test-no-such-agent")
+				wantErr = "no coding agent is available"
+			case "merge refused":
+				gh.mergeErrs = []fakeError{{405, "Required checks pending"}}
+				args = append(args, "--merge")
+				wantErr = "Required checks pending"
+			case "help":
+				args = []string{"run", "--help"}
+				wantErr = "usage"
+			}
+			var stderr bytes.Buffer
+			err := run(context.Background(), args, nil, io.Discard, &stderr)
+			if wantErr == "" {
+				if err != nil {
+					t.Fatalf("run: %v\n%s", err, &stderr)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), wantErr) {
+				t.Fatalf("error = %v, want %q\n%s", err, wantErr, &stderr)
+			}
+			link := "https://github.com/vicgupta/auto-mini-factory/blob/main/docs/TROUBLESHOOTING.md"
+			wantLink := wantErr != "" && scenario != "help"
+			if got := strings.Contains(stderr.String(), link); got != wantLink {
+				t.Errorf("troubleshooting link present = %t, want %t; stderr: %s", got, wantLink, &stderr)
+			}
+		})
+	}
+}
+
 func TestAutoAbortCloseIssues(t *testing.T) {
 	for _, scenario := range []string{"success", "close fails", "wrong repo"} {
 		t.Run(scenario, func(t *testing.T) {

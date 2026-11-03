@@ -41,6 +41,8 @@ func buildVersion() string {
 // permission, so a run without a limit could watch forever.
 const defaultAgentTimeout = 60 * time.Minute
 
+const troubleshootingURL = "https://github.com/vicgupta/auto-mini-factory/blob/main/docs/TROUBLESHOOTING.md"
+
 var errUsage = errors.New("usage")
 
 func main() {
@@ -187,7 +189,7 @@ func cmdIssueCreate(ctx context.Context, args []string, stdin io.Reader, stdout,
 	return nil
 }
 
-func cmdRun(ctx context.Context, args []string, stderr io.Writer) error {
+func cmdRun(ctx context.Context, args []string, stderr io.Writer) (err error) {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	withHelp(fs, stderr, runHelp)
@@ -223,6 +225,11 @@ func cmdRun(ctx context.Context, args []string, stderr io.Writer) error {
 	if err := lo.check(); err != nil {
 		return err
 	}
+	defer func() {
+		if err != nil {
+			fmt.Fprintln(stderr, "amf: troubleshooting:", troubleshootingURL)
+		}
+	}()
 	r, err := newRunner(ctx, timeout, *evalRounds, *agent, *lo, stderr)
 	if err != nil {
 		return err
