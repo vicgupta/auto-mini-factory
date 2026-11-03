@@ -18,23 +18,36 @@ import (
 	"time"
 )
 
-// An issue moves amf:ready -> amf:in-progress -> amf:done or amf:failed.
+// An issue moves amf:ready -> amf:in-progress -> amf:pr-open (a pull
+// request is open, not merged), amf:done (amf merged it) or amf:failed.
 // Adding amf:ready again asks amf to retry it.
 const (
 	labelReady      = "amf:ready"
 	labelInProgress = "amf:in-progress"
 	labelDone       = "amf:done"
 	labelFailed     = "amf:failed"
+	labelPROpen     = "amf:pr-open"
 )
 
-var statusLabels = []string{labelInProgress, labelDone, labelFailed}
+var statusLabels = []string{labelInProgress, labelPROpen, labelDone, labelFailed}
 
 // amfLabels are the labels amf uses, as `amf init` creates them.
 var amfLabels = []LabelSpec{
 	{labelReady, "0e8a16", "Ready for amf to turn into a pull request"},
 	{labelInProgress, "fbca04", "amf is working on this issue"},
-	{labelDone, "1d76db", "amf opened a pull request for this issue"},
+	{labelPROpen, "c5def5", "amf opened a pull request for this issue; it is not merged yet"},
+	{labelDone, "1d76db", "amf's pull request for this issue was merged"},
 	{labelFailed, "d93f0b", "amf could not process this issue; see its comment"},
+}
+
+// labelSpec is amf's spec of label name, from amfLabels.
+func labelSpec(name string) LabelSpec {
+	for _, l := range amfLabels {
+		if l.Name == name {
+			return l
+		}
+	}
+	return LabelSpec{Name: name}
 }
 
 // Runner turns issues into pull requests from a local checkout of the repo.
@@ -120,12 +133,31 @@ type Runner struct {
 	lastPR     PullRequest
 	lastCommit string
 	lastAgent  string
+
+	// Force, from run's --force (and set by amf auto), skips the
+	// pre-start guard: amf runs the issue even though it already has an
+	// open PR or an amf/issue-N branch, and updates that PR.
+	Force bool
+	// StaleTimeout is how long an issue may stay amf:in-progress, with no
+	// amf process working on it, before watch puts it back to amf:ready
+	// (see sweepStale). 0 turns the sweep off.
+	StaleTimeout time.Duration
+	// working is the issue this process is running now, 0 for none.
+	working int
+	// attempts are the agent runs of the latest build without a pipeline,
+	// in order, and noFallback why the fallback agent didn't run ("" when
+	// it did, or the issue had a pipeline). The failure comment lists them.
+	attempts   []agentAttempt
+	noFallback string
+	// lock is the repo's .amf/watch.lock while this process holds it.
+	lock *repoLock
 }
 
 // Close writes out the event file and sends the logs still queued for
 // PostgreSQL.
 func (r *Runner) Close() {
 	r.summarize(true)
+	r.releaseLock()
 	if err := r.events.Close(); err != nil {
 		fmt.Fprintf(r.Log, "amf: could not write the event log: %v\n", err)
 	}
@@ -141,6 +173,9 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 	defer r.summarize(false)           // runs last, after the deferred failure handling
 	ctx = withEvents(ctx, r.Events, n) // git, GitHub and skill calls log there
 	r.lastPR, r.lastCommit, r.lastAgent = PullRequest{}, "", ""
+	r.attempts, r.noFallback = nil, ""
+	r.working = n
+	defer func() { r.working = 0 }()
 	issue, err := r.GH.GetIssue(ctx, n)
 	if err != nil {
 		return err
@@ -180,6 +215,10 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 	if r.DryRun {
 		return r.dryRun(ctx, issue, base, pipeline, agent)
 	}
+	if err := r.guard(ctx, issue); err != nil {
+		return err
+	}
+	wasDone := issue.HasLabel(labelDone)
 	if err := r.setStatus(ctx, n, labelInProgress); err != nil {
 		return err
 	}
@@ -189,17 +228,25 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 		return err
 	}
 	defer func() {
-		// A PR amf couldn't merge is still open, so the issue stays done.
+		// A PR amf couldn't merge is still open: the issue is amf:pr-open.
 		if err == nil || errors.As(err, new(*mergeError)) {
 			return
 		}
 		// Report even if ctx was cancelled (e.g. Ctrl-C), but don't hang on it.
 		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
-		if serr := r.setStatus(cctx, n, labelFailed); serr != nil {
-			r.event(slog.LevelWarn, "issue.status", n, fmt.Sprintf("#%d: could not set %s: %v", n, labelFailed, serr), "to", labelFailed, "error", serr)
+		// An issue that has an open PR, or whose PR was merged, keeps that
+		// status: a failed retry doesn't undo the earlier PR.
+		final := labelFailed
+		if _, open, ferr := r.GH.OpenPR(cctx, issueBranch(n)); ferr == nil && open {
+			final = labelPROpen
+		} else if wasDone {
+			final = labelDone
+		}
+		if serr := r.setStatus(cctx, n, final); serr != nil {
+			r.event(slog.LevelWarn, "issue.status", n, fmt.Sprintf("#%d: could not set %s: %v", n, final, serr), "to", final, "error", serr)
 		} else {
-			r.statusEvent(n, labelInProgress, labelFailed)
+			r.statusEvent(n, labelInProgress, final)
 		}
 		msg := fmt.Sprintf("amf could not turn this issue into a pull request:\n\n```\n%s\n```", err)
 		var se *stageError
@@ -222,6 +269,12 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 			}
 			r.event(slog.LevelDebug, "issue.failed", n, fmt.Sprintf("#%d: failed: %v", n, err), "reason", reason, "error", err)
 		}
+		if se == nil {
+			msg += r.attemptReport()
+		}
+		if final != labelFailed {
+			msg += fmt.Sprintf("\n\nThe issue keeps its `%s` label: its earlier pull request is unaffected.", final)
+		}
 		r.comment(cctx, n, msg)
 	}()
 
@@ -238,7 +291,8 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 	}
 
 	r.lastPR = pr
-	// The PR exists, so the issue is done even if GitHub fails from here on.
+	// The PR exists, so the issue is pr-open (or done) even if GitHub fails
+	// from here on.
 	verb := "opened"
 	if updated {
 		verb = "updated"
@@ -258,10 +312,15 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 			msg = fmt.Sprintf("amf %s %s for this issue and %s it.", verb, pr.HTMLURL, mergedVerb[r.Merge])
 		}
 	}
-	if err := r.setStatus(ctx, n, labelDone); err != nil {
-		r.event(slog.LevelWarn, "issue.status", n, fmt.Sprintf("#%d: could not set %s: %v", n, labelDone, err), "to", labelDone, "error", err)
+	// amf:done only once the PR is merged; an open one is amf:pr-open.
+	status := labelPROpen
+	if r.Merge != "" && merr == nil {
+		status = labelDone
+	}
+	if err := r.setStatus(ctx, n, status); err != nil {
+		r.event(slog.LevelWarn, "issue.status", n, fmt.Sprintf("#%d: could not set %s: %v", n, status, err), "to", status, "error", err)
 	} else {
-		r.statusEvent(n, labelInProgress, labelDone)
+		r.statusEvent(n, labelInProgress, status)
 	}
 	r.comment(ctx, n, msg)
 	r.event(slog.LevelDebug, "issue.done", n, fmt.Sprintf("#%d: done", n), "pr", pr.Number)
@@ -403,13 +462,16 @@ func (r *Runner) build(ctx context.Context, issue Issue, base string, p *Pipelin
 
 // buildOne makes the change with a single run of agent in a fresh worktree
 // reset to origin/base, and commits it. log is the agent's log file.
-func (r *Runner) buildOne(ctx context.Context, issue Issue, base, agent, log string) (summary string, err error) {
+//
+// exit is how the agent's run ended, for the failure comment: "0", the
+// exit code, "timed out", or "" when it didn't run or amf can't tell.
+func (r *Runner) buildOne(ctx context.Context, issue Issue, base, agent, log string) (summary, exit string, err error) {
 	n := issue.Number
 	branch, wt := issueBranch(n), r.worktreePath(n)
 	r.event(slog.LevelInfo, "issue.worktree", n, fmt.Sprintf("#%d: creating worktree %s on %s from origin/%s", n, wt, branch, base),
 		"path", wt, "branch", branch, "base", base)
 	if err := r.prepareWorktree(ctx, wt, branch, base); err != nil {
-		return "", err
+		return "", "", err
 	}
 	model := r.agentModel(agent, "")
 	r.event(slog.LevelDebug, "issue.pipeline", n, fmt.Sprintf("#%d: no pipeline; one %s run", n, agentName(agent)),
@@ -421,12 +483,12 @@ func (r *Runner) buildOne(ctx context.Context, issue Issue, base, agent, log str
 	r.event(slog.LevelInfo, "issue.agent", n, text, "agent", agentName(agent), "model", model, "timeout", r.Timeout.String())
 	out := filepath.Join(wt, ".amf", "code.md") // for agents that write their final message to a file
 	if summary, err = r.runAgent(ctx, agent, "", model, wt, buildPrompt(r.Repo, branch, issue), log, out); err != nil {
-		return "", err
+		return "", exitOf(err), err
 	}
 	if err := commitAll(ctx, wt, prTitle(issue), n, base, agent); err != nil {
-		return "", err
+		return "", "0", err
 	}
-	return summary, nil
+	return summary, "0", nil
 }
 
 // buildFallback is build without a pipeline: it runs the plan's agents in
@@ -450,7 +512,10 @@ func (r *Runner) buildFallback(ctx context.Context, issue Issue, base string, pl
 		if i > 0 { // keep the failed agent's log
 			log = filepath.Join(r.Root, ".amf", "logs", fmt.Sprintf("issue-%d-%s.log", n, agentName(agent)))
 		}
-		summary, err = r.buildOne(ctx, issue, base, agent, log)
+		start := time.Now()
+		var exit string
+		summary, exit, err = r.buildOne(ctx, issue, base, agent, log)
+		r.attempts = append(r.attempts, agentAttempt{Agent: agentName(agent), Exit: exit, Duration: time.Since(start), Log: log, Err: err})
 		if err == nil {
 			r.lastAgent = agentName(agent)
 			if len(failed) > 0 {
@@ -460,6 +525,9 @@ func (r *Runner) buildFallback(ctx context.Context, issue Issue, base string, pl
 			return summary, "", nil
 		}
 		if ctx.Err() != nil {
+			if i+1 < len(plan.Agents) {
+				r.noFallback = "amf was stopped before it could fall back to " + agentName(plan.Agents[i+1])
+			}
 			return "", "", err
 		}
 		failed = append(failed, fmt.Sprintf("%s failed: %v", agentName(agent), err))
@@ -472,6 +540,7 @@ func (r *Runner) buildFallback(ctx context.Context, issue Issue, base string, pl
 		}
 	}
 	if len(failed) == 1 {
+		r.noFallback = plan.NoFallback
 		return "", "", err
 	}
 	var ate *agentTimeoutError
@@ -786,7 +855,12 @@ func (r *Runner) Watch(ctx context.Context, label string, interval time.Duration
 		}
 		r.event(slog.LevelInfo, "watch.agents", 0, text, "picked", agentName(plan.Agents[0]), "fallback", plan.describe())
 	}
+	// amf:pr-open is newer than most repos' amf init: create it if missing.
+	if _, err := r.GH.EnsureLabel(ctx, labelSpec(labelPROpen)); err != nil {
+		r.event(slog.LevelDebug, "watch.labels", 0, fmt.Sprintf("could not create %s: %v", labelPROpen, err), "error", err)
+	}
 	for cycle := 1; ; cycle++ {
+		r.sweepStale(ctx)
 		issues, err := r.GH.ListIssues(ctx, "open", label, true)
 		switch {
 		case err != nil && ctx.Err() == nil:
@@ -807,7 +881,9 @@ func (r *Runner) Watch(ctx context.Context, label string, interval time.Duration
 				r.event(slog.LevelDebug, "watch.skip", is.Number, fmt.Sprintf("#%d: skipped (excluded_label %q)", is.Number, l), "reason", "excluded_label", "label", l)
 				continue
 			}
-			if err := r.Run(ctx, is.Number); err != nil {
+			if err := r.Run(ctx, is.Number); errors.As(err, new(*skipError)) {
+				r.event(slog.LevelInfo, "watch.skip", is.Number, fmt.Sprintf("#%d: skipped: %v", is.Number, err), "reason", err.(*skipError).reason)
+			} else if err != nil {
 				r.event(slog.LevelWarn, "watch.failed", is.Number, fmt.Sprintf("#%d failed: %v", is.Number, err), "error", err)
 			}
 		}

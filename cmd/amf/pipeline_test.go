@@ -249,7 +249,7 @@ func TestPipelineRetriesUntilEvalPasses(t *testing.T) {
 	if got := mustGit(t, root, "--git-dir", origin, "diff", "--name-only", "main", "amf/issue-1"); got != "feature.txt" {
 		t.Fatalf("branch changes = %q", got)
 	}
-	if got, want := gh.labels(1), []string{"amf:done"}; !reflect.DeepEqual(got, want) {
+	if got, want := gh.labels(1), []string{"amf:pr-open"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("labels = %v, want %v", got, want)
 	}
 	for _, name := range []string{"logs/issue-1-plan.log", "logs/issue-1-code-1.log", "logs/issue-1-eval-1.log", "logs/issue-1-code-2.log", "logs/issue-1-eval-2.log", "runs/issue-1/plan.md", "runs/issue-1/eval-1.md", "runs/issue-1/eval-2.md"} {

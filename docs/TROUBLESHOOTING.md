@@ -19,7 +19,7 @@ conflicts during the merge step.
 
 **Fix:** Inspect the existing PR with `amf pr view 101` and `amf pr diff 101`.
 Resolve conflicts on its branch and push the resolution, then run
-`amf pr merge 101`. Alternatively, `amf run 42 --merge` regenerates the
+`amf pr merge 101`. Alternatively, `amf run 42 --merge --force` regenerates the
 change from the latest default branch and updates the open PR. A rerun starts
 with a fresh worktree and force-pushes the branch, replacing manual edits.
 
@@ -29,8 +29,8 @@ with a fresh worktree and force-pushes the branch, replacing manual edits.
 pending or failing. `amf run` exits 1 even though it opened a PR.
 
 **Cause:** Branch protection requires checks. `amf run --merge` attempts the
-merge immediately; it does not wait for CI. The issue remains `amf:done`
-because its PR exists.
+merge immediately; it does not wait for CI. The issue is `amf:pr-open`
+because its PR exists but isn't merged.
 
 **Fix:** Open the PR with `amf pr view 101`, inspect its checks on GitHub,
 and fix failing checks or wait for pending ones. Once they pass, run
@@ -167,3 +167,46 @@ need Checks read access. Check the supported credentials in GitHub's
 [check runs documentation](https://docs.github.com/en/rest/checks/runs#list-check-runs-for-a-git-reference)
 if the endpoint returns 403. `amf doctor` checks repository access, but
 does not test the Checks API. Waiting cannot create missing CI runs.
+
+## Another amf holds the lock
+
+**Symptom:** `amf watch` (or `run`, `auto`) exits with `another amf (watch,
+pid 1234 on host, since ...) holds .amf/watch.lock`.
+
+**Cause:** Only one amf works in a checkout at a time, so two watchers never
+race on the same issue.
+
+**Fix:** Stop the other amf. If it is gone (another machine, a crash), amf
+takes the lock over by itself once the PID is dead on this host or the lock
+is 10 minutes old; or delete `.amf/watch.lock`.
+
+## Issue skipped: already has a PR or branch
+
+**Symptom:** `watch` logs `#42: skipped: ... already has an open pull
+request` or `branch amf/issue-42 already exists on origin`.
+
+**Cause:** amf won't start an issue it already turned into a PR. An open PR
+relabels the issue `amf:pr-open`.
+
+**Fix:** Review and merge the PR. To regenerate it, run `amf run 42 --force`.
+For a leftover branch without a PR, delete it (`git push origin --delete
+amf/issue-42`) and add `amf:ready` again.
+
+## Issue stuck on amf:in-progress
+
+**Symptom:** An issue keeps `amf:in-progress` after amf was killed.
+
+**Fix:** `amf watch` puts it back to `amf:ready` once the label is older than
+`AMF_STALE_TIMEOUT` (default twice the agent timeout, at least 2h), and
+comments that it did. Use `--stale-timeout 30m` for sooner, or run
+`amf run 42` now.
+
+## Fallback agent didn't run
+
+**Symptom:** The failure comment says `Fallback: did not run, because ...`.
+
+**Cause and fix:** The reason names it: `--agent` picks a single agent,
+`AMF_SECONDARY_AGENT=none` (or the same as the primary), or the secondary
+agent isn't usable (not installed, or no key: e.g. claude without
+`CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`). `amf doctor` shows each
+agent's status.

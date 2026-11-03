@@ -116,13 +116,34 @@ In a clone of the repo you want amf to work on, run `amf init`. It writes
   folder you ran `amf init` in, even a subdirectory), so the
   tokens never show up in `git status`.
 - **Labels:** once `GITHUB_TOKEN` and `GITHUB_REPO` are filled in, `amf init`
-  makes sure the repo has `amf:ready`, `amf:in-progress`, `amf:done` and
-  `amf:failed`, creating any that are missing. Run it again after editing
+  makes sure the repo has `amf:ready`, `amf:in-progress`, `amf:pr-open`,
+  `amf:done` and `amf:failed`, creating any that are missing. Run it again after editing
   `.env`. If nothing changed, it makes no new backup.
 
 amf reads `.env` in the current directory, then at the top of the enclosing
 git checkout. Real environment variables win over the file.
 Keep `.env` out of git: add it to the target repo's `.gitignore`.
+
+### Watch reliability
+
+- **One amf per checkout.** `amf watch`, `amf run` and `amf auto` hold
+  `.amf/watch.lock` (PID, host, start time) while they work. A second one
+  refuses to start and names the holder. A lock whose process is dead on the
+  same host, or that hasn't been refreshed for 10 minutes, is taken over.
+  The lock is released on exit, Ctrl-C and SIGTERM included.
+- **No duplicate PRs.** Before starting an issue, amf checks for an open PR
+  from `amf/issue-N` (the issue becomes `amf:pr-open` and is skipped) and for
+  an `amf/issue-N` branch on origin (skipped; delete the branch or use
+  `amf run N --force` to retry). An `amf:failed` issue relabeled `amf:ready`
+  is still retried.
+- **`amf:pr-open` vs `amf:done`.** An issue whose PR is open but not merged
+  is `amf:pr-open`; `amf:done` means amf merged its PR (`--merge`).
+- **Stuck issues recover.** Each poll, `watch` puts `amf:in-progress` issues
+  no amf is working on back to `amf:ready` after `AMF_STALE_TIMEOUT`
+  (`--stale-timeout`; default twice the agent timeout, at least 2h).
+- **Failure comments** list each agent tried with its exit code and
+  duration, whether the fallback ran (and why not), and the redacted last
+  lines of the agent's log.
 
 ### Configuration (.env)
 
@@ -145,6 +166,7 @@ placeholders ending in `...`, and `owner/name`, count as unset.
 | `AMF_PRIMARY_AGENT` | `codex` | The agent for issues without a pipeline: `claudecode` (or `claude`), `codex` or `opencode`, ignoring case. `--agent` and a pipeline override it |
 | `AMF_SECONDARY_AGENT` | `claudecode` | The agent amf falls back to when the primary fails, in a fresh worktree; the same values, or `none` for no fallback |
 | `AMF_AGENT_TIMEOUT` | `60m` | How long each agent run may take, as a Go duration; `--agent-timeout` (or its deprecated alias `--timeout`) overrides it. Must be at least 1m and at most 24h |
+| `AMF_STALE_TIMEOUT` | `max(2x agent timeout, 2h)` | How long `watch` lets an issue stay `amf:in-progress` with no amf working on it before putting it back to `amf:ready`; `off` disables it. `--stale-timeout` overrides it |
 | `AMF_LOG_LEVEL` | `info` (terminal), `debug` (event log) | `debug`, `info`, `warn` or `error`, for both the terminal and the event log of `run` and `watch`; `--log-level` overrides it |
 | `AMF_CODEX` | `codex` | Path to the Codex CLI |
 | `AMF_OPENCODE` | `opencode` | Path to the opencode CLI |

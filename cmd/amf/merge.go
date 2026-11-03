@@ -69,7 +69,7 @@ func (m *mergeFlag) check(pos []string) error {
 }
 
 // mergeError is a PR amf opened or updated but couldn't merge. The PR stays
-// open and the issue amf:done, but run exits 1.
+// open and the issue amf:pr-open, but run exits 1.
 type mergeError struct {
 	url string
 	err error
