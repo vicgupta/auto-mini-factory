@@ -67,7 +67,7 @@ amf issue list --json --label amf:failed | jq -r '.[].url'  # as JSON: number, t
 
 amf run 42                  # process one issue now
 amf watch --interval 60s    # process issues labeled `amf:ready`, one at a time
-amf watch --agent codex     # ...with Codex only, no fallback
+amf watch --agent codex     # without a pipeline, use Codex only, no fallback
 amf watch --exclude-label blocked --exclude-label needs-human  # ...leaving issues with either label alone until it's removed
 amf run 42 --draft          # open the PR as a draft
 amf watch --draft           # ...opening each new PR as a draft
@@ -399,8 +399,8 @@ branch, so a change takes effect once merged. To check a change before
 merging, run `amf pipeline --fetch` in your checkout: it shows the stages,
 checks the agents are installed, and downloads each skill.
 
-Starter skills are in [`skills/`](skills): [plan](skills/plan/SKILL.md),
-[code](skills/code/SKILL.md) and [eval](skills/eval/SKILL.md). Write your own
+Starter skills are in [`skills/`](../skills): [plan](../skills/plan/SKILL.md),
+[code](../skills/code/SKILL.md) and [eval](../skills/eval/SKILL.md). Write your own
 by copying one; amf's prompt already fixes each stage's inputs and output
 format, so a skill only needs to say how to do the work.
 

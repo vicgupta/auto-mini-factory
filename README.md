@@ -5,6 +5,20 @@ coding agent (Claude Code, Codex or opencode, whichever you have), or with a
 plan → code → eval pipeline of them. For a solo developer or small team that wants coding agents without
 running a platform.
 
+## Table of contents
+
+- [Commands](#commands)
+- [Quick start](#quick-start)
+- [Install](#install)
+- [Configure](#configure)
+  - [Configuration (.env)](#configuration-env)
+  - [Check your setup](#check-your-setup)
+- [Use](#use)
+- [Security](#security)
+- [Spec](#spec)
+- [Develop](#develop)
+- [License](#license)
+
 ## Commands
 
 | Command | What it does |
@@ -28,17 +42,22 @@ For common failures and fixes, see the
 
 ## Quick start
 
+Have `git` and at least one [coding agent](#install) on `PATH`, with a git
+identity and credentials that can push to your repo. See
+[Choosing the agent](docs/COMMANDS.md#choosing-the-agent) for key and login requirements.
+
 ```sh
 curl -fsSL https://raw.githubusercontent.com/vicgupta/auto-mini-factory/main/install.sh | sh
-cd your-repo
-amf init                 # writes .env: fill in GITHUB_TOKEN and an agent key
+cd your-repo             # a clone of the GitHub repo you want to work on
+amf init                 # writes .env; fills GITHUB_REPO from origin
+# Edit .env: set GITHUB_TOKEN, check GITHUB_REPO and configure your agent.
+amf init                 # creates any missing amf labels once configured
 amf doctor               # check the setup
 amf issue "Add dark mode" -b "Use CSS variables for the palette"
-amf run 1                # or: amf watch, to handle amf:ready issues as they come
+amf run 42               # replace 42 with the issue number in the URL printed above
 ```
 
-<details>
-<summary><b>Install options</b></summary>
+Or run `amf watch` to process open issues labeled `amf:ready`, oldest first.
 
 ## Install
 
@@ -82,17 +101,16 @@ amf update --version v0.0.7   # install a specific release (also downgrades)
 against `checksums.txt`, makes sure the new binary runs, then swaps it in place
 of the running one. It needs write access to the folder `amf` is in.
 
-</details>
-
 ## Configure
 
 In a clone of the repo you want amf to work on, run `amf init`. It writes
 `.env` with the common settings (listed in
 [Configuration (.env)](#configuration-env)) and creates amf's labels.
 
-- **Backups:** if `.env` already exists, `amf init` first copies it to the next
-  free `.env.0001`, `.env.0002`, and so on, then keeps its real values in the
-  new file, including any extra variables.
+- **Backups:** if `.env` changes, `amf init` first copies the old file to
+  `.env.NNNN`, numbered above the highest existing backup (starting at
+  `.env.0001`), then keeps its real values in the new file, including any
+  extra variables.
 - **Repo:** `GITHUB_REPO` is filled in from the checkout's GitHub `origin`.
 - **Git:** `.env` and `.env.NNNN` are added to `.git/info/exclude` (for the
   folder you ran `amf init` in, even a subdirectory), so the
@@ -168,8 +186,6 @@ helps on servers or in CI where you can't log in interactively. Generate one wit
 instead of API billing. When it's not set, Claude uses whatever login it
 already has.
 
-Keep `.env` out of git: add it to the target repo's `.gitignore`.
-
 ### Check your setup
 
 `amf doctor` checks everything amf needs, one line each, without changing
@@ -230,7 +246,7 @@ amf issue list --json --label amf:failed | jq -r '.[].url'  # as JSON: number, t
 
 amf run 42                  # process one issue now
 amf watch --interval 60s    # process issues labeled `amf:ready`, one at a time
-amf watch --agent codex     # ...with Codex only, no fallback
+amf watch --agent codex     # without a pipeline, use Codex only, no fallback
 amf watch --exclude-label blocked --exclude-label needs-human  # ...leaving issues with either label alone until it's removed
 amf run 42 --draft          # open the PR as a draft
 amf watch --draft           # ...opening each new PR as a draft
@@ -240,13 +256,14 @@ amf auto "Add a dark mode toggle"  # plan issues, merge the first PR, then ask b
 amf auto "Add a dark mode toggle" --checkpoint-after 2 --wait-for-checks # review CI after two merges
 amf auto "Add a dark mode toggle" --approve # approve the checkpoint without a terminal
 amf auto "Add a dark mode toggle" --no-checkpoint # merge all issues without pausing
-amf auto --continue        # approve and resume when there was no terminal to ask on
+amf auto --continue        # approve the checkpoint and resume
 amf run 42 --dry-run        # make the change locally and show the PR, touching nothing on GitHub
 ```
 
 See [docs/COMMANDS.md](docs/COMMANDS.md) for the details:
 
 - [Choosing the agent](docs/COMMANDS.md#choosing-the-agent): which agent runs, and the fallback
+- [Auto: one sentence to merged PRs](docs/COMMANDS.md#auto-one-sentence-to-merged-prs): checkpoints, approval and recovery
 - [Merge methods](docs/COMMANDS.md#merge-methods): how `--merge`, `--merge=squash` and `--merge=rebase` shape history
 - [What `amf run N` does](docs/COMMANDS.md#what-amf-run-n-does), [logs](docs/COMMANDS.md#logs) and [logs in PostgreSQL](docs/COMMANDS.md#logs-in-postgresql)
 - [Pipelines](docs/COMMANDS.md#pipelines-plan--code--eval) and [labels](docs/COMMANDS.md#labels)
@@ -260,9 +277,10 @@ code you're executing on your machine.
   access can add labels, but anyone can write an issue body, and its author
   can edit it after you label it.
 - Set `AMF_TRUSTED=you,teammate` to have amf work only on issues those
-  GitHub users opened. Anyone else's issue is marked `amf:failed` with a
-  comment saying why, and no agent runs. Unset, amf works on anyone's issue,
-  and `amf doctor` warns about it.
+  GitHub users opened, except issues labeled `amf:auto`, which are always
+  trusted. Other authors' issues without that label are marked `amf:failed`
+  with a comment saying why, and no agent runs. Unset, amf works on anyone's
+  issue, and `amf doctor` warns about it.
 - `GITHUB_TOKEN` is stripped from every agent's environment, but agents can
   still read files on disk, including `.env` at the top of your checkout. For full
   isolation, run amf in a container or VM.
