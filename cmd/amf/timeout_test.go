@@ -300,7 +300,7 @@ case "$p" in *"# #1:"*) while :; do sleep 1; done;; *) echo x > x.txt; echo done
 	done := make(chan error, 1)
 	go func() { done <- r.Watch(ctx, "amf:ready", 20*time.Millisecond) }()
 	deadline := time.Now().Add(10 * time.Second)
-	for !slices.Contains(gh.labels(1), "amf:failed") || !slices.Contains(gh.labels(2), "amf:done") {
+	for !slices.Contains(gh.labels(1), "amf:failed") || !slices.Contains(gh.labels(2), "amf:pr-open") {
 		if time.Now().After(deadline) {
 			cancel()
 			t.Fatalf("issues not processed; log:\n%s", buf.String())

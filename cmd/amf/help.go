@@ -36,7 +36,7 @@ Run amf help <command> or amf <command> -h for details.
 `
 
 const runHelp = `Usage:
-  amf run <issue-number> [--agent A] [--agent-timeout 60m] [--eval-rounds 2] [--dry-run] [--draft] [--merge[=squash|rebase]] [--log-level L] [--log-file P] [--memory-backend sqlite|markdown|logfiles] [--memory-dir D]
+  amf run <issue-number> [--agent A] [--agent-timeout 60m] [--eval-rounds 2] [--dry-run] [--force] [--draft] [--merge[=squash|rebase]] [--log-level L] [--log-file P] [--memory-backend sqlite|markdown|logfiles] [--memory-dir D]
 
 Processes one issue into a pull request (alias of amf issue run; also takes
 --draft, --dry-run, --merge, --eval-rounds, --log-level, --log-file).
@@ -51,6 +51,14 @@ amf run --dry-run makes the change on the local amf/issue-N branch and prints
 the pull request it would open, without labeling, commenting, pushing,
 opening a PR or merging.
 
+An issue that already has an open amf pull request is labeled amf:pr-open
+and skipped, and one whose amf/issue-N branch is on origin without an open
+PR is skipped: --force runs it anyway, updating the open PR. An issue is
+amf:pr-open while its PR is open and amf:done once amf merged it.
+
+run, watch and auto hold .amf/watch.lock while they work, so two of them
+never share a checkout; a lock left by a dead amf is taken over.
+
 run and watch work in the enclosing git checkout. Started anywhere else, they
 clone GITHUB_REPO into ./<name> (or reuse that clone) and work there.
 
@@ -63,12 +71,17 @@ amf help agents says which agent runs; amf help env lists the settings.
 `
 
 const watchHelp = `Usage:
-  amf watch [--agent A] [--interval 60s] [--label amf:ready] [--exclude-label L]... [--agent-timeout 60m] [--eval-rounds 2] [--draft] [--merge[=squash|rebase]] [--log-level L] [--log-file P] [--memory-backend sqlite|markdown|logfiles] [--memory-dir D]
+  amf watch [--agent A] [--interval 60s] [--label amf:ready] [--exclude-label L]... [--agent-timeout 60m] [--stale-timeout 2h] [--eval-rounds 2] [--draft] [--merge[=squash|rebase]] [--log-level L] [--log-file P] [--memory-backend sqlite|markdown|logfiles] [--memory-dir D]
 
 Processes amf:ready issues as they arrive, one at a time, until interrupted
 (alias of amf issue watch; also takes --exclude-label, --draft, --merge,
 --agent-timeout, --eval-rounds, --log-level, --log-file). --merge, the
 checkout and the agent work as for amf run: see amf help run.
+
+Each poll, watch also puts amf:in-progress issues that no amf is working on
+back to amf:ready once they have been in progress longer than
+--stale-timeout (AMF_STALE_TIMEOUT; default twice the agent timeout, at
+least 2h; off disables it), or labels them amf:pr-open if their PR is open.
 See merge methods at:
 https://github.com/vicgupta/auto-mini-factory/blob/main/docs/COMMANDS.md#merge-methods
 
@@ -180,6 +193,9 @@ Placeholders ending in ..., and owner/name, count as unset.
   AMF_AGENT_TIMEOUT (default: 60m)
     How long each agent run may take, as a Go duration; --agent-timeout (or its deprecated
     alias --timeout) overrides it. Must be at least 1m and at most 24h
+  AMF_STALE_TIMEOUT (default: max(2x agent timeout, 2h))
+    How long watch lets an issue stay amf:in-progress with no amf working on it
+    before putting it back to amf:ready; off disables it. --stale-timeout overrides it
   AMF_LOG_LEVEL (default: info (terminal), debug (event log))
     debug, info, warn or error, for both the terminal and the event log of run and watch;
     --log-level overrides it

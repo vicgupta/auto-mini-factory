@@ -78,8 +78,12 @@ func (g *GitHub) PullsSince(ctx context.Context, since string) ([]ghPull, error)
 }
 
 func memIssueFrom(is Issue) MemIssue {
-	return MemIssue{Number: is.Number, Title: is.Title, Body: is.Body, State: is.State, Labels: labelNames(is),
-		Author: is.User.Login, CreatedAt: is.CreatedAt, UpdatedAt: is.UpdatedAt, ClosedAt: is.ClosedAt}
+	m := MemIssue{Number: is.Number, Title: is.Title, Body: is.Body, State: is.State, Labels: labelNames(is),
+		Author: is.User.Login, CreatedAt: is.CreatedAt, ClosedAt: is.ClosedAt}
+	if !is.UpdatedAt.IsZero() {
+		m.UpdatedAt = is.UpdatedAt.UTC().Format(time.RFC3339)
+	}
+	return m
 }
 
 // syncResult counts what amf memory sync stored.
@@ -483,13 +487,6 @@ func (r *Runner) memRecordRun(n int, started time.Time, err error) {
 		}
 		r.memWarn(n, "record the PR", r.Memory.UpsertPR(pr))
 	}
-}
-
-func cmpOr(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
 }
 
 // issueLogTail is the last max bytes of issue n's newest agent log.

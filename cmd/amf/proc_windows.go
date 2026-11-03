@@ -8,6 +8,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -37,4 +38,18 @@ func killGroup(p *os.Process, sig syscall.Signal) error {
 		return fmt.Errorf("taskkill /T /F /PID %d: %v: %s", p.Pid, err, out)
 	}
 	return nil
+}
+
+// pidAlive reports whether a process with this pid exists.
+func pidAlive(pid int) bool {
+	h, err := syscall.OpenProcess(syscall.PROCESS_QUERY_INFORMATION, false, uint32(pid))
+	if err != nil {
+		return errors.Is(err, syscall.ERROR_ACCESS_DENIED)
+	}
+	defer syscall.CloseHandle(h)
+	var code uint32
+	if syscall.GetExitCodeProcess(h, &code) != nil {
+		return true
+	}
+	return code == 259 // STILL_ACTIVE
 }

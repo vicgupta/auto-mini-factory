@@ -671,6 +671,11 @@ func cmdAuto(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 		return err
 	}
 	defer r.Close()
+	// auto retries its own issues and updates their open PRs itself.
+	r.Force = true
+	if err := r.lockRepo("auto"); err != nil {
+		return err
+	}
 	r.Command = "auto"
 	if !*dryRun {
 		r.openMemory(*mo)

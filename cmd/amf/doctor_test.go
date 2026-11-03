@@ -76,7 +76,7 @@ func TestDoctorAllGood(t *testing.T) {
 		`ok +GITHUB_REPO +vic/demo, from the environment$`,
 		`ok +github +token accepted for @vic at http`,
 		`ok +repo +vic/demo, default branch main$`,
-		`ok +labels +all 4 amf labels exist$`,
+		`ok +labels +all 5 amf labels exist$`,
 		`ok +trusted +only issues opened by @vic, @teammate$`,
 		`ok +checkout +.*/work \(origin .*origin\.git\)$`,
 		`ok +git push +your git credentials can push`,
@@ -200,7 +200,7 @@ func TestDoctorPipelineProblems(t *testing.T) {
 		t.Fatalf("error = %v\n%s", err, out)
 	}
 	wantLines(t, out,
-		`warn +labels +missing amf:ready, amf:in-progress, amf:done, amf:failed`,
+		`warn +labels +missing amf:ready, amf:in-progress, amf:pr-open, amf:done, amf:failed`,
 		`warn +trusted +AMF_TRUSTED is not set; amf works on issues opened by anyone`,
 		`ok +pipeline +origin/main: code \(codex, default model\) -> eval \(codex, default model\)$`,
 		`FAIL +skill eval +downloading skill https://127\.0\.0\.1:1/eval/SKILL\.md`,

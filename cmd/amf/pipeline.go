@@ -735,7 +735,7 @@ func (r *Runner) runAgent(ctx context.Context, agent, stage, model, wt, prompt, 
 		if runErr == nil { // ctx was cancelled and the agent still exited cleanly
 			runErr = ctx.Err()
 		}
-		return "", fmt.Errorf("%s: %v (log: %s)", name, runErr, logPath)
+		return "", fmt.Errorf("%s: %w (log: %s)", name, runErr, logPath)
 	}
 	switch agent {
 	case agentCodex, agentOpencode:

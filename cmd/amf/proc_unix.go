@@ -31,3 +31,9 @@ func killGroup(p *os.Process, sig syscall.Signal) error {
 	}
 	return syscall.Kill(-p.Pid, sig)
 }
+
+// pidAlive reports whether a process with this pid exists.
+func pidAlive(pid int) bool {
+	err := syscall.Kill(pid, 0)
+	return err == nil || err == syscall.EPERM
+}

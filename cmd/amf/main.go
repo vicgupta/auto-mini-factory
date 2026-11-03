@@ -201,6 +201,7 @@ func cmdRun(ctx context.Context, args []string, stderr io.Writer) (err error) {
 	draft := fs.Bool("draft", false, draftFlagHelp)
 	merge := addMergeFlag(fs)
 	dryRun := fs.Bool("dry-run", false, "make the change on the local branch only: no label, comment, push, PR or merge")
+	force := fs.Bool("force", false, "run even if the issue already has an open PR or an amf/issue-N branch, updating that PR")
 	lo := addLogFlags(fs)
 	mo := addMemoryFlags(fs)
 	pos, err := parseArgs(fs, args)
@@ -214,7 +215,7 @@ func cmdRun(ctx context.Context, args []string, stderr io.Writer) (err error) {
 		return errDraftMerge
 	}
 	if len(pos) != 1 {
-		fmt.Fprintln(stderr, "usage: amf run <issue-number> [--agent claudecode|codex|opencode] [--agent-timeout 60m] [--eval-rounds 2] [--dry-run] [--draft] [--merge[=squash|rebase]]")
+		fmt.Fprintln(stderr, "usage: amf run <issue-number> [--agent claudecode|codex|opencode] [--agent-timeout 60m] [--eval-rounds 2] [--dry-run] [--force] [--draft] [--merge[=squash|rebase]]")
 		return errUsage
 	}
 	timeout, err := timeoutFlag(fs, at, alias)
@@ -244,6 +245,10 @@ func cmdRun(ctx context.Context, args []string, stderr io.Writer) (err error) {
 	r.Draft = *draft
 	r.Merge = merge.value
 	r.DryRun = *dryRun
+	r.Force = *force
+	if err := r.lockRepo("run"); err != nil {
+		return err
+	}
 	r.Command = "run"
 	if !*dryRun {
 		r.openMemory(*mo)
@@ -266,6 +271,7 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 	agent := fs.String("agent", "", agentFlagHelp)
 	draft := fs.Bool("draft", false, draftFlagHelp)
 	merge := addMergeFlag(fs)
+	staleFlag := fs.String("stale-timeout", "", "put amf:in-progress issues no amf works on back to amf:ready after this long (default AMF_STALE_TIMEOUT, else max(2x agent timeout, 2h); off disables)")
 	lo := addLogFlags(fs)
 	mo := addMemoryFlags(fs)
 	pos, err := parseArgs(fs, args)
@@ -282,7 +288,7 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 		return errDraftMerge
 	}
 	if len(pos) != 0 {
-		fmt.Fprintln(stderr, "usage: amf watch [--agent claudecode|codex|opencode] [--interval 60s] [--label amf:ready] [--exclude-label L]... [--agent-timeout 60m] [--eval-rounds 2] [--draft] [--merge[=squash|rebase]]")
+		fmt.Fprintln(stderr, "usage: amf watch [--agent claudecode|codex|opencode] [--interval 60s] [--label amf:ready] [--exclude-label L]... [--agent-timeout 60m] [--stale-timeout 2h] [--eval-rounds 2] [--draft] [--merge[=squash|rebase]]")
 		return errUsage
 	}
 	if *interval <= 0 {
@@ -319,6 +325,14 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 	r.Draft = *draft
 	r.ExcludeLabels = exclude
 	r.Merge = merge.value
+	if *staleFlag != "" {
+		if r.StaleTimeout, err = parseStaleTimeout(*staleFlag, "--stale-timeout", r.Timeout); err != nil {
+			return err
+		}
+	}
+	if err := r.lockRepo("watch"); err != nil {
+		return err
+	}
 	err = redactErr(r.Redact, r.Watch(ctx, *label, *interval))
 	r.DB.logError(err)
 	return err
@@ -547,7 +561,12 @@ func newRunnerFrom(ctx context.Context, cfg Config, timeout time.Duration, evalR
 	if err := excludeFromGit(ctx, root, "amf worktrees and logs", "/.amf/"); err != nil {
 		return nil, err
 	}
+	stale, err := parseStaleTimeout(cfg.StaleTimeout, "AMF_STALE_TIMEOUT", timeout)
+	if err != nil {
+		return nil, err
+	}
 	return &Runner{
+		StaleTimeout:  stale,
 		GH:            gh,
 		Repo:          cfg.Repo,
 		Root:          root,

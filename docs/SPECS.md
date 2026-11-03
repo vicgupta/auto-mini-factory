@@ -18,17 +18,29 @@ pipeline needs whichever agents it names.
 ## Issue lifecycle
 
 ```
-amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened, and merged with --merge)
+amf:ready ──▶ amf:in-progress ──▶ amf:pr-open (PR opened, not merged)
+                       ├────────▶ amf:done    (PR merged with --merge)
                        └────────▶ amf:failed  (reason commented)
 ```
 
 - `amf:ready` marks an issue for amf. Adding it again retries an issue that is
   done or failed.
-- `amf:done` means amf produced a PR for the issue, a draft one (`--draft`)
-  included.
+- `amf:pr-open` means amf produced a PR for the issue, a draft one
+  (`--draft`) included, that is open and not merged: no `--merge`, or the
+  merge failed.
+- `amf:done` means amf merged the issue's PR.
+- Before Claim, amf skips an issue with an open PR from `amf/issue-N`
+  (relabeling it `amf:pr-open`) or with an `amf/issue-N` branch on origin
+  (unless it is `amf:failed`); `amf run N --force`, and `amf auto`, skip
+  that guard. A failure never moves an issue from `amf:pr-open` or
+  `amf:done` to `amf:failed`.
+- `watch` puts an `amf:in-progress` issue no amf works on back to
+  `amf:ready` once the label is older than `AMF_STALE_TIMEOUT`.
+- `run`, `watch` and `auto` hold `.amf/watch.lock`; see
+  [the repo lock](COMMANDS.md#the-repo-lock).
 - amf removes `amf:ready` when it starts, and an issue has at most one status
   label at a time.
-- amf owns these four labels and every `amf/issue-<N>` branch.
+- amf owns these five labels and every `amf/issue-<N>` branch.
 
 ## Commands
 
@@ -669,6 +681,7 @@ space, a trailing comment. A leading byte order mark is ignored.
 | `AMF_PRIMARY_AGENT` | `codex` | The agent for issues without a pipeline: `claudecode` (or `claude`), `codex` or `opencode`, ignoring case. `--agent` and a pipeline override it |
 | `AMF_SECONDARY_AGENT` | `claudecode` | The agent amf falls back to when the primary fails, in a fresh worktree; the same values, or `none` for no fallback |
 | `AMF_AGENT_TIMEOUT` | `60m` | How long each agent run may take, as a Go duration; `--agent-timeout` (or its deprecated alias `--timeout`) overrides it. Must be at least 1m and at most 24h |
+| `AMF_STALE_TIMEOUT` | `max(2x agent timeout, 2h)` | How long `watch` lets an issue stay `amf:in-progress` with no amf working on it before putting it back to `amf:ready`; `off` disables it. `--stale-timeout` overrides it |
 | `AMF_LOG_LEVEL` | `info` (terminal), `debug` (event log) | `debug`, `info`, `warn` or `error`, for both the terminal and the event log of `run` and `watch`; `--log-level` overrides it |
 | `AMF_CODEX` | `codex` | Path to the Codex CLI |
 | `AMF_OPENCODE` | `opencode` | Path to the opencode CLI |
@@ -844,7 +857,8 @@ and exit code are preserved.
       run) is final at once.
     - amf doesn't wait for checks to finish. With branch protection that
       requires them, the merge fails and the PR stays open.
-12. **Finish.** Set `amf:done` and comment on the issue:
+12. **Finish.** Set `amf:done` if amf merged the PR, else `amf:pr-open`, and
+    comment on the issue:
     - without `--merge`: `amf opened <PR URL> for this issue.` (`updated`
       for a retry's PR);
     - merged: `amf opened <PR URL> for this issue and merged it.` (`squashed
@@ -852,7 +866,7 @@ and exit code are preserved.
       the issue;
     - not merged: `amf opened <PR URL> for this issue, but could not merge
       it:`, the reason in a code block, and that the PR is still open for
-      review. The issue is still `amf:done`, but `run` exits 1 with `opened
+      review. The issue is `amf:pr-open`, and `run` exits 1 with `opened
       <PR URL> but could not merge it: <reason>`, and `watch` logs that as
       a failure and goes on.
 
@@ -944,12 +958,16 @@ was: no label and no comment. Its worktree is kept for inspection, except
 after `--agent-timeout`, which removes it as usual.
 
 **On failure** in any step after Claim, up to opening the PR (a failed
-merge doesn't count; see step 11): set `amf:failed`, comment the error on
-the issue, and keep the worktree and logs for inspection. This also happens if
+merge doesn't count; see step 11): set `amf:failed` (or keep `amf:pr-open`
+when the branch still has an open PR, and `amf:done` when it was done),
+comment the error on the issue (each agent tried with its exit code and
+duration, whether the fallback ran and why not, and the redacted last 40
+lines of the log), and keep the worktree and logs for inspection. This also happens if
 the run is interrupted — except that a run that hit `--agent-timeout` leaves
 the worktree (removed, with its branch unpushed) and keeps only the logs and
 partial output. If Claim itself fails, the issue can be left on
-`amf:in-progress`, which `watch` skips; `amf run N` recovers it.
+`amf:in-progress`, which `watch` skips until the stale sweep puts it back
+to `amf:ready`; `amf run N` recovers it too.
 
 ## Updating (`amf update`)
 
@@ -1031,7 +1049,7 @@ event log opens, are not. The fields of each event, besides those:
 | `agent.fallback` | warn | Without a pipeline, the primary agent failed or wasn't usable: `from`, `to`, `reason` (`unusable`, `error` or `agent_timeout`) and `error` |
 | `log.file` | info | `path`: the event log |
 | `run.summary` | debug, info | The fields of `summary.json` (see Commands) as `done`, `failed`, `skipped`, `github_calls`, `ratelimit_lowest`, `git_calls`, `agent_ms`, `errors`, `log`, and `final`: false (debug) after an issue, true (info, the terminal's last line) at exit |
-| `config.load` | debug | `paths` (the `.env` files looked for), `file` (the one read, or `""`), and `keys`: for each variable read, its `source` (`env`, `.env` or `default`) and `value`. Only `GITHUB_REPO`, `AMF_API_URL`, `OPENCODE_MODEL`, `AMF_AGENT_TIMEOUT`, `AMF_LOG_LEVEL`, `AMF_CLAUDE`, `AMF_CODEX` and `AMF_OPENCODE` show their value; every other one shows `set` or `unset` |
+| `config.load` | debug | `paths` (the `.env` files looked for), `file` (the one read, or `""`), and `keys`: for each variable read, its `source` (`env`, `.env` or `default`) and `value`. Only `GITHUB_REPO`, `AMF_API_URL`, `OPENCODE_MODEL`, `AMF_AGENT_TIMEOUT`, `AMF_STALE_TIMEOUT`, `AMF_LOG_LEVEL`, `AMF_CLAUDE`, `AMF_CODEX` and `AMF_OPENCODE` show their value; every other one shows `set` or `unset` |
 | `pg.connect` | debug | With `AMF_POSTGRES_URL`: `host`, `port`, `database`, and `tls` and `auth` (`trust`, `password`, `md5` or `scram-sha-256`), or `error`; `created` when amf created the database. The first connection's event follows `log.file` and `config.load` |
 | `pg.retry` | debug | `attempt` (since the last success), `backoff`, `error` |
 | `pg.drop` | debug | `rows` that never reached the database, and `error` when amf gave up at exit |

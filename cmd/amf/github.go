@@ -47,9 +47,11 @@ type Issue struct {
 	User        struct {
 		Login string `json:"login"`
 	} `json:"user"`
-	// The timestamps are for amf's memory; GitHub sends RFC 3339.
+	// UpdatedAt is when the issue last changed; the stale sweep falls back
+	// to it when the events don't say when amf:in-progress was added.
+	UpdatedAt time.Time `json:"updated_at"`
+	// CreatedAt and ClosedAt are for amf's memory; GitHub sends RFC 3339.
 	CreatedAt string `json:"created_at,omitempty"`
-	UpdatedAt string `json:"updated_at,omitempty"`
 	ClosedAt  string `json:"closed_at,omitempty"`
 }
 
@@ -477,6 +479,38 @@ func (g *GitHub) ListIssues(ctx context.Context, state, label string, asc bool) 
 		return b.Number - a.Number
 	})
 	return issues, nil
+}
+
+// IssueEvent is one entry of an issue's events: for "labeled" and
+// "unlabeled", Label is the label.
+type IssueEvent struct {
+	Event     string    `json:"event"`
+	CreatedAt time.Time `json:"created_at"`
+	Label     struct {
+		Name string `json:"name"`
+	} `json:"label"`
+}
+
+// LabeledAt is when label was last added to issue n, from its events, or
+// the zero time if the events don't record it.
+func (g *GitHub) LabeledAt(ctx context.Context, n int, label string) (time.Time, error) {
+	var at time.Time
+	for path := g.repoPath("/issues/%d/events?per_page=100", n); path != ""; {
+		var page []IssueEvent
+		header, err := g.send(ctx, "GET", path, nil, &page)
+		if err != nil {
+			return time.Time{}, err
+		}
+		for _, e := range page {
+			if e.Event == "labeled" && e.Label.Name == label && e.CreatedAt.After(at) {
+				at = e.CreatedAt
+			}
+		}
+		if path, err = g.nextPage(header); err != nil {
+			return time.Time{}, err
+		}
+	}
+	return at, nil
 }
 
 // nextPage is the path of the rel="next" page in a Link header, or "" on the last page.

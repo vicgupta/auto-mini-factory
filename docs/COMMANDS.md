@@ -199,7 +199,11 @@ subscribed to Go. A repo with a pipeline ignores
 
 Without a pipeline (see below), amf runs one agent once. With Claude Code:
 
-1. Labels the issue `amf:in-progress` and removes `amf:ready`.
+1. Checks the issue isn't already turned into a PR: with an open PR from
+   `amf/issue-N` it labels the issue `amf:pr-open` and stops; with an
+   `amf/issue-N` branch on origin and no open PR it stops too (unless the
+   issue is `amf:failed`, which is a retry). `--force` skips this check.
+   Then labels the issue `amf:in-progress` and removes `amf:ready`.
 2. Fetches the default branch and creates a worktree at
    `.amf/worktrees/issue-N` on branch `amf/issue-N` from `origin/<default>`.
 3. Runs `claude -p --dangerously-skip-permissions --output-format stream-json --verbose` in the
@@ -218,10 +222,10 @@ Without a pipeline (see below), amf runs one agent once. With Claude Code:
    Actions secrets before anyone reviews it.
 5. Opens a PR with the agent's final message as the body plus `Closes #N`, as
    a draft with `--draft` (default off; `amf run` and `amf watch` take it). On
-   a retry whose PR is still open, it updates that PR's title and body
+   a `--force` retry whose PR is still open, it updates that PR's title and body
    instead, and leaves it a draft or ready for review as it was.
-6. Comments the PR link on the issue, labels it `amf:done` (a draft PR
-   counts), removes the worktree.
+6. Comments the PR link on the issue, labels it `amf:pr-open` (a draft PR
+   counts; `amf:done` once `--merge` merged it), removes the worktree.
 
 With [`--merge`](#merge-methods), amf also merges the PR before commenting,
 with a merge commit (or `--merge=squash`, `--merge=rebase`), pinned to the
@@ -239,8 +243,13 @@ Nothing is labeled, commented, pushed, opened or merged. See the change with
 `git diff origin/main amf/issue-N`. The agent still runs with every
 permission, so the trust rules below still apply.
 
-On any failure the issue gets `amf:failed` plus a comment with the reason,
-and the worktree is kept for inspection. A run that hit the agent timeout
+On any failure the issue gets `amf:failed` plus a comment with the reason:
+each agent amf tried, in order, with its exit code and duration, whether
+the fallback agent ran and if not why, and the last 40 lines of the agent's
+log, redacted, with the log's path. An issue that already had an open PR
+keeps `amf:pr-open` instead (and a merged one `amf:done`): a failed retry
+never marks it `amf:failed`.
+The worktree is kept for inspection. A run that hit the agent timeout
 loses only the worktree: amf comments with how to retry with more time and
 keeps the logs and partial output. Re-running `amf run N` starts again from a
 fresh worktree.
@@ -458,11 +467,27 @@ format, so a skill only needs to say how to do the work.
 
 ## Labels
 
-An issue moves `amf:ready` → `amf:in-progress` → `amf:done` or `amf:failed`.
+An issue moves `amf:ready` → `amf:in-progress` → `amf:pr-open` (PR open,
+not merged), `amf:done` (PR merged by `--merge`) or `amf:failed`. `amf watch`
+creates `amf:pr-open` if the repo lacks it; `amf init` creates all five.
 `amf issue` adds `amf:ready`, and `amf watch` picks up open `amf:ready` issues
 oldest first. To retry an issue, add `amf:ready` again or run `amf run N`.
 If amf is killed mid-run and an issue is stuck on `amf:in-progress`, run
-`amf run N`.
+`amf run N`, or let `amf watch` recover it: each poll it puts
+`amf:in-progress` issues no amf is working on back to `amf:ready` once the
+label is older than `--stale-timeout` (`AMF_STALE_TIMEOUT`; default twice
+the agent timeout and at least 2h; `off` disables it), using the time the
+label was added from the issue's events, else the issue's `updated_at`. An
+issue whose PR is open becomes `amf:pr-open` instead.
+
+## The repo lock
+
+`amf run`, `amf watch` and `amf auto` take `.amf/watch.lock` in the checkout
+before they work, written atomically with the PID, host, command and start
+time, and refreshed every minute. If another live amf holds it, the command
+exits with an error naming it. A lock is stale, and taken over, when its PID
+is dead on the same host or it hasn't been refreshed for 10 minutes. It is
+removed on exit, including Ctrl-C and SIGTERM.
 
 Issues labeled `amf` by amf v0.0.4 and earlier aren't picked up any more.
 Relabel them `amf:ready`, or run `amf watch --label amf`.
