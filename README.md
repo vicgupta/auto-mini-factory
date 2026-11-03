@@ -207,6 +207,8 @@ installed is a `FAIL`.
 
 ## Use
 
+For complete workflows, see the [examples cookbook](docs/EXAMPLES.md).
+
 Run `run` and `watch` inside a clone of `GITHUB_REPO`, or from any folder that
 holds your `.env`. There, amf clones the repo into `./<name>` the first time
 (using your git credentials) and reuses that clone afterwards. amf checks

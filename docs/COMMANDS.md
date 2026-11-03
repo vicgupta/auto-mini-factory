@@ -5,6 +5,8 @@ does, its flags, logs and labels. `amf help <command>` (or `amf <command> -h`)
 prints the same in the terminal. Every setting is in
 [Configuration (.env)](../README.md#configuration-env) and `amf help env`.
 
+For complete command sequences, see the [examples cookbook](EXAMPLES.md).
+
 ## Run and watch
 
 Run `run` and `watch` inside a clone of `GITHUB_REPO`, or from any folder that
