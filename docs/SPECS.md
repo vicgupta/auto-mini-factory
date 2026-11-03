@@ -110,6 +110,8 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened, and merged
   rebase, got "<value>"`, both at startup. `--merge` with `--draft` fails
   at startup with `--draft and --merge can't be used together: GitHub doesn't
   merge draft pull requests`.
+  The `run`, `watch` and `auto` help texts link to
+  [Merge methods](COMMANDS.md#merge-methods) for history diagrams and tradeoffs.
 - `--dry-run` (`run` only; default off) makes the change on the local
   `amf/issue-N` branch and prints the pull request amf would open, without
   changing anything on GitHub: no label, comment, push, PR or merge. See

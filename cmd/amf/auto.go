@@ -36,6 +36,8 @@ const autoHelp = `Usage:
   amf auto --abort [--close-issues]
 
 Turns one sentence into a few issues and works through them, merging each PR.
+See diagrams and tradeoffs for --merge at:
+https://github.com/vicgupta/auto-mini-factory/blob/main/docs/COMMANDS.md#merge-methods
 
 1. Plan: the agent (picked as for amf run: see amf help agents) reads the
    repo and splits the sentence into at most --max-issues issues, each with a

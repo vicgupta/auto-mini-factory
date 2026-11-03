@@ -243,6 +243,7 @@ amf run 42 --dry-run        # make the change locally and show the PR, touching 
 See [docs/COMMANDS.md](docs/COMMANDS.md) for the details:
 
 - [Choosing the agent](docs/COMMANDS.md#choosing-the-agent): which agent runs, and the fallback
+- [Merge methods](docs/COMMANDS.md#merge-methods): how `--merge`, `--merge=squash` and `--merge=rebase` shape history
 - [What `amf run N` does](docs/COMMANDS.md#what-amf-run-n-does), [logs](docs/COMMANDS.md#logs) and [logs in PostgreSQL](docs/COMMANDS.md#logs-in-postgresql)
 - [Pipelines](docs/COMMANDS.md#pipelines-plan--code--eval) and [labels](docs/COMMANDS.md#labels)
 

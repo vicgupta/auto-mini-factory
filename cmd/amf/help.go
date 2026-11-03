@@ -43,6 +43,8 @@ Processes one issue into a pull request (alias of amf issue run; also takes
 --merge makes run and watch merge each PR they open or update, without
 review: a merge commit, or --merge=squash or --merge=rebase. A merge GitHub
 refuses (a conflict, required checks or reviews) leaves the PR open.
+See diagrams and tradeoffs for --merge at:
+https://github.com/vicgupta/auto-mini-factory/blob/main/docs/COMMANDS.md#merge-methods
 
 amf run --dry-run makes the change on the local amf/issue-N branch and prints
 the pull request it would open, without labeling, commenting, pushing,
@@ -61,6 +63,8 @@ Processes amf:ready issues as they arrive, one at a time, until interrupted
 (alias of amf issue watch; also takes --exclude-label, --draft, --merge,
 --agent-timeout, --eval-rounds, --log-level, --log-file). --merge, the
 checkout and the agent work as for amf run: see amf help run.
+See merge methods at:
+https://github.com/vicgupta/auto-mini-factory/blob/main/docs/COMMANDS.md#merge-methods
 
 amf help agents says which agent runs; amf help env lists the settings.
 `
