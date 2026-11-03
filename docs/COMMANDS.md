@@ -36,6 +36,9 @@ amf auto "Add a dark mode toggle"  # plan issues, merge the first PR, then ask b
 amf run 42 --dry-run        # make the change locally and show the PR, touching nothing on GitHub
 ```
 
+For `run` and `watch`, [`--merge[=merge|squash|rebase]`](#merge-methods)
+selects how each PR is merged; without it, PRs stay open for review.
+
 ## Auto: one sentence to merged PRs
 
 ```sh
@@ -53,7 +56,8 @@ criteria. A plan with more issues, or an unusable one, is an error and creates
 nothing. The issues are created labeled `amf:auto` only, their URLs are
 printed, and `amf:ready` is added immediately before each issue runs. They
 run one at a time like `amf run`, each PR merged
-(`--merge=merge` by default, or `squash` / `rebase`).
+([`--merge=merge`](#merge-methods) by default, or `--merge=squash` /
+`--merge=rebase`).
 
 By default, after the first merge amf stops at a checkpoint and shows the PR, its merge
 commit, the agent and the checks. On a terminal it asks for approval; on
@@ -177,10 +181,11 @@ Without a pipeline (see below), amf runs one agent once. With Claude Code:
 6. Comments the PR link on the issue, labels it `amf:done` (a draft PR
    counts), removes the worktree.
 
-With `--merge`, amf also merges the PR before commenting, with a merge commit
-(or `--merge=squash`, `--merge=rebase`), pinned to the commit it pushed. It
-doesn't wait for checks, so with required checks or reviews GitHub refuses
-and the PR stays open; amf comments why, and `amf run` exits 1. amf never
+With [`--merge`](#merge-methods), amf also merges the PR before commenting,
+with a merge commit (or `--merge=squash`, `--merge=rebase`), pinned to the
+commit it pushed. It doesn't wait for checks, so with required checks or
+reviews GitHub refuses and the PR stays open; amf comments why, and
+`amf run` exits 1. amf never
 merges a change to the top-level `AGENTS.md`, which holds the pipeline.
 `--merge` can't be combined with `--draft`, since GitHub doesn't merge drafts.
 
@@ -197,6 +202,61 @@ and the worktree is kept for inspection. A run that hit the agent timeout
 loses only the worktree: amf comments with how to retry with more time and
 keeps the logs and partial output. Re-running `amf run N` starts again from a
 fresh worktree.
+
+## Merge methods
+
+`amf run N --merge=METHOD`, `amf watch --merge=METHOD` and
+`amf auto "sentence" --merge=METHOD` select the same three methods.
+Bare `--merge` means `--merge=merge`. `run` and `watch` leave PRs open by
+default; `auto` always merges, using a merge commit unless you select another
+method. Use `=` for the method, for example `--merge=squash`.
+
+These diagrams start from the same history: `main` is the default branch,
+and `C` and `D` are the PR's commits, branched from `A`:
+
+```text
+A---B       main
+ \
+  C---D     PR
+```
+
+**Merge commit (`--merge` or `--merge=merge`)** keeps the original commits
+and adds a merge commit `M` with two parents:
+
+```text
+A---B---M   main
+ \     /
+  C---D
+```
+
+Preserves the full history and an explicit PR boundary, but adds a merge
+commit and a branch in the history.
+
+**Squash (`--merge=squash`)** combines the PR's changes into one new commit
+`S` on the default branch:
+
+```text
+A---B---S   main (S combines C and D)
+```
+
+Keeps history linear with one commit per PR, making the whole change easy
+to revert. The PR's individual commits are lost from the default branch's
+history.
+
+**Rebase (`--merge=rebase`)** replays the PR's commits individually on top
+of the default branch, without a merge commit:
+
+```text
+A---B---C'---D'   main
+```
+
+Keeps history linear and retains the individual changes, but GitHub gives
+them new commit SHAs (`C'`, `D'`) and there is no merge commit marking the PR
+boundary. Best when the individual commits are worth keeping.
+
+These are [GitHub's merge methods](https://docs.github.com/en/pull-requests/reference/pull-request-merges).
+The repository must allow the selected method; branch protection and amf's
+merge safety rules still apply.
 
 ## Logs
 
