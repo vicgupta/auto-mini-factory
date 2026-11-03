@@ -23,6 +23,8 @@ running a platform.
 
 `amf help <command>` or `amf <command> -h` prints a command's details, and
 [docs/COMMANDS.md](docs/COMMANDS.md) has the full reference.
+For common failures and fixes, see the
+[troubleshooting guide](docs/TROUBLESHOOTING.md).
 
 ## Quick start
 

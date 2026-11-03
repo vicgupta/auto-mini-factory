@@ -566,9 +566,10 @@ permission) fails with its first message and leaves the PR as it was.
 
 Prints one line per check, as `<status>  <check>  <detail>`. The status is
 `ok`, `warn` (works, but worth knowing), `FAIL`, or `skip` (an earlier check
-it depends on failed). Any `FAIL` ends with `doctor found N problems` and
-exit 1; warnings alone exit 0. It never clones, creates labels or pushes, and
-never prints a secret. The checks, in order:
+it depends on failed). Any `FAIL` prints a link to
+[the troubleshooting guide](TROUBLESHOOTING.md) on stderr, then ends with
+`doctor found N problems` and exit 1; warnings alone exit 0. It never clones,
+creates labels or pushes, and never prints a secret. The checks, in order:
 
 | Check | `ok` when | Otherwise |
 |---|---|---|
@@ -686,6 +687,11 @@ work. Starter skills are in this repo under `skills/`.
   worktree (`.amf/code.md` without a pipeline), which git ignores.
 
 ## Processing one issue
+
+After validating its arguments, `amf run` prints a link to
+[the troubleshooting guide](TROUBLESHOOTING.md) on stderr if setup or issue
+processing fails, including a PR that could not merge. The original error
+and exit code are preserved.
 
 1. **Preflight.** Confirm `GITHUB_REPO` exists and `GITHUB_TOKEN` can reach it.
    A 404 means the repo or token is wrong; a 401 means the token was rejected.

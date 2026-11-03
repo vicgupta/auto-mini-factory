@@ -49,6 +49,7 @@ func cmdDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	d.check(ctx)
 	d.w.Flush()
 	if d.fails > 0 {
+		fmt.Fprintln(stderr, "amf: troubleshooting:", troubleshootingURL)
 		return fmt.Errorf("doctor found %d %s", d.fails, plural(d.fails, "problem", "problems"))
 	}
 	return nil
