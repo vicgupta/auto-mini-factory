@@ -38,10 +38,11 @@ func (d *doctor) line(status, check, format string, a ...any) {
 // cmdDoctor checks everything amf needs to run here, without changing
 // anything: no clone, no labels, no push.
 func cmdDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) error {
-	if len(args) != 0 {
-		if isHelpArgs(args) {
-			fmt.Fprint(stderr, doctorHelp)
-		}
+	pos, err := parseArgs(newCommandFlags("doctor", stderr), args)
+	if err != nil {
+		return errUsage
+	}
+	if len(pos) != 0 {
 		fmt.Fprintln(stderr, "usage: amf doctor")
 		return errUsage
 	}

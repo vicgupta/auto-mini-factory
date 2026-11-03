@@ -49,10 +49,11 @@ func isPlaceholder(v string) bool {
 // values are carried over into the new file. Once .env has a usable token and
 // repo, it also creates any of amf's labels the repository is missing.
 func cmdInit(ctx context.Context, args []string, stdout, stderr io.Writer) error {
-	if len(args) != 0 {
-		if isHelpArgs(args) {
-			fmt.Fprint(stderr, initHelp)
-		}
+	pos, err := parseArgs(newCommandFlags("init", stderr), args)
+	if err != nil {
+		return errUsage
+	}
+	if len(pos) != 0 {
 		fmt.Fprintln(stderr, "usage: amf init")
 		return errUsage
 	}

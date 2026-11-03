@@ -36,8 +36,11 @@ running a platform.
 | `amf version` | print amf's version |
 | `amf help` | show help for a command or topic |
 
-`amf help <command>` or `amf <command> -h` prints a command's details, and
-[docs/COMMANDS.md](docs/COMMANDS.md) has the full reference.
+`amf help <command>` or `amf <command> --help` (`-h`) prints a command's details, and
+[docs/COMMANDS.md](docs/COMMANDS.md) has the full reference. Every flag has a long
+`--full-word` form, used in all examples here; common ones also have a one-letter
+short form, such as `-a` for `--agent` (see
+[Flag conventions](docs/COMMANDS.md#flag-conventions) or `amf help flags`).
 For common failures and fixes, see the
 [troubleshooting guide](docs/TROUBLESHOOTING.md).
 
@@ -54,7 +57,7 @@ amf init                 # writes .env; fills GITHUB_REPO from origin
 # Edit .env: set GITHUB_TOKEN, check GITHUB_REPO and configure your agent.
 amf init                 # creates any missing amf labels once configured
 amf doctor               # check the setup
-amf issue "Add dark mode" -b "Use CSS variables for the palette"
+amf issue "Add dark mode" --body "Use CSS variables for the palette"
 amf run 42               # replace 42 with the issue number in the URL printed above
 ```
 
@@ -256,8 +259,8 @@ holds your `.env`. There, amf clones the repo into `./<name>` the first time
 `GITHUB_REPO` against GitHub first, so a typo fails with a clear message.
 
 ```sh
-amf issue "Add dark mode" -b "Use CSS variables for the palette"
-amf issue "Fix login bug" -f bug.md
+amf issue "Add dark mode" --body "Use CSS variables for the palette"
+amf issue "Fix login bug" --file bug.md
 echo "details" | amf issue "Title"     # body from stdin
 amf issue "Just a note" --no-label     # won't be picked up by watch
 

@@ -38,7 +38,7 @@ than assuming it will be issue #1. `amf issue create` prints `#N URL`.
 ```sh
 set -eu
 created=$(amf issue create "Document the test command" \
-  -b "Add the project's existing test command to README.md, with a short explanation of how to run it locally.")
+  --body "Add the project's existing test command to README.md, with a short explanation of how to run it locally.")
 amf run "${created%% *}" --agent codex
 amf pr list
 ```
@@ -56,9 +56,9 @@ amf process is not already working.
 ```sh
 set -eu
 amf issue create "Document the build command" \
-  -b "Add the project's existing build command to README.md and describe where its output goes."
+  --body "Add the project's existing build command to README.md and describe where its output goes."
 amf issue create "Document required environment variables" \
-  -b "List the environment variables the application currently requires, with descriptions and no real secrets."
+  --body "List the environment variables the application currently requires, with descriptions and no real secrets."
 amf watch --agent codex --interval 60s --draft
 ```
 
@@ -90,7 +90,7 @@ git add AGENTS.md
 git commit -m "Configure amf plan, code and eval stages"
 git push origin HEAD
 created=$(amf issue create "Document the development workflow" \
-  -b "Document the existing install, build and test commands in README.md. Verify each against the project configuration.")
+  --body "Document the existing install, build and test commands in README.md. Verify each against the project configuration.")
 amf run "${created%% *}" --eval-rounds 2
 amf pr list
 ```

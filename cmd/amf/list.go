@@ -23,7 +23,7 @@ type listedIssue struct {
 func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("list", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	withHelp(fs, stderr, listHelp)
+	withHelp(fs, stderr, "list")
 	state := fs.String("state", "open", "open, closed or all")
 	label := fs.String("label", "", "only issues with this label, e.g. amf:ready")
 	search := fs.String("search", "", "only issues whose title contains this text, ignoring case")
@@ -37,7 +37,7 @@ func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		return errUsage
 	}
 	if len(pos) != 0 {
-		fmt.Fprintln(stderr, "usage: amf issue list [--state open|closed|all] [--label L] [--search TEXT] [--limit N] [--json]")
+		fmt.Fprintln(stderr, "usage: amf issue list [--state open|closed|all] [--label name] [--search text] [--limit n] [--json]")
 		return errUsage
 	}
 	if *limit < 0 {

@@ -86,12 +86,30 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return cmdDoctor(ctx, rest, stdout, stderr)
 	case "update":
 		return cmdUpdate(ctx, rest, stdout, stderr)
-	case "version", "--version":
+	case "--version":
+		fmt.Fprintln(stdout, "amf", buildVersion())
+		return nil
+	case "version":
+		if _, err := parseArgs(newCommandFlags("version", stderr), rest); err != nil {
+			return errUsage
+		}
 		fmt.Fprintln(stdout, "amf", buildVersion())
 		return nil
 	case "help", "-h", "--help":
 		// amf help <command or topic> prints its details.
 		if cmd == "help" && len(rest) > 0 {
+			key := rest[0]
+			if len(rest) > 1 && (key == "pr" || key == "issue" || key == "memory") {
+				key += " " + rest[1]
+			}
+			if a, ok := helpArgs[key]; ok {
+				// The command prints its own help, flags and all, so
+				// amf help run matches amf run --help.
+				if err := run(ctx, append(slices.Clone(a), "--help"), nil, stdout, stdout); err != nil && !errors.Is(err, errUsage) {
+					return err
+				}
+				return nil
+			}
 			if t, ok := helpTopics[rest[0]]; ok {
 				_, err := fmt.Fprint(stdout, t)
 				return err
@@ -120,10 +138,9 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 }
 
 func cmdIssueCreate(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	fs := flag.NewFlagSet("issue", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	body := fs.String("b", "", "issue body")
-	file := fs.String("f", "", "read the issue body from a file (- for stdin)")
+	fs := newCommandFlags("issue create", stderr)
+	body := fs.String("body", "", "`text` of the issue body")
+	file := fs.String("file", "", "read the issue body from the file at `path` (- for stdin)")
 	label := fs.String("label", labelReady, "label that marks the issue for amf")
 	noLabel := fs.Bool("no-label", false, "don't label the issue for amf")
 	pos, err := parseArgs(fs, args)
@@ -134,7 +151,7 @@ func cmdIssueCreate(ctx context.Context, args []string, stdin io.Reader, stdout,
 		return errUsage
 	}
 	if len(pos) != 1 || strings.TrimSpace(pos[0]) == "" {
-		fmt.Fprintln(stderr, `usage: amf issue "Title" [-b body | -f file.md] [--label L] [--no-label]`)
+		fmt.Fprintln(stderr, `usage: amf issue create "Title" [--body text | --file path] [--label name] [--no-label]`)
 		return errUsage
 	}
 
@@ -145,7 +162,7 @@ func cmdIssueCreate(ctx context.Context, args []string, stdin io.Reader, stdout,
 	var bodySet, labelSet bool
 	fs.Visit(func(f *flag.Flag) {
 		switch f.Name {
-		case "b":
+		case "body":
 			bodySet = true
 		case "label":
 			labelSet = true
@@ -161,7 +178,7 @@ func cmdIssueCreate(ctx context.Context, args []string, stdin io.Reader, stdout,
 	text := *body
 	switch {
 	case bodySet && *file != "":
-		return errors.New("use -b or -f, not both")
+		return errors.New("use --body or --file, not both")
 	case *file == "-":
 		text, err = readAll(stdin)
 	case *file != "":
@@ -194,7 +211,7 @@ func cmdIssueCreate(ctx context.Context, args []string, stdin io.Reader, stdout,
 func cmdRun(ctx context.Context, args []string, stderr io.Writer) (err error) {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	withHelp(fs, stderr, runHelp)
+	withHelp(fs, stderr, "run")
 	at, alias := addTimeoutFlags(fs)
 	evalRounds := fs.Int("eval-rounds", 2, "how many times a pipeline's eval stage may send the change back to code")
 	agent := fs.String("agent", "", agentFlagHelp)
@@ -215,7 +232,7 @@ func cmdRun(ctx context.Context, args []string, stderr io.Writer) (err error) {
 		return errDraftMerge
 	}
 	if len(pos) != 1 {
-		fmt.Fprintln(stderr, "usage: amf run <issue-number> [--agent claudecode|codex|opencode] [--agent-timeout 60m] [--eval-rounds 2] [--dry-run] [--force] [--draft] [--merge[=squash|rebase]]")
+		fmt.Fprintln(stderr, "usage: amf run <issue-number> [flags] (amf run --help lists them)")
 		return errUsage
 	}
 	timeout, err := timeoutFlag(fs, at, alias)
@@ -261,7 +278,7 @@ func cmdRun(ctx context.Context, args []string, stderr io.Writer) (err error) {
 func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 	fs := flag.NewFlagSet("watch", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	withHelp(fs, stderr, watchHelp)
+	withHelp(fs, stderr, "watch")
 	interval := fs.Duration("interval", 60*time.Second, "how often to poll GitHub")
 	label := fs.String("label", labelReady, "process open issues with this label")
 	var exclude labelsFlag
@@ -288,7 +305,7 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 		return errDraftMerge
 	}
 	if len(pos) != 0 {
-		fmt.Fprintln(stderr, "usage: amf watch [--agent claudecode|codex|opencode] [--interval 60s] [--label amf:ready] [--exclude-label L]... [--agent-timeout 60m] [--stale-timeout 2h] [--eval-rounds 2] [--draft] [--merge[=squash|rebase]]")
+		fmt.Fprintln(stderr, "usage: amf watch [flags] (amf watch --help lists them)")
 		return errUsage
 	}
 	if *interval <= 0 {
@@ -602,6 +619,7 @@ func envPaths(ctx context.Context) []string {
 // so `amf issue "Title" -b body` and `amf run 42 --agent-timeout 1h` both work.
 func parseArgs(fs *flag.FlagSet, args []string) ([]string, error) {
 	var pos []string
+	args = expandShortFlags(fs, args)
 	for {
 		if err := fs.Parse(args); err != nil {
 			return nil, err
