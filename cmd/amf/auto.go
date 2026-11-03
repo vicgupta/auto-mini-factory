@@ -29,6 +29,8 @@ const autoStateVersion = 1
 const autoHelp = `Usage:
   amf auto "<one simple sentence>" [--agent A] [--max-issues 5] [--merge[=squash|rebase]] [--agent-timeout 60m] [--eval-rounds 2] [--dry-run] [--log-level L] [--log-file P]
   amf auto --continue [--agent A] [--agent-timeout 60m] [--eval-rounds 2] [--log-level L] [--log-file P]
+  amf auto status
+  amf auto --abort [--close-issues]
 
 Turns one sentence into a few issues and works through them, merging each PR.
 
@@ -55,7 +57,12 @@ If an issue fails or its PR can't be merged, amf auto stops there and says
 so; amf auto --continue retries that issue. --dry-run only plans: it prints
 the issues it would create and creates nothing.
 
-Remove .amf/auto/state.json to abandon a run and start another.
+amf auto status prints the saved sentence, merge method and each issue's
+status, PR and commit without contacting GitHub or running agents.
+amf auto --abort removes the saved state so another run can start. With
+--close-issues, it first closes the created, unmerged issues on GitHub;
+if closing fails, the state is kept so you can retry. Plain --abort leaves
+GitHub issues unchanged. Stop any active auto process before aborting.
 Add amf:ready to any remaining issues to let amf watch process them.
 `
 
@@ -492,6 +499,10 @@ func (r *Runner) checkSummary(ctx context.Context, commit string) string {
 }
 
 func cmdAuto(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	status := len(args) > 0 && args[0] == "status"
+	if status {
+		args = args[1:]
+	}
 	fs := flag.NewFlagSet("auto", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	withHelp(fs, stderr, autoHelp)
@@ -502,11 +513,35 @@ func cmdAuto(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	merge := &mergeFlag{value: "merge"}
 	fs.Var(merge, "merge", "how to merge each PR: a merge commit (the default), or --merge=squash or --merge=rebase")
 	cont := fs.Bool("continue", false, "approve the checkpoint and resume the saved amf auto run")
+	abort := fs.Bool("abort", false, "abandon the saved run by removing its state")
+	closeIssues := fs.Bool("close-issues", false, "with --abort, close the created, unmerged issues first")
 	dryRun := fs.Bool("dry-run", false, "plan only: print the issues amf would create, and create nothing")
 	lo := addLogFlags(fs)
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return errUsage
+	}
+	if *closeIssues && !*abort {
+		return errors.New("--close-issues requires --abort")
+	}
+	if status || *abort {
+		mode := "status"
+		if !status {
+			mode = "--abort"
+		}
+		if len(pos) > 0 {
+			return fmt.Errorf("amf auto %s takes no sentence", mode)
+		}
+		fs.Visit(func(f *flag.Flag) {
+			if !status && (f.Name == "abort" || f.Name == "close-issues") {
+				return
+			}
+			err = fmt.Errorf("%s and --%s can't be used together", mode, f.Name)
+		})
+		if err != nil {
+			return err
+		}
+		return cmdAutoState(ctx, status, *closeIssues, stdout)
 	}
 	if err := merge.check(pos); err != nil {
 		return err
@@ -521,7 +556,7 @@ func cmdAuto(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	case *cont && *dryRun:
 		return errors.New("--continue and --dry-run can't be used together")
 	case !*cont && sentence == "":
-		fmt.Fprintln(stderr, `usage: amf auto "<one simple sentence>" [--agent A] [--max-issues 5] [--merge[=squash|rebase]] [--dry-run] | amf auto --continue`)
+		fmt.Fprintln(stderr, `usage: amf auto "<one simple sentence>" [--agent A] [--max-issues 5] [--merge[=squash|rebase]] [--dry-run] | amf auto --continue | amf auto status | amf auto --abort [--close-issues]`)
 		return errUsage
 	}
 	if *maxIssues < 1 || *maxIssues > 10 {
@@ -544,6 +579,68 @@ func cmdAuto(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	}, terminalApprover(stdin, stdout), stdout))
 	r.DB.logError(err)
 	return err
+}
+
+// cmdAutoState avoids runner setup: inspection and plain abort need neither
+// GitHub nor agents, and must not clone a repo or create logs.
+func cmdAutoState(ctx context.Context, status, closeIssues bool, stdout io.Writer) error {
+	root, err := git(ctx, ".", "rev-parse", "--show-toplevel")
+	if err != nil {
+		// Outside a checkout, auto uses ./<repo name>. Locate that state
+		// without invoking checkoutRoot, which could create a new clone.
+		cfg, err := loadConfig(envPaths(ctx)...)
+		if err != nil {
+			return err
+		}
+		_, root, _ = strings.Cut(cfg.Repo, "/")
+	}
+	path := autoStatePath(root)
+	if !status && !closeIssues {
+		// Plain abort also recovers from corrupt or unsupported state.
+		err = os.Remove(path)
+	} else {
+		var st *autoState
+		st, err = loadAutoState(path)
+		if err == nil {
+			if status {
+				fmt.Fprintf(stdout, "Sentence: %s\nMerge method: %s\n", st.Sentence, st.Merge)
+				for _, is := range st.Issues {
+					number := "not created"
+					if is.Number != 0 {
+						number = fmt.Sprintf("#%d", is.Number)
+					}
+					fmt.Fprintf(stdout, "%s %s: %s\n  PR: %s\n  commit: %s\n", number, is.Title, is.Status, is.PR, is.Commit)
+				}
+				return nil
+			}
+			cfg, err := loadConfig(envPaths(ctx)...)
+			if err != nil {
+				return err
+			}
+			if st.Repo != cfg.Repo {
+				return fmt.Errorf("cannot close amf auto issues: state's repo %q differs from GITHUB_REPO %q", st.Repo, cfg.Repo)
+			}
+			gh := newGitHub(cfg)
+			for _, is := range st.Issues {
+				if is.Number == 0 || is.Status == "merged" {
+					continue
+				}
+				if err := gh.CloseIssue(ctx, is.Number); err != nil {
+					return redactErr(configRedactor(cfg), fmt.Errorf("closing issue #%d (state kept; retry amf auto --abort --close-issues): %w", is.Number, err))
+				}
+			}
+			err = os.Remove(path)
+		}
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		fmt.Fprintln(stdout, "No amf auto run saved.")
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(stdout, "Aborted amf auto run; saved state removed.")
+	return nil
 }
 
 // autoOptions are amf auto's flags that Auto needs.
@@ -585,8 +682,8 @@ func (r *Runner) Auto(ctx context.Context, sentence string, o autoOptions, appro
 		return r.autoWork(ctx, saved, path, approve, stdout)
 	}
 	if saved != nil && !o.DryRun {
-		return fmt.Errorf("an amf auto run is already in progress (%q, %s); run amf auto --continue to resume it, or remove %s to start over",
-			saved.Sentence, remainingLine(saved), shownPath(r.Root, path))
+		return fmt.Errorf("an amf auto run is already in progress (%q, %s); run amf auto --continue to resume it, or amf auto --abort to start over",
+			saved.Sentence, remainingLine(saved))
 	}
 	r.Merge = o.Merge
 	issues, err := r.autoPlan(ctx, sentence, o.MaxIssues)

@@ -5,6 +5,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -212,6 +213,15 @@ func TestAutoFlags(t *testing.T) {
 		{[]string{"x", "--merge=false"}, "always merges"},
 		{[]string{"x", "--max-issues", "0"}, "between 1 and 10"},
 		{[]string{"--continue", "--dry-run"}, "can't be used together"},
+		{[]string{"--abort", "x"}, "takes no sentence"},
+		{[]string{"--abort", "--continue"}, "can't be used together"},
+		{[]string{"--abort", "--dry-run"}, "can't be used together"},
+		{[]string{"--close-issues"}, "requires --abort"},
+		{[]string{"status", "x"}, "takes no sentence"},
+		{[]string{"status", "--abort"}, "can't be used"},
+		{[]string{"status", "--continue"}, "can't be used"},
+		{[]string{"status", "--dry-run"}, "can't be used"},
+		{[]string{"status", "--agent", "codex"}, "can't be used"},
 	} {
 		err := cmdAuto(context.Background(), tc.args, nil, &bytes.Buffer{}, &bytes.Buffer{})
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -220,5 +230,74 @@ func TestAutoFlags(t *testing.T) {
 	}
 	if err := cmdAuto(context.Background(), nil, nil, &bytes.Buffer{}, &bytes.Buffer{}); err != errUsage {
 		t.Fatalf("no args: %v", err)
+	}
+}
+
+func TestAutoStatus(t *testing.T) {
+	root, _ := setupRepo(t)
+	t.Chdir(root)
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("GITHUB_REPO", "")
+	var out bytes.Buffer
+	if err := cmdAuto(context.Background(), []string{"status"}, nil, &out, &bytes.Buffer{}); err != nil || !strings.Contains(out.String(), "No amf auto run") {
+		t.Fatalf("no run: %v, output: %s", err, &out)
+	}
+	st := &autoState{Version: autoStateVersion, Sentence: "do three things", Merge: "squash", Issues: []autoIssue{
+		{Number: 1, Title: "One", Status: "merged", PR: "https://github.com/vic/demo/pull/101", Commit: "abc123"},
+		{Number: 2, Title: "Two", Status: "failed", PR: "https://github.com/vic/demo/pull/102"},
+		{Title: "Three", Status: "pending"},
+	}}
+	path := autoStatePath(root)
+	if err := saveAutoState(path, st); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := cmdAuto(context.Background(), []string{"status"}, nil, &out, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{st.Sentence, "squash", "#1", "One", "merged", st.Issues[0].PR, "abc123", "#2", "failed", st.Issues[1].PR, "Three", "pending", "not created"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("missing %q in %s", want, &out)
+		}
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("status changed state: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".amf", "runs")); !os.IsNotExist(err) {
+		t.Fatalf("status created logs: %v", err)
+	}
+}
+
+func TestAutoAbortThenNewRun(t *testing.T) {
+	r, gh, _ := newAutoRunner(t, autoClaude)
+	t.Chdir(r.Root)
+	ctx := context.Background()
+	noTTY := func(string) (bool, bool) { return false, false }
+	opts := autoOptions{MaxIssues: 5, Merge: "merge"}
+	var out bytes.Buffer
+	if err := r.Auto(ctx, "first run", opts, noTTY, &out); err != nil {
+		t.Fatal(err)
+	}
+	before := len(gh.writes)
+	if err := cmdAuto(ctx, []string{"--abort"}, nil, &out, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(autoStatePath(r.Root)); !os.IsNotExist(err) {
+		t.Fatalf("state left after abort: %v", err)
+	}
+	if len(gh.writes) != before || gh.issues[2].State != "open" {
+		t.Fatal("plain abort changed GitHub issues")
+	}
+	if err := r.Auto(ctx, "second run", opts, noTTY, &out); err != nil {
+		t.Fatal(err)
+	}
+	st, err := loadAutoState(autoStatePath(r.Root))
+	if err != nil || st.Sentence != "second run" || len(gh.issues) != 6 {
+		t.Fatalf("new run state = %+v, error = %v, issues = %d", st, err, len(gh.issues))
 	}
 }

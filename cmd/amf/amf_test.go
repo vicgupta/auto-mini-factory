@@ -303,6 +303,14 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
 	mux.HandleFunc("GET "+repo+"/issues/{n}", func(w http.ResponseWriter, r *http.Request) {
 		f.withIssue(w, r, func(is *Issue) { writeJSON(w, 200, is) })
 	})
+	mux.HandleFunc("PATCH "+repo+"/issues/{n}", func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ State string }
+		decode(t, r, &in)
+		f.withIssue(w, r, func(is *Issue) {
+			is.State = in.State
+			writeJSON(w, 200, is)
+		})
+	})
 	mux.HandleFunc("POST "+repo+"/issues/{n}/labels", func(w http.ResponseWriter, r *http.Request) {
 		var in struct{ Labels []string }
 		decode(t, r, &in)
