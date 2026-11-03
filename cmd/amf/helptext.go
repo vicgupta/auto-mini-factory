@@ -164,4 +164,6 @@ Go's flag parser also accepts one dash before a long name (-agent) and two
 before a short one (--a), so older spellings such as -b, -f and --timeout
 keep working; --timeout is a hidden, deprecated alias of --agent-timeout.
 Flags without a short form are rarer ones, spelled out to stay clear.
+The global path flags --dir, --env-file and --clone-dir work on any command,
+before --, and have no short form.
 `

@@ -34,6 +34,9 @@ Topics:
   env        configuration: every .env setting, with its default
   flags      flag conventions: long and short forms, shared letters
 
+Paths default to the current directory; amf help run lists the path flags
+every command takes.
+
 Run amf help <command> or amf <command> -h for details.
 Every flag has a long form and common ones a short one: see amf help flags.
 `
@@ -69,6 +72,14 @@ run, watch and auto record each attempt in the repo's memory and note
 similar past work: --memory-backend picks sqlite (default), markdown or
 logfiles, and --memory-dir where the amf-memory folder goes (default: the
 current directory). See amf help memory.
+
+Paths default to the current directory; flags override them, and relative
+values resolve against it:
+  --dir DIR         work as if started in DIR
+  --env-file FILE   read only FILE instead of ./.env
+  --clone-dir DIR   use (or clone into) DIR instead of the checkout or ./<name>
+  --log-file FILE   event log (default .amf/runs/<run_id>/events.jsonl, or off)
+amf keeps its state under <checkout>/.amf/, excluded from git.
 
 amf help agents says which agent runs; amf help env lists the settings.
 `
@@ -240,6 +251,13 @@ func topicNames() []string {
 // text, its flags in one aligned column, and examples. amf help <key> prints
 // the same, by running the command with --help.
 func withHelp(fs *flag.FlagSet, w io.Writer, key string) {
+	// run strips the path flags before the command parses its own, so these
+	// are only listed here; see paths.go.
+	if fs.Lookup("dir") == nil {
+		fs.String("dir", "", "work as if amf were started in this `folder` (default: the current directory)")
+		fs.String("env-file", "", "read only this .env `file` (default: ./.env, then the checkout's top-level .env)")
+		fs.String("clone-dir", "", "use, or clone GITHUB_REPO into, this `folder` (default: the enclosing checkout, else ./<repo name>)")
+	}
 	fs.Usage = func() { fmt.Fprint(w, commandHelp(fs, key)) }
 }
 
@@ -249,6 +267,8 @@ func commandHelp(fs *flag.FlagSet, key string) string {
 	b.WriteString(strings.TrimRight(helpText(key), "\n"))
 	b.WriteString("\n\nFlags:\n")
 	printFlags(&b, fs)
+	b.WriteString("\nGlobal flags (any command, before --):\n")
+	printGlobalFlags(&b)
 	if ex := helpExamples[key]; ex != "" {
 		b.WriteString("\nExamples:\n" + ex)
 	}

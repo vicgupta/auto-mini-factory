@@ -59,9 +59,19 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	paths = pathOptions{}
+	var po pathOptions
+	args, err := extractPathFlags(args, &po)
+	if err != nil {
+		fmt.Fprintln(stderr, "amf:", err)
+		return errUsage
+	}
 	if len(args) == 0 {
 		fmt.Fprint(stderr, usage)
 		return errUsage
+	}
+	if paths, err = resolvePathOptions(po); err != nil {
+		return err
 	}
 	switch cmd, rest := args[0], args[1:]; cmd {
 	case "init":
@@ -509,6 +519,12 @@ func newRunner(ctx context.Context, timeout time.Duration, evalRounds int, agent
 
 	runID := newRunID()
 	path := lo.File
+	if path != "" && path != "off" {
+		if path, err = absFlag(path); err != nil {
+			r.Close()
+			return nil, fmt.Errorf("--log-file: %v", err)
+		}
+	}
 	if path == "" {
 		path = filepath.Join(r.Root, ".amf", "runs", runID, "events.jsonl")
 	}
@@ -606,13 +622,20 @@ func newRunnerFrom(ctx context.Context, cfg Config, timeout time.Duration, evalR
 	}, nil
 }
 
-// envPaths is ./.env, then .env at the top of the enclosing git checkout.
+// envPaths is <cwd>/.env, then .env at the top of the enclosing git checkout.
+// --env-file replaces both.
 func envPaths(ctx context.Context) []string {
-	paths := []string{".env"}
-	if root, err := git(ctx, ".", "rev-parse", "--show-toplevel"); err == nil {
-		paths = append(paths, filepath.Join(root, ".env"))
+	if paths.EnvFile != "" {
+		return []string{paths.EnvFile}
 	}
-	return paths
+	ps := []string{".env"}
+	if wd, err := os.Getwd(); err == nil {
+		ps[0] = filepath.Join(wd, ".env")
+	}
+	if root, err := git(ctx, ".", "rev-parse", "--show-toplevel"); err == nil && filepath.Join(root, ".env") != ps[0] {
+		ps = append(ps, filepath.Join(root, ".env"))
+	}
+	return ps
 }
 
 // parseArgs parses flags that may come before or after positional arguments,

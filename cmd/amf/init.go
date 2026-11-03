@@ -57,7 +57,10 @@ func cmdInit(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		fmt.Fprintln(stderr, "usage: amf init")
 		return errUsage
 	}
-	const path = ".env"
+	path := ".env"
+	if paths.EnvFile != "" {
+		path = paths.EnvFile
+	}
 
 	old := map[string]string{}
 	var oldKeys []string // to keep extra variables in their original order
@@ -128,11 +131,21 @@ func cmdInit(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	if root, err := git(ctx, ".", "rev-parse", "--show-toplevel"); err == nil {
 		// Exclude this folder's .env, which is only the top-level one when
 		// init runs at the top of the checkout.
-		dir := "/"
-		if rel, err := git(ctx, ".", "rev-parse", "--show-prefix"); err == nil && rel != "" {
+		dir, name := "/", ".env"
+		if paths.EnvFile != "" {
+			// --env-file: exclude that file, when it is inside the checkout.
+			name = escapeGitPattern(filepath.Base(path))
+			if rel, err := filepath.Rel(root, filepath.Dir(path)); err != nil || strings.HasPrefix(rel, "..") {
+				dir = ""
+			} else if rel != "." {
+				dir = "/" + escapeGitPattern(filepath.ToSlash(rel)) + "/"
+			}
+		} else if rel, err := git(ctx, ".", "rev-parse", "--show-prefix"); err == nil && rel != "" {
 			dir = "/" + escapeGitPattern(rel)
 		}
-		if err := excludeFromGit(ctx, root, "amf secrets", dir+".env", dir+".env.[0-9][0-9][0-9][0-9]"); err != nil {
+		if dir == "" {
+			// outside the checkout: nothing to exclude
+		} else if err := excludeFromGit(ctx, root, "amf secrets", dir+name, dir+name+".[0-9][0-9][0-9][0-9]"); err != nil {
 			fmt.Fprintf(stderr, "amf: warning: could not update .git/info/exclude: %v\n", err)
 		}
 	}

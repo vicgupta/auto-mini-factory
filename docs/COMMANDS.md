@@ -104,6 +104,12 @@ Flags with no short form are the rarer ones, spelled out to stay clear:
 `--memory-dir` and `amf update --version` (whose letter would read as
 `amf --version`).
 
+The global path flags `--dir <folder>`, `--env-file <file>` and
+`--clone-dir <folder>` work on any command, anywhere before `--`, and have no
+short form so they never collide with a command's letters (`-d` is
+`--delete-branch`, `-f` is `--file` or `--force`). Each command's help lists
+them under "Global flags".
+
 Older spellings keep working, though help shows only the forms above. Go's
 flag parser accepts one or two dashes for any flag, so `-agent` and `--a`
 work; `amf issue create`'s old `-b` and `-f` are now the short forms of
@@ -276,6 +282,26 @@ Run `run` and `watch` inside a clone of `GITHUB_REPO`, or from any folder that
 holds your `.env`. There, amf clones the repo into `./<name>` the first time
 (using your git credentials) and reuses that clone afterwards. amf checks
 `GITHUB_REPO` against GitHub first, so a typo fails with a clear message.
+
+### Paths default to the current directory
+
+Every file or folder amf reads or writes defaults to the directory you run it
+in (`os.Getwd`, never `$HOME` or `/tmp`), unless a command-line flag says
+otherwise. Every command accepts these path flags, before or after the
+command name (`amf --dir ~/work run 42` or `amf run 42 --dir ~/work`):
+
+| Flag | Default | What it sets |
+|---|---|---|
+| `--dir <folder>` | the current directory | where amf works, as if started there: the checkout, `./.env`, `./<name>` and `.amf/` all follow it |
+| `--env-file <file>` | `./.env`, then `.env` at the top of the enclosing checkout | the only `.env` amf reads, and the one `amf init` writes |
+| `--clone-dir <folder>` | the enclosing checkout, else `./<name>` | the checkout run, watch and auto use (cloning `GITHUB_REPO` there if it is missing); it wins over the enclosing checkout |
+| `--log-file <path>` (run, watch, auto) | `<checkout>/.amf/runs/<run_id>/events.jsonl` | the event log; `off` for none |
+
+Relative flag values resolve against the directory amf was started in, before
+`--dir` changes into its folder. amf's own state stays under `<checkout>/.amf/`
+(worktrees, `logs/`, `runs/`, `auto/state.json`, `watch.lock`); `--memory-dir` (default: the current directory) holds `amf-memory/`, also excluded from git, which amf adds to
+`.git/info/exclude`, so it is never committed. `amf update` still replaces the
+running binary where it is, and its temporary download sits next to it.
 
 ```sh
 amf issue "Add dark mode" --body "Use CSS variables for the palette"

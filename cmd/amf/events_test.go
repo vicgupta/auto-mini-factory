@@ -349,7 +349,8 @@ func TestConfigLoadEvent(t *testing.T) {
 	}
 	r.Close()
 	out := mustRead(t, own)
-	e := wantEvent(t, eventsByName(eventLines(t, out)), "config.load", map[string]any{"paths": nil, "file": ".env", "keys": nil})
+	cwd, _ := os.Getwd()
+	e := wantEvent(t, eventsByName(eventLines(t, out)), "config.load", map[string]any{"paths": nil, "file": filepath.Join(cwd, ".env"), "keys": nil})
 	if e == nil {
 		return
 	}

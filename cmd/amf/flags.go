@@ -180,7 +180,7 @@ func prettyDefault(d string) string {
 func flagLines(fs *flag.FlagSet) [][2]string {
 	var rows [][2]string
 	fs.VisitAll(func(f *flag.Flag) {
-		if hiddenFlags[f.Name] {
+		if hiddenFlags[f.Name] || (pathFlags[f.Name] && fs.Name() != "global") {
 			return
 		}
 		left := "    --" + f.Name
@@ -200,8 +200,26 @@ func flagLines(fs *flag.FlagSet) [][2]string {
 // printFlags writes fs's flags in one aligned column:
 //
 //	-a, --agent <name>  agent for ...
-func printFlags(w io.Writer, fs *flag.FlagSet) {
+//
+// pathFlags are amf's global flags, listed in their own section of every
+// command's help.
+var pathFlags = map[string]bool{"dir": true, "env-file": true, "clone-dir": true}
+
+// printGlobalFlags lists the path flags every command takes.
+func printGlobalFlags(w io.Writer) {
+	fs := flag.NewFlagSet("global", flag.ContinueOnError)
+	fs.String("dir", "", "work as if amf were started in this `folder` (default: the current directory)")
+	fs.String("env-file", "", "read only this .env `file` (default: ./.env, then the checkout's top-level .env)")
+	fs.String("clone-dir", "", "use, or clone GITHUB_REPO into, this `folder` (default: the enclosing checkout, else ./<repo name>)")
 	rows := flagLines(fs)
+	printRows(w, rows[:len(rows)-1]) // without -h, --help
+}
+
+func printFlags(w io.Writer, fs *flag.FlagSet) {
+	printRows(w, flagLines(fs))
+}
+
+func printRows(w io.Writer, rows [][2]string) {
 	width := 0
 	for _, r := range rows {
 		width = max(width, len(r[0]))
