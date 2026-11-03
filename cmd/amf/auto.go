@@ -24,11 +24,14 @@ var autoLabel = LabelSpec{labelAuto, "5319e7", "Planned by amf auto from one sen
 // defaultAutoMaxIssues is how many issues amf auto plans at most.
 const defaultAutoMaxIssues = 5
 
+const autoChecksTimeout = 5 * time.Minute
+const autoChecksPoll = 10 * time.Second
+
 const autoStateVersion = 1
 
 const autoHelp = `Usage:
-  amf auto "<one simple sentence>" [--agent A] [--max-issues 5] [--merge[=squash|rebase]] [--agent-timeout 60m] [--eval-rounds 2] [--dry-run] [--log-level L] [--log-file P]
-  amf auto --continue [--agent A] [--agent-timeout 60m] [--eval-rounds 2] [--log-level L] [--log-file P]
+  amf auto "<one simple sentence>" [--no-checkpoint | --checkpoint-after N] [--approve] [--wait-for-checks] [--agent A] [--max-issues 5] [--merge[=squash|rebase]] [--agent-timeout 60m] [--eval-rounds 2] [--dry-run] [--log-level L] [--log-file P]
+  amf auto --continue [--no-checkpoint | --checkpoint-after N] [--approve] [--wait-for-checks] [--agent A] [--agent-timeout 60m] [--eval-rounds 2] [--log-level L] [--log-file P]
   amf auto status
   amf auto --abort [--close-issues]
 
@@ -53,6 +56,17 @@ Turns one sentence into a few issues and works through them, merging each PR.
    The remaining issues stay labeled amf:auto only, so amf watch does not
    pick them up while auto waits.
 
+--checkpoint-after N delays the single checkpoint until N PRs have merged
+(default 1; N must be positive). There is no checkpoint if no issues remain.
+--no-checkpoint skips the checkpoint and approval entirely, merging all issues.
+--approve accepts the checkpoint automatically, including without a terminal.
+--wait-for-checks polls the checkpoint's merge commit every 10 seconds for up
+to 5 minutes, waiting for check runs to appear and all complete, then reports
+pass/fail or a timeout before approval. By default checks are fetched once.
+Failed, unavailable or timed-out checks are reported; approval can still proceed.
+Checkpoint settings are saved for --continue; --checkpoint-after overrides the
+saved threshold, and --no-checkpoint or --wait-for-checks enables that setting.
+
 If an issue fails or its PR can't be merged, amf auto stops there and says
 so; amf auto --continue retries that issue. --dry-run only plans: it prints
 the issues it would create and creates nothing.
@@ -69,13 +83,16 @@ Add amf:ready to any remaining issues to let amf watch process them.
 // autoState is what amf auto saves in .amf/auto/state.json, so --continue
 // can resume where it stopped.
 type autoState struct {
-	Version  int         `json:"version"`
-	Sentence string      `json:"sentence"`
-	Repo     string      `json:"repo"`
-	Merge    string      `json:"merge"`
-	Created  time.Time   `json:"created"`
-	Approved bool        `json:"approved"` // the checkpoint was approved
-	Issues   []autoIssue `json:"issues"`
+	Version         int         `json:"version"`
+	Sentence        string      `json:"sentence"`
+	Repo            string      `json:"repo"`
+	Merge           string      `json:"merge"`
+	Created         time.Time   `json:"created"`
+	Approved        bool        `json:"approved"` // the checkpoint was approved
+	NoCheckpoint    bool        `json:"no_checkpoint,omitempty"`
+	CheckpointAfter int         `json:"checkpoint_after,omitempty"`
+	WaitForChecks   bool        `json:"wait_for_checks,omitempty"`
+	Issues          []autoIssue `json:"issues"`
 }
 
 // autoIssue is one planned issue and how far amf got with it: pending,
@@ -102,6 +119,11 @@ func (st *autoState) merged() int {
 		}
 	}
 	return n
+}
+
+func (st *autoState) checkpointDue() bool {
+	n := st.merged()
+	return !st.NoCheckpoint && !st.Approved && n >= max(1, st.CheckpointAfter) && n < len(st.Issues)
 }
 
 func (st *autoState) remaining() []autoIssue {
@@ -308,7 +330,7 @@ func (r *Runner) autoPlan(ctx context.Context, sentence string, max int) ([]plan
 }
 
 // approver asks whether to go on past the checkpoint. asked is false when
-// it couldn't ask (no terminal), and then yes is false too.
+// it couldn't ask (no terminal) or approval was supplied by --approve.
 type approver func(prompt string) (asked, yes bool)
 
 // terminalApprover asks on stdin when it is a terminal.
@@ -355,8 +377,8 @@ func (r *Runner) autoCreateIssues(ctx context.Context, st *autoState, path strin
 }
 
 // autoWork processes st's issues in order, saving st to path after each.
-// After the first merge, unless st.Approved, it stops at the checkpoint and
-// asks approve; nothing more is merged without a yes.
+// After the configured number of merges, unless disabled or approved, it
+// stops at the checkpoint and asks approve; nothing more is merged without a yes.
 func (r *Runner) autoWork(ctx context.Context, st *autoState, path string, approve approver, stdout io.Writer) error {
 	for i := range st.Issues {
 		is := &st.Issues[i]
@@ -378,9 +400,9 @@ func (r *Runner) autoWork(ctx context.Context, st *autoState, path string, appro
 				continue
 			}
 		}
-		if st.merged() > 0 && !st.Approved {
-			if !r.autoCheckpoint(ctx, st, path, approve, stdout) {
-				return nil
+		if st.checkpointDue() {
+			if yes, err := r.autoCheckpoint(ctx, st, path, approve, stdout, "prompt"); err != nil || !yes {
+				return err
 			}
 		}
 		if err := r.GH.AddLabels(ctx, is.Number, labelReady); err != nil {
@@ -425,57 +447,108 @@ func remainingLine(st *autoState) string {
 	return "Remaining: " + strings.Join(left, ", ")
 }
 
-// autoCheckpoint prints the first merge and asks to go on. It reports
+// autoCheckpoint prints the latest merge and asks to go on. It reports
 // whether approval was given; without it, st is saved for --continue.
-func (r *Runner) autoCheckpoint(ctx context.Context, st *autoState, path string, approve approver, stdout io.Writer) bool {
-	var first autoIssue
+func (r *Runner) autoCheckpoint(ctx context.Context, st *autoState, path string, approve approver, stdout io.Writer, how string) (bool, error) {
+	var latest autoIssue
 	for _, is := range st.Issues {
 		if is.Status == "merged" {
-			first = is
-			break
+			latest = is
 		}
 	}
-	checks := r.checkSummary(ctx, first.Commit)
+	wait := time.Duration(0)
+	if st.WaitForChecks {
+		wait = autoChecksTimeout
+		fmt.Fprintln(stdout, "Waiting up to 5 minutes for checks on the merge commit...")
+	}
+	checks := r.checkSummary(ctx, latest.Commit, wait, autoChecksPoll)
+	if ctx.Err() != nil {
+		return false, ctx.Err()
+	}
 	left := st.remaining()
-	fmt.Fprintf(stdout, "\namf auto checkpoint: the first pull request is merged.\n"+
+	fmt.Fprintf(stdout, "\namf auto checkpoint: %d %s merged.\n"+
 		"  issue:   #%d %s (%s)\n  PR:      %s\n  commit:  %s\n  agent:   %s\n  checks:  %s\n  %s\n\n",
-		first.Number, first.Title, first.URL, first.PR, first.Commit, first.Agent, checks, remainingLine(st))
-	r.event(slog.LevelInfo, "auto.checkpoint", first.Number, fmt.Sprintf("checkpoint after #%d: waiting for approval to process %d more", first.Number, len(left)),
-		"pr", first.PR, "commit", first.Commit, "agent", first.Agent, "checks", checks, "remaining", len(left))
+		st.merged(), plural(st.merged(), "pull request is", "pull requests are"),
+		latest.Number, latest.Title, latest.URL, latest.PR, latest.Commit, latest.Agent, checks, remainingLine(st))
+	r.event(slog.LevelInfo, "auto.checkpoint", latest.Number, fmt.Sprintf("checkpoint after #%d: waiting for approval to process %d more", latest.Number, len(left)),
+		"pr", latest.PR, "commit", latest.Commit, "agent", latest.Agent, "checks", checks, "remaining", len(left))
 	if err := saveAutoState(path, st); err != nil {
 		fmt.Fprintf(stdout, "amf: could not save %s: %v\n", path, err)
-		return false
+		return false, err
 	}
 	asked, yes := approve(fmt.Sprintf("Process the remaining %d %s, merging each PR? [y/N] ", len(left), plural(len(left), "issue", "issues")))
 	if yes {
 		st.Approved = true
 		if err := saveAutoState(path, st); err != nil {
 			fmt.Fprintf(stdout, "amf: could not save %s: %v\n", path, err)
-			return false
+			return false, err
 		}
-		r.event(slog.LevelInfo, "auto.approved", 0, "approved: processing the remaining issues", "how", "prompt")
-		return true
+		if !asked && how == "prompt" {
+			how = "flag"
+		}
+		message := "approved: processing the remaining issues"
+		if how == "continue" {
+			message = "approved with --continue: processing the remaining issues"
+		}
+		r.event(slog.LevelInfo, "auto.approved", 0, message, "how", how)
+		return true, nil
 	}
 	if asked {
 		r.event(slog.LevelInfo, "auto.declined", 0, "not approved: stopping", "remaining", len(left))
 		fmt.Fprintf(stdout, "Stopped. The remaining issues stay labeled %s only, unprocessed.\n"+
 			"To approve and resume later, run: amf auto --continue\n", labelAuto)
-		return false
+		return false, nil
 	}
 	fmt.Fprintf(stdout, "Waiting for approval (no terminal to ask on). State is saved in %s.\n"+
 		"Review the merge above, then run: amf auto --continue\n", shownPath(r.Root, path))
-	return false
+	return false, nil
 }
 
 // checkSummary describes the check runs on commit, or why it can't.
-func (r *Runner) checkSummary(ctx context.Context, commit string) string {
+func (r *Runner) checkSummary(ctx context.Context, commit string, wait, poll time.Duration) string {
 	if commit == "" {
 		return "unavailable (no merge commit)"
 	}
-	runs, err := r.GH.CheckRuns(ctx, commit)
-	if err != nil {
-		return fmt.Sprintf("unavailable (%v)", err)
+	if wait > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, wait)
+		defer cancel()
 	}
+	last := "none reported yet"
+	for {
+		runs, err := r.GH.CheckRuns(ctx, commit)
+		if ctx.Err() != nil {
+			return fmt.Sprintf("timed out waiting for checks (%s)", last)
+		}
+		if err != nil {
+			return fmt.Sprintf("unavailable (%v)", err)
+		}
+		last = summarizeCheckRuns(runs)
+		if wait == 0 {
+			return last
+		}
+		completed, passed := len(runs) > 0, true
+		for _, c := range runs {
+			completed = completed && c.Status == "completed"
+			if c.Conclusion != "success" && c.Conclusion != "neutral" && c.Conclusion != "skipped" {
+				passed = false
+			}
+		}
+		if completed {
+			if passed {
+				return "passed: " + last
+			}
+			return "failed: " + last
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Sprintf("timed out waiting for checks (%s)", last)
+		case <-time.After(poll):
+		}
+	}
+}
+
+func summarizeCheckRuns(runs []checkRun) string {
 	if len(runs) == 0 {
 		return "none reported yet"
 	}
@@ -513,6 +586,10 @@ func cmdAuto(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	merge := &mergeFlag{value: "merge"}
 	fs.Var(merge, "merge", "how to merge each PR: a merge commit (the default), or --merge=squash or --merge=rebase")
 	cont := fs.Bool("continue", false, "approve the checkpoint and resume the saved amf auto run")
+	noCheckpoint := fs.Bool("no-checkpoint", false, "merge all issues without a checkpoint or approval")
+	checkpointAfter := fs.Int("checkpoint-after", 1, "checkpoint after this many merges (must be positive)")
+	approve := fs.Bool("approve", false, "approve the checkpoint without prompting")
+	waitForChecks := fs.Bool("wait-for-checks", false, "wait up to 5 minutes for completed checks before the checkpoint")
 	abort := fs.Bool("abort", false, "abandon the saved run by removing its state")
 	closeIssues := fs.Bool("close-issues", false, "with --abort, close the created, unmerged issues first")
 	dryRun := fs.Bool("dry-run", false, "plan only: print the issues amf would create, and create nothing")
@@ -562,6 +639,19 @@ func cmdAuto(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	if *maxIssues < 1 || *maxIssues > 10 {
 		return errors.New("--max-issues must be between 1 and 10")
 	}
+	if *checkpointAfter < 1 {
+		return errors.New("--checkpoint-after must be at least 1")
+	}
+	// Zero means preserve the saved threshold when continuing.
+	checkpointSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "checkpoint-after" {
+			checkpointSet = true
+		}
+	})
+	if *cont && !checkpointSet {
+		*checkpointAfter = 0
+	}
 	timeout, err := timeoutFlag(fs, at, alias)
 	if err != nil {
 		return err
@@ -576,6 +666,7 @@ func cmdAuto(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	defer r.Close()
 	err = redactErr(r.Redact, r.Auto(ctx, sentence, autoOptions{
 		Continue: *cont, DryRun: *dryRun, MaxIssues: *maxIssues, Merge: merge.value,
+		NoCheckpoint: *noCheckpoint, CheckpointAfter: *checkpointAfter, Approve: *approve, WaitForChecks: *waitForChecks,
 	}, terminalApprover(stdin, stdout), stdout))
 	r.DB.logError(err)
 	return err
@@ -645,15 +736,20 @@ func cmdAutoState(ctx context.Context, status, closeIssues bool, stdout io.Write
 
 // autoOptions are amf auto's flags that Auto needs.
 type autoOptions struct {
-	Continue, DryRun bool
-	MaxIssues        int
-	Merge            string
+	Continue, DryRun                     bool
+	MaxIssues                            int
+	Merge                                string
+	NoCheckpoint, Approve, WaitForChecks bool
+	CheckpointAfter                      int
 }
 
 // Auto is amf auto: plan sentence into issues and work through them, or
 // with Continue resume the saved run, approving its checkpoint.
 func (r *Runner) Auto(ctx context.Context, sentence string, o autoOptions, approve approver, stdout io.Writer) error {
 	ctx = withEvents(ctx, r.Events, 0)
+	if o.Approve {
+		approve = func(string) (bool, bool) { return false, true }
+	}
 	path := autoStatePath(r.Root)
 	saved, lerr := loadAutoState(path)
 	if lerr != nil && !errors.Is(lerr, os.ErrNotExist) {
@@ -667,15 +763,21 @@ func (r *Runner) Auto(ctx context.Context, sentence string, o autoOptions, appro
 			return fmt.Errorf("cannot continue amf auto: state's repo %q differs from GITHUB_REPO %q", saved.Repo, r.Repo)
 		}
 		r.Merge = saved.Merge
-		if saved.merged() > 0 && !saved.Approved {
-			saved.Approved = true
-			if err := saveAutoState(path, saved); err != nil {
+		saved.NoCheckpoint = saved.NoCheckpoint || o.NoCheckpoint
+		saved.WaitForChecks = saved.WaitForChecks || o.WaitForChecks
+		if o.CheckpointAfter > 0 {
+			saved.CheckpointAfter = o.CheckpointAfter
+		}
+		if saved.checkpointDue() {
+			if _, err := r.autoCheckpoint(ctx, saved, path, func(string) (bool, bool) { return false, true }, stdout, "continue"); err != nil {
 				return err
 			}
-			r.event(slog.LevelInfo, "auto.approved", 0, "approved with --continue: processing the remaining issues", "how", "continue")
 		}
 		r.event(slog.LevelInfo, "auto.resume", 0, fmt.Sprintf("resuming amf auto: %q, %s", saved.Sentence, remainingLine(saved)),
 			"sentence", saved.Sentence, "remaining", len(saved.remaining()))
+		if err := saveAutoState(path, saved); err != nil {
+			return err
+		}
 		if err := r.autoCreateIssues(ctx, saved, path, stdout); err != nil {
 			return err
 		}
@@ -698,6 +800,7 @@ func (r *Runner) Auto(ctx context.Context, sentence string, o autoOptions, appro
 		return nil
 	}
 	st := &autoState{Version: autoStateVersion, Sentence: sentence, Repo: r.Repo, Merge: r.Merge, Created: time.Now().UTC()}
+	st.NoCheckpoint, st.CheckpointAfter, st.WaitForChecks = o.NoCheckpoint, o.CheckpointAfter, o.WaitForChecks
 	for _, p := range issues {
 		st.Issues = append(st.Issues, autoIssue{Title: p.Title, Scope: p.Scope, Acceptance: p.Acceptance, Status: "pending"})
 	}

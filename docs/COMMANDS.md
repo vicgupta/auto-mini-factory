@@ -55,7 +55,7 @@ printed, and `amf:ready` is added immediately before each issue runs. They
 run one at a time like `amf run`, each PR merged
 (`--merge=merge` by default, or `squash` / `rebase`).
 
-After the first merge amf stops at a checkpoint and shows the PR, its merge
+By default, after the first merge amf stops at a checkpoint and shows the PR, its merge
 commit, the agent and the checks. On a terminal it asks for approval; on
 no, the rest stay open and labeled. Without a terminal it saves its state to
 `.amf/auto/state.json` and exits; `amf auto --continue` is the approval and
@@ -63,6 +63,21 @@ runs the rest. If the first merge fails, auto stops. A failed later issue
 stops the run too; `--continue` retries it. While state exists, a new
 `amf auto` is refused. The remaining issues stay labeled `amf:auto` only,
 so the default `amf watch` does not pick them up while auto waits.
+
+Use `--checkpoint-after N` (positive, default 1) to delay the single checkpoint
+until N PRs have merged. It shows the latest merge and only appears if issues
+remain. `--approve` accepts it without prompting, even without a terminal.
+`--no-checkpoint` skips it entirely, merging all issues without recording
+approval; recovery progress is still saved until the run finishes.
+
+Checks are fetched once by default. Add `--wait-for-checks` to poll the merge
+commit every 10 seconds for up to 5 minutes, waiting for checks to appear and
+all complete. It reports pass/fail or timeout before approval; failed or
+unavailable checks can still be approved. Cancellation stops without approval.
+The checkpoint threshold and the skip/wait settings persist across retries.
+`--continue` approves only once the saved threshold has been reached; before
+that, it resumes work toward the checkpoint. A reached checkpoint is shown
+again, including the CI wait if enabled, before `--continue` approves it.
 
 `amf auto status` prints the saved sentence, merge method and every planned
 issue's title, status, PR URL and commit, marking issues not yet created.

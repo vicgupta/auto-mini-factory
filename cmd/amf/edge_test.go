@@ -236,6 +236,62 @@ func TestAutoCrashAfterFirstCreate(t *testing.T) {
 	}
 }
 
+func TestAutoContinueAfterAllMerged(t *testing.T) {
+	r, _, _ := newAutoRunner(t, autoClaude)
+	st := &autoState{Version: autoStateVersion, Repo: r.Repo, Merge: "merge", Issues: []autoIssue{{Number: 1, Status: "merged"}}}
+	path := autoStatePath(r.Root)
+	if err := saveAutoState(path, st); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := r.Auto(context.Background(), "", autoOptions{Continue: true}, nil, &out); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "checkpoint") || !strings.Contains(out.String(), "amf auto is done") {
+		t.Fatalf("checkpoint after final merge:\n%s", &out)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("completed state remains: %v", err)
+	}
+}
+
+func TestAutoCheckpointSaveFailure(t *testing.T) {
+	for _, afterApproval := range []bool{false, true} {
+		t.Run(fmt.Sprintf("after approval=%v", afterApproval), func(t *testing.T) {
+			r, _, _ := newAutoRunner(t, autoClaude)
+			st := &autoState{Version: autoStateVersion, Repo: r.Repo, Merge: "merge", Issues: []autoIssue{
+				{Number: 1, Status: "merged"}, {Number: 2, Status: "pending"},
+			}}
+			path := autoStatePath(r.Root)
+			if err := saveAutoState(path, st); err != nil {
+				t.Fatal(err)
+			}
+			blockSave := func() {
+				if err := os.Mkdir(path+".tmp", 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if !afterApproval {
+				blockSave()
+			}
+			approve := func(string) (bool, bool) {
+				if !afterApproval {
+					t.Fatal("asked for approval after save failure")
+				}
+				blockSave()
+				return true, true
+			}
+			if err := r.autoWork(context.Background(), st, path, approve, &bytes.Buffer{}); err == nil {
+				t.Fatal("checkpoint swallowed save failure")
+			}
+			saved, err := loadAutoState(path)
+			if err != nil || saved.Approved {
+				t.Fatalf("saved state = %+v, %v", saved, err)
+			}
+		})
+	}
+}
+
 func TestAutoCheckpointWithWatch(t *testing.T) {
 	root, _ := setupRepo(t)
 	gh, srv := newFakeGitHub(t)
