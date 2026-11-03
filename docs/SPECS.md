@@ -1204,3 +1204,21 @@ get without it. Other commands don't log there.
   `--merge` or an explicit `amf pr merge`, and only what GitHub allows.
 - Sandboxing agents.
 - Skills that need authentication to download.
+
+## Paths
+
+Every path default resolves at run time to the current directory
+(`os.Getwd`, made absolute) or a subpath of it, unless a command-line flag
+names one. `$PWD`, `$HOME` and the OS temp folder never decide a default.
+All commands take `--dir DIR` (change into DIR first), `--env-file FILE` (read
+and, for `amf init`, write only FILE) and `--clone-dir DIR` (the checkout run,
+watch, auto and doctor use; it wins over the enclosing checkout, and is cloned
+when missing), before or after the command name. Relative values resolve
+against the directory amf was started in; `~` is not expanded. run, watch and
+auto also take `--log-file` and `--memory-dir`, made absolute the same way. No environment
+variable sets a path; `AMF_CLAUDE`, `AMF_CODEX` and `AMF_OPENCODE` name
+binaries, looked up on `PATH` when bare.
+
+Left as they are: `amf update` writes to the running executable's path (and its
+temporary file next to it); `amf init` and `amf doctor` create temporary files
+next to the file they write or in the folder they test, and remove them at once.

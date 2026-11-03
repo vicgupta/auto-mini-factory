@@ -7,22 +7,23 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 )
 
 // checkoutRoot returns the top of the git checkout amf works in. Inside a git
 // checkout that is the checkout itself. Anywhere else, such as a folder that
 // only holds .env, amf clones GITHUB_REPO into ./<name>, or reuses the clone
-// a previous run made there.
+// a previous run made there. --clone-dir names that clone explicitly, and
+// then wins over the enclosing checkout.
 //
 // how says which it was: checkout, clone (reused) or cloned.
 func checkoutRoot(ctx context.Context, cfg Config, log io.Writer) (root, how string, err error) {
-	if root, err := git(ctx, ".", "rev-parse", "--show-toplevel"); err == nil {
-		return root, "checkout", nil
+	if paths.CloneDir == "" {
+		if root, err := git(ctx, ".", "rev-parse", "--show-toplevel"); err == nil {
+			return root, "checkout", nil
+		}
 	}
-	_, name, _ := strings.Cut(cfg.Repo, "/")
-	dir, err := filepath.Abs(name)
+	dir, err := cloneDirFor(cfg.Repo)
 	if err != nil {
 		return "", "", err
 	}
