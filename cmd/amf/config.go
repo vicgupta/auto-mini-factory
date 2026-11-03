@@ -69,6 +69,11 @@ type Config struct {
 	// AgentTimeout. "" means the defaults.
 	LogLevel string
 
+	// StaleTimeout is AMF_STALE_TIMEOUT as written: how long an issue may
+	// stay amf:in-progress, with no amf working on it, before watch puts it
+	// back to amf:ready. "" means the default, "off" no sweep.
+	StaleTimeout string
+
 	// Trusted is AMF_TRUSTED, the lower-case GitHub logins whose issues amf
 	// works on. Nil means anyone's.
 	Trusted []string
@@ -140,6 +145,7 @@ func loadConfig(paths ...string) (Config, error) {
 		Trusted:        parseTrusted(get("AMF_TRUSTED", "")),
 		AgentTimeout:   get("AMF_AGENT_TIMEOUT", ""),
 		LogLevel:       get("AMF_LOG_LEVEL", ""),
+		StaleTimeout:   get("AMF_STALE_TIMEOUT", ""),
 		EnvPaths:       paths,
 		EnvFile:        envFile,
 		seen:           seen,
@@ -233,7 +239,7 @@ func parseDotEnv(r io.Reader) (map[string]string, error) {
 
 // shownConfig are the variables whose values config.load may log; every
 // other one is logged only as set or unset.
-var shownConfig = []string{"GITHUB_REPO", "AMF_API_URL", "OPENCODE_MODEL", "AMF_AGENT_TIMEOUT", "AMF_LOG_LEVEL", "AMF_CLAUDE", "AMF_CODEX", "AMF_OPENCODE", "AMF_PRIMARY_AGENT", "AMF_SECONDARY_AGENT"}
+var shownConfig = []string{"GITHUB_REPO", "AMF_API_URL", "OPENCODE_MODEL", "AMF_AGENT_TIMEOUT", "AMF_STALE_TIMEOUT", "AMF_LOG_LEVEL", "AMF_CLAUDE", "AMF_CODEX", "AMF_OPENCODE", "AMF_PRIMARY_AGENT", "AMF_SECONDARY_AGENT"}
 
 // configAttrs is, for config.load, each variable loadConfig read with where
 // it came from and its value, or set or unset for those not in shownConfig.

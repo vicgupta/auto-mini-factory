@@ -281,6 +281,9 @@ type agentSkip struct{ Agent, Reason string }
 type runPlan struct {
 	Agents  []string
 	Skipped []agentSkip
+	// NoFallback says why the plan has a single agent ("" with two), for
+	// the failure comment: --agent, no secondary, or an unusable one.
+	NoFallback string
 }
 
 // describe is the plan for messages: "codex", or "codex, then claude if
@@ -308,7 +311,11 @@ func (r *Runner) agentPlan() (runPlan, error) {
 		if err != nil {
 			return runPlan{}, err
 		}
-		return runPlan{Agents: []string{agent}}, nil
+		why := "no AMF_PRIMARY_AGENT is configured, so amf picked a single agent"
+		if r.Agent != "" {
+			why = fmt.Sprintf("--agent %s names a single agent, so there is no fallback", agentName(r.Agent))
+		}
+		return runPlan{Agents: []string{agent}, NoFallback: why}, nil
 	}
 	var plan runPlan
 	for _, a := range []string{r.Primary, r.Secondary} {
@@ -319,9 +326,22 @@ func (r *Runner) agentPlan() (runPlan, error) {
 			plan.Agents = append(plan.Agents, a)
 		} else if len(plan.Agents) == 0 {
 			plan.Skipped = append(plan.Skipped, agentSkip{a, st.reason()})
+		} else {
+			// A secondary that isn't usable used to be dropped without a
+			// word, so a failed primary looked as if the fallback never
+			// existed. Say why it won't run.
+			plan.NoFallback = fmt.Sprintf("the secondary agent %s is not usable: %s", agentName(a), st.reason())
 		}
 	}
 	if len(plan.Agents) > 0 {
+		if len(plan.Agents) == 1 && plan.NoFallback == "" {
+			switch {
+			case len(plan.Skipped) > 0:
+				plan.NoFallback = fmt.Sprintf("%s was already the fallback: %s is not usable (%s)", agentName(plan.Agents[0]), agentName(plan.Skipped[0].Agent), plan.Skipped[0].Reason)
+			default:
+				plan.NoFallback = "AMF_SECONDARY_AGENT is none, or the same as the primary agent"
+			}
+		}
 		return plan, nil
 	}
 	agent, _, err := r.pickAgent()
@@ -329,6 +349,7 @@ func (r *Runner) agentPlan() (runPlan, error) {
 		return runPlan{}, err
 	}
 	plan.Agents = []string{agent}
+	plan.NoFallback = "neither the primary nor the secondary agent is usable, so amf picked " + agentName(agent)
 	return plan, nil
 }
 
