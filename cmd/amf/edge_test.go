@@ -3603,3 +3603,32 @@ func TestUsageIsOverview(t *testing.T) {
 		}
 	}
 }
+
+func TestSubcommandHelpTopics(t *testing.T) {
+	for group, commands := range map[string][]string{"pr": prSubcommands, "issue": issueSubcommands} {
+		for _, command := range commands {
+			t.Run(group+"/"+command, func(t *testing.T) {
+				topic := group + " " + command
+				want, ok := subcommandHelp[topic]
+				if !ok || want == "" {
+					t.Fatalf("missing help for %s", topic)
+				}
+				var out, stderr strings.Builder
+				if err := run(context.Background(), []string{"help", group, command}, nil, &out, &stderr); err != nil {
+					t.Fatal(err)
+				}
+				if out.String() != want || stderr.Len() != 0 {
+					t.Fatalf("stdout %q, stderr %q", out.String(), stderr.String())
+				}
+				if err := run(context.Background(), []string{"help", group, command}, nil, failWriter{}, io.Discard); err == nil {
+					t.Fatal("expected stdout write failure")
+				}
+			})
+		}
+	}
+	var out, stderr strings.Builder
+	err := run(context.Background(), []string{"help", "pr", "missing"}, nil, &out, &stderr)
+	if !errors.Is(err, errUsage) || out.Len() != 0 || !strings.Contains(stderr.String(), `unknown help topic "pr missing"`) {
+		t.Fatalf("err %v, stdout %q, stderr %q", err, out.String(), stderr.String())
+	}
+}

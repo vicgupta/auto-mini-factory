@@ -90,15 +90,20 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	case "help", "-h", "--help":
 		// amf help <command or topic> prints its details.
 		if cmd == "help" && len(rest) > 0 {
-			if t, ok := helpTopics[rest[0]]; ok {
+			topic := strings.Join(rest, " ")
+			if t, ok := subcommandHelp[topic]; ok {
+				_, err := fmt.Fprint(stdout, t)
+				return err
+			}
+			if t, ok := helpTopics[topic]; ok {
 				_, err := fmt.Fprint(stdout, t)
 				return err
 			}
 			// A word that names no command is a typo: say so, rather than
 			// printing the usage as if the question had been answered.
 			if !strings.HasPrefix(rest[0], "-") {
-				fmt.Fprintf(stderr, "amf: unknown help topic %q\n", rest[0])
-				if s := suggestFrom(rest[0], topicNames()); s != "" {
+				fmt.Fprintf(stderr, "amf: unknown help topic %q\n", topic)
+				if s := suggestFrom(topic, topicNames()); s != "" {
 					fmt.Fprintf(stderr, "Did you mean %q?\n", s)
 				}
 				fmt.Fprintf(stderr, "\n%s", usage)

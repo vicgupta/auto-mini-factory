@@ -112,10 +112,11 @@ Prints amf's version (also amf --version).
 `
 
 const helpHelp = `Usage:
-  amf help [command | topic]
+  amf help [command [subcommand] | topic]
 
 Without an argument, prints the overview of commands and topics. With one,
-prints that command's or topic's details.
+prints that command's or topic's details. Use amf help pr merge or
+amf help issue list for a subcommand.
 `
 
 const agentsHelp = `Choosing the agent

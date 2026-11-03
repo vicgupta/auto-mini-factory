@@ -46,6 +46,267 @@ For common failures and fixes, see the [troubleshooting guide](TROUBLESHOOTING.m
 | `amf pr ready <N>` | mark a draft pull request ready for review |
 | `amf pr draft <N>` | convert a pull request to a draft |
 
+## Subcommand reference
+
+Use `amf help pr merge`, `amf help issue list`, or the corresponding
+group and subcommand to read these topics without loading configuration.
+PR numbers accept positive integers such as `42` or `"#42"`.
+The commands below read configuration from the environment and `.env`;
+they need GitHub access but no git checkout.
+
+### amf issue create
+
+```text
+amf issue create "Title" [-b body | -f file.md | -f -] [--label L] [--no-label]
+```
+
+Creates an issue; amf issue "Title" is a shortcut.
+-b selects the body, even when empty; -f reads a file, or stdin for -f -.
+Without either, piped stdin supplies the body. -b and nonempty -f conflict.
+--label defaults to amf:ready; --no-label creates an unlabeled issue.
+An explicit --label conflicts with --no-label; a blank label is rejected.
+Title and label surrounding whitespace is trimmed. Prints #N <url>.
+There is no --json flag.
+
+Example output:
+
+```text
+#42 https://github.com/owner/repo/issues/42
+```
+
+### amf issue list
+
+```text
+amf issue list [--state open|closed|all] [--label L] [--search TEXT] [--limit N] [--json]
+```
+
+Lists issues, newest first, excluding pull requests.
+--state defaults to open, ignores case and trims surrounding whitespace.
+--label filters by one label (default empty, no filter).
+--search matches title text ignoring case (default empty, no filter).
+--limit defaults to 0 (unlimited); negative limits are rejected.
+Filters apply before the limit. Text columns are ISSUE, AMF, TITLE, plus
+STATE with --state all. AMF shows only amf and amf:* labels, or -.
+--json prints an array of {number, title, state, url, labels}; number is an
+integer, labels contains every label as strings, and the other fields are
+strings. No matches prints []. JSON emits no truncation hint; text reports
+a limit hiding matches on stderr.
+
+Example output:
+
+```text
+ISSUE  AMF        TITLE
+#42    amf:ready  Fix login
+```
+
+With `--json`:
+
+```json
+[{"number":42,"title":"Fix login","state":"open","url":"https://github.com/owner/repo/issues/42","labels":["amf:ready","bug"]}]
+```
+
+### amf pr list
+
+```text
+amf pr list [--state open|closed|merged|all] [--limit N] [--issue N] [--json]
+```
+
+Lists pull requests, newest first, including drafts.
+--state defaults to open; closed excludes merged PRs, merged selects only
+merged PRs, and all includes everything. Values are case sensitive.
+--limit defaults to 0 (unlimited). --issue defaults to 0 (no filter).
+Both require nonnegative integers. Issue filtering precedes the limit.
+An issue is inferred only from a canonical amf/issue-N head branch in this
+repository; forks and unavailable head repositories have no inferred issue.
+Text columns are PR, ISSUE, STATE, TITLE; missing ISSUE is -.
+--json prints an array of {number, title, state, draft, url, head, base,
+issue}. number is an integer, draft a boolean, issue an integer or null;
+the others are strings. state is open, draft, closed or merged.
+No matches prints []; text instead prints No ... in owner/name.
+Text reports a limit hiding matches on stderr; JSON emits no such hint.
+
+Example output:
+
+```text
+PR   ISSUE  STATE  TITLE
+#57  #42    open   Fix login
+```
+
+With `--json`:
+
+```json
+[{"number":57,"title":"Fix login","state":"open","draft":false,"url":"https://github.com/owner/repo/pull/57","head":"amf/issue-42","base":"main","issue":42}]
+```
+
+### amf pr merge
+
+```text
+amf pr merge <N> [--squash | --rebase] [--delete-branch]
+```
+
+Merges using a merge commit by default; --squash or --rebase selects that
+method. The two flags conflict. Refuses merged, closed or draft PRs.
+Pins the merge to the fetched head SHA; GitHub checks and reviews still apply.
+--delete-branch deletes the head after merging only in this repository;
+forks or unavailable head repositories are skipped with a stderr note.
+A deletion failure is an error after the merge has already succeeded.
+Prints Merged #N <url>, Squashed and merged #N <url>, or
+Rebased and merged #N <url>. There is no --json flag.
+
+Example output:
+
+```text
+Merged #57 https://github.com/owner/repo/pull/57
+```
+
+### amf pr view
+
+```text
+amf pr view <N> [--json]
+```
+
+Shows title, state, branches, author, inferred issue, mergeability, change
+counts, URL and body. Mergeability may be unknown; it is not polled.
+--json prints one object with number, title, state, draft, url, head, base,
+author, issue, mergeable, mergeable_state, additions, deletions,
+changed_files and body. number and change counts are integers, draft is a
+boolean, issue is an integer or null, mergeable is a boolean or null, and
+the rest are strings. state is open, closed or merged; drafts remain open.
+issue is inferred from a canonical amf/issue-N branch, including forks.
+
+Example output:
+
+```text
+#57 Fix login
+state:     open
+branch:    amf/issue-42 → main
+author:    octocat
+issue:     #42
+mergeable: yes
+changes:   +3 −1 in 1 file
+url:       https://github.com/owner/repo/pull/57
+```
+
+With `--json`:
+
+```json
+{"number":57,"title":"Fix login","state":"open","draft":false,"url":"https://github.com/owner/repo/pull/57","head":"amf/issue-42","base":"main","author":"octocat","issue":42,"mergeable":true,"mergeable_state":"clean","additions":3,"deletions":1,"changed_files":1,"body":""}
+```
+
+### amf pr diff
+
+```text
+amf pr diff <N> [--name-only]
+```
+
+Prints the unified diff. --name-only instead prints one changed path per
+line, fetching every page of changed files. There is no --json flag.
+
+Example output with `--name-only`:
+
+```text
+src/login.go
+```
+
+### amf pr close
+
+```text
+amf pr close <N> [--comment text] [--delete-branch]
+```
+
+Closes an unmerged PR. --comment posts text before closing (default none).
+--delete-branch deletes the head after closing only in this repository;
+forks or unavailable head repositories are skipped with a stderr note.
+A deletion failure is an error after the close has already succeeded.
+Already closed PRs succeed without commenting or deleting; merged PRs fail.
+Prints Closed #N <url>, or #N is already closed.
+Leaves linked issue labels unchanged. There is no --json flag.
+
+Example output:
+
+```text
+Closed #57 https://github.com/owner/repo/pull/57
+```
+
+### amf pr reopen
+
+```text
+amf pr reopen <N>
+```
+
+Reopens a closed, unmerged PR. Already open PRs succeed without changing it;
+merged PRs fail. No command-specific flags.
+Prints Reopened #N <url>, or #N is already open.
+Leaves linked issue labels unchanged. There is no --json flag.
+
+Example output:
+
+```text
+Reopened #57 https://github.com/owner/repo/pull/57
+```
+
+### amf pr ready
+
+```text
+amf pr ready <N>
+```
+
+Marks an open draft PR ready for review using GitHub GraphQL.
+Closed or merged PRs fail. No command-specific flags.
+Prints #N is ready for review <url>, or #N is already ready for review.
+Leaves linked issue labels unchanged. There is no --json flag.
+
+Example output:
+
+```text
+#57 is ready for review https://github.com/owner/repo/pull/57
+```
+
+### amf pr draft
+
+```text
+amf pr draft <N>
+```
+
+Converts an open PR to a draft using GitHub GraphQL.
+Closed or merged PRs fail. No command-specific flags.
+Prints #N is now a draft <url>, or #N is already a draft.
+Leaves linked issue labels unchanged. There is no --json flag.
+
+Example output:
+
+```text
+#57 is now a draft https://github.com/owner/repo/pull/57
+```
+
+### amf issue run and amf issue watch
+
+These are aliases of `amf run` and `amf watch`: all flags, defaults and
+output are identical. Use `amf help issue run` or `amf help issue watch`.
+See [Run and watch](#run-and-watch), [Choosing the agent](#choosing-the-agent),
+[Merge methods](#merge-methods), and [Logs](#logs) for flags and output.
+Shared flags: `--agent claudecode|codex|opencode` selects one agent with no
+fallback (default uses configured selection); `--agent-timeout` sets a Go
+duration per agent run (default `AMF_AGENT_TIMEOUT` or `60m`, range `1m` to
+`24h`), with deprecated alias `--timeout`. `--eval-rounds` defaults to 2 and accepts nonnegative integers.
+`--draft` defaults off and cannot be combined with `--merge`.
+`--merge[=merge|squash|rebase]` defaults off; bare `--merge` uses a merge
+commit. `--log-level` selects debug, info, warn or error (default info in the
+terminal, debug in the event log, or `AMF_LOG_LEVEL`). `--log-file PATH`
+overrides the event log path; `off` disables it.
+
+Run alone takes `--dry-run` (default off), making only local changes.
+Watch alone takes `--interval` (default `60s`, must be positive), `--label` (default
+`amf:ready`) and repeatable `--exclude-label` (default none).
+Neither supports `--json`. Output includes progress and a final summary,
+for example `amf: summary: 1 issues (1 done, 0 failed, 0 skipped); 12 GitHub calls; log …`;
+counts and log path depend on the run.
+
+### Group help
+
+`amf help issue help` and `amf help pr help` print their group's command
+list, just like `amf issue help` and `amf pr help`; they take no flags.
+
 ## Run and watch
 
 Run `run` and `watch` inside a clone of `GITHUB_REPO`, or from any folder that

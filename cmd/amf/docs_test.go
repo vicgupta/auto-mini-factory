@@ -152,6 +152,8 @@ func TestDocumentedFlagsExist(t *testing.T) {
 			if len(cmd) == 1 {
 				check(helpTopics[cmd[0]])
 			} else {
+				synopsis, _, _ := strings.Cut(subcommandHelp[strings.Join(cmd, " ")], "\n\n")
+				check(synopsis)
 				for _, row := range helpCommandRows(helpTopics[cmd[0]], "") {
 					if strings.Fields(row[0])[0] == cmd[1] {
 						check(strings.Join(row, " "))
