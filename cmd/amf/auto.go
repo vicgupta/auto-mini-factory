@@ -78,6 +78,7 @@ type autoIssue struct {
 	URL        string   `json:"url"`
 	Status     string   `json:"status"`
 	PR         string   `json:"pr,omitempty"`
+	PRNumber   int      `json:"pr_number,omitempty"`
 	Commit     string   `json:"commit,omitempty"`
 	Agent      string   `json:"agent,omitempty"`
 	Error      string   `json:"error,omitempty"`
@@ -352,6 +353,21 @@ func (r *Runner) autoWork(ctx context.Context, st *autoState, path string, appro
 		if is.Status == "merged" {
 			continue
 		}
+		if is.PRNumber != 0 {
+			pr, err := r.GH.GetPR(ctx, is.PRNumber)
+			if err != nil {
+				return fmt.Errorf("checking PR #%d for issue #%d: %w", is.PRNumber, is.Number, err)
+			}
+			if pr.Merged {
+				is.Status, is.Error = "merged", ""
+				if err := saveAutoState(path, st); err != nil {
+					return err
+				}
+				r.event(slog.LevelInfo, "auto.reconciled", is.Number, fmt.Sprintf("#%d: PR #%d is already merged; skipping", is.Number, is.PRNumber),
+					"pr", is.PRNumber)
+				continue
+			}
+		}
 		if st.merged() > 0 && !st.Approved {
 			if !r.autoCheckpoint(ctx, st, path, approve, stdout) {
 				return nil
@@ -359,7 +375,7 @@ func (r *Runner) autoWork(ctx context.Context, st *autoState, path string, appro
 		}
 		is.Status, is.Error = "pending", ""
 		err := r.Run(ctx, is.Number)
-		is.PR, is.Commit, is.Agent = r.lastPR.HTMLURL, r.lastCommit, r.lastAgent
+		is.PR, is.PRNumber, is.Commit, is.Agent = r.lastPR.HTMLURL, r.lastPR.Number, r.lastCommit, r.lastAgent
 		if err == nil && r.lastCommit == "" {
 			err = errors.New("the pull request was not merged")
 		}

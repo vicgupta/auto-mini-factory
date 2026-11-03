@@ -102,7 +102,7 @@ func TestAutoStopsAtCheckpointWithoutTerminal(t *testing.T) {
 	if err != nil || st.Approved || st.merged() != 1 || len(st.Issues) != 3 {
 		t.Fatalf("state = %+v, %v", st, err)
 	}
-	if st.Issues[0].PR == "" || st.Issues[0].Commit == "" || st.Issues[0].Agent == "" {
+	if st.Issues[0].PR == "" || st.Issues[0].PRNumber != 101 || st.Issues[0].Commit == "" || st.Issues[0].Agent == "" {
 		t.Fatalf("first issue not recorded: %+v", st.Issues[0])
 	}
 

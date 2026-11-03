@@ -135,6 +135,113 @@ func TestAutoResumesAfterCreationError(t *testing.T) {
 	}
 }
 
+func TestAutoContinueAfterManualMerge(t *testing.T) {
+	r, gh, log := newAutoRunner(t, autoClaude)
+	gh.mergeErrs = []fakeError{{422, "merge blocked"}}
+	ctx := context.Background()
+	var out bytes.Buffer
+	noTTY := func(string) (bool, bool) { return false, false }
+	if err := r.Auto(ctx, "do three things", autoOptions{MaxIssues: 5, Merge: "merge"}, noTTY, &out); err == nil {
+		t.Fatal("expected the first merge to fail")
+	}
+	path := autoStatePath(r.Root)
+	st, err := loadAutoState(path)
+	if err != nil || st.Issues[0].Status != "failed" || st.Issues[0].PR == "" || st.Issues[0].PRNumber != 101 {
+		t.Fatalf("state = %+v, error %v", st, err)
+	}
+	if _, err := r.GH.MergePR(ctx, 101, "merge", ""); err != nil {
+		t.Fatal(err)
+	}
+	// A real merge of the PR's Closes #1 also closes the issue.
+	gh.mu.Lock()
+	gh.issues[1].State = "closed"
+	gh.mu.Unlock()
+	asked := false
+	approve := func(string) (bool, bool) {
+		asked = true
+		st, err := loadAutoState(path)
+		if err != nil || st.Issues[0].Status != "merged" || st.Issues[0].Error != "" || len(gh.prs) != 1 {
+			t.Fatalf("reconciled state = %+v, error %v; PRs = %d", st, err, len(gh.prs))
+		}
+		return true, true
+	}
+	if err := r.Auto(ctx, "", autoOptions{Continue: true}, approve, &out); err != nil {
+		t.Fatalf("continue after manual merge: %v\nlog:\n%s", err, log)
+	}
+	if !asked {
+		t.Fatal("missing checkpoint after the manual merge")
+	}
+	if !strings.Contains(log.String(), "already merged") {
+		t.Fatalf("missing reconciliation log:\n%s", log)
+	}
+	if merges(gh) != 3 || len(gh.prs) != 3 {
+		t.Fatalf("merged %d of %d PRs, want 3 without re-running #1", merges(gh), len(gh.prs))
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("state left behind: %v", err)
+	}
+}
+
+func TestAutoContinueClosedWithoutMergedPR(t *testing.T) {
+	for _, state := range []string{"open", "closed", "no PR"} {
+		t.Run(state, func(t *testing.T) {
+			r, gh, _ := newAutoRunner(t, autoClaude)
+			gh.issues[1] = &Issue{Number: 1, State: "closed"}
+			is := autoIssue{Number: 1, Status: "failed"}
+			if state != "no PR" {
+				gh.prs = append(gh.prs, map[string]string{"state": state})
+				is.PRNumber = 101
+			}
+			path := autoStatePath(r.Root)
+			if err := saveAutoState(path, &autoState{Version: autoStateVersion, Repo: r.Repo, Merge: "merge", Issues: []autoIssue{is}}); err != nil {
+				t.Fatal(err)
+			}
+			err := r.Auto(context.Background(), "", autoOptions{Continue: true}, nil, &bytes.Buffer{})
+			if err == nil || !strings.Contains(err.Error(), "#1 is closed") {
+				t.Fatalf("error = %v, want closed issue failure", err)
+			}
+			st, err := loadAutoState(path)
+			if err != nil || st.Issues[0].Status != "failed" || !strings.Contains(st.Issues[0].Error, "#1 is closed") {
+				t.Fatalf("state = %+v, error %v", st, err)
+			}
+		})
+	}
+}
+
+func TestLoadAutoStateWithoutPRNumber(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	if err := os.WriteFile(path, []byte(`{"version":1,"issues":[{"number":1,"pr":"https://github.com/vic/demo/pull/101","status":"failed"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st, err := loadAutoState(path)
+	if err != nil || len(st.Issues) != 1 || st.Issues[0].PRNumber != 0 || st.Issues[0].PR == "" {
+		t.Fatalf("old state = %+v, error %v", st, err)
+	}
+}
+
+func TestAutoContinuePRLookupFails(t *testing.T) {
+	r, gh, _ := newAutoRunner(t, autoClaude)
+	path := autoStatePath(r.Root)
+	st := &autoState{Version: autoStateVersion, Repo: r.Repo, Merge: "merge", Issues: []autoIssue{
+		{Number: 1, Status: "failed", PRNumber: 101, PR: "https://github.com/vic/demo/pull/101", Error: "merge blocked"},
+	}}
+	if err := saveAutoState(path, st); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = r.Auto(context.Background(), "", autoOptions{Continue: true}, nil, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "checking PR #101 for issue #1") {
+		t.Fatalf("lookup error = %v", err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(before, after) || len(gh.writes) != 0 {
+		t.Fatalf("lookup failure changed state or GitHub: state error %v, writes %v", err, gh.writes)
+	}
+}
+
 func TestAutoContinueRejectsRepoMismatch(t *testing.T) {
 	r, gh, _ := newAutoRunner(t, autoClaude)
 	path := autoStatePath(r.Root)
