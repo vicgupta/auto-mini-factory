@@ -227,10 +227,17 @@ criteria and progress. An issue's `number` is 0 and its URL is empty until it
 is created. After each successful creation, amf saves its assigned number and
 URL before printing them or creating the next issue. Writes use a temporary
 file and rename it over the state file.
+After processing an issue, the state also records its PR URL and `pr_number`.
+Older version 1 files without `pr_number` still load, with the number set to 0.
 
 `amf auto --continue` creates only the saved issues whose number is still 0,
 using their original scope, criteria and position in the plan, then resumes
-processing. A creation error stops the run with the full plan saved for retry.
+processing. Before retrying an issue with a saved PR number, amf checks the PR
+with GitHub. If it is already merged, amf marks the issue `merged`, clears its
+saved error, logs `auto.reconciled` and skips running it, even if the issue is
+closed. A closed issue without a confirmed merged PR still fails. A PR lookup
+error stops the run without discarding the saved PR. A creation error stops
+the run with the full plan saved for retry.
 Loading an unsupported state version (including an old file without a
 version) fails with `unsupported amf auto state version`. Continuing a run
 whose saved repository differs from `GITHUB_REPO` fails with a message naming
