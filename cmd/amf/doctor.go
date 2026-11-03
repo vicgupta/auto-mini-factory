@@ -150,6 +150,7 @@ func (d *doctor) check(ctx context.Context) {
 
 	// The checkout, and pushing from it.
 	root := d.checkCheckout(ctx, cfg, repoOK)
+	d.checkAutoState(root)
 	if root == "" {
 		d.line("skip", "git push", "no checkout yet")
 	} else {
@@ -590,6 +591,22 @@ func (d *doctor) checkGitHub(ctx context.Context, gh *GitHub, cfg Config) string
 		d.line("ok", "labels", "all %d amf labels exist", len(amfLabels))
 	}
 	return repo.DefaultBranch
+}
+
+// checkAutoState reports saved progress without changing or resuming it.
+func (d *doctor) checkAutoState(root string) {
+	if root == "" {
+		return
+	}
+	st, err := loadAutoState(autoStatePath(root))
+	if errors.Is(err, os.ErrNotExist) {
+		return
+	}
+	if err != nil {
+		d.line("warn", "auto state", "cannot read saved run: %v; run amf auto --continue or amf auto --abort", err)
+		return
+	}
+	d.line("warn", "auto state", "%q: %d merged, %d remaining; run amf auto --continue or amf auto --abort", st.Sentence, st.merged(), len(st.remaining()))
 }
 
 // checkCheckout finds the checkout run and watch would use, without cloning,

@@ -29,6 +29,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"text/tabwriter"
 	"time"
 	"unicode/utf8"
 )
@@ -3356,5 +3357,49 @@ func TestUsageIsOverview(t *testing.T) {
 		if !strings.Contains(envHelp, k) {
 			t.Errorf("amf help env omits %s", k)
 		}
+	}
+}
+
+func TestDoctorAutoStateEdges(t *testing.T) {
+	for _, tc := range []struct {
+		name, state, want string
+	}{
+		{"absent", "", ""},
+		{"invalid JSON", "{", "cannot read saved run:"},
+		{"unsupported version", `{"version":999}`, "unsupported amf auto state version 999"},
+		{"empty plan", `{"version":1,"sentence":"Plan\nmore"}`, `"Plan\nmore": 0 merged, 0 remaining`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			path := autoStatePath(root)
+			if tc.state != "" {
+				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(tc.state), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var out bytes.Buffer
+			d := &doctor{w: tabwriter.NewWriter(&out, 0, 4, 2, ' ', 0)}
+			d.checkAutoState(root)
+			d.w.Flush()
+			if tc.want == "" {
+				if out.Len() != 0 {
+					t.Fatalf("unexpected output: %s", &out)
+				}
+			} else if !strings.Contains(out.String(), tc.want) || !strings.Contains(out.String(), "amf auto --continue or amf auto --abort") || strings.Count(out.String(), "\n") != 1 {
+				t.Errorf("unexpected output: %s", &out)
+			}
+			if d.fails != 0 {
+				t.Errorf("saved state caused %d failures", d.fails)
+			}
+			if tc.state != "" {
+				got, err := os.ReadFile(path)
+				if err != nil || string(got) != tc.state {
+					t.Errorf("state changed: %q, %v", got, err)
+				}
+			}
+		})
 	}
 }
