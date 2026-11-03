@@ -83,7 +83,12 @@ func TestPathFlagsAfterCommand(t *testing.T) {
 
 func TestRelativePathFlagsResolveAgainstCwd(t *testing.T) {
 	resetPaths(t)
-	t.Chdir(t.TempDir())
+	// The real path, since os.Chdir(--dir) drops symlinks such as macOS /var.
+	tmp, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(tmp)
 	start := wd(t)
 	if err := os.Mkdir("work", 0o755); err != nil {
 		t.Fatal(err)
