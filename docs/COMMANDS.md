@@ -155,6 +155,10 @@ forks or unavailable head repositories are skipped with a stderr note.
 A deletion failure is an error after the merge has already succeeded.
 Prints Merged #N <url>, Squashed and merged #N <url>, or
 Rebased and merged #N <url>. There is no --json flag.
+When the head is amf/issue-N in this repository, issue N is then labeled
+amf:done and loses amf:failed, amf:pr-open and amf:in-progress
+(printing Labeled #N amf:done when that changed anything); a labeling
+failure is a stderr warning, not an error.
 
 Example output:
 

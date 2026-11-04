@@ -141,7 +141,7 @@ Keep `.env` out of git: add it to the target repo's `.gitignore`.
   `amf run N --force` to retry). An `amf:failed` issue relabeled `amf:ready`
   is still retried.
 - **`amf:pr-open` vs `amf:done`.** An issue whose PR is open but not merged
-  is `amf:pr-open`; `amf:done` means amf merged its PR (`--merge`).
+  is `amf:pr-open`; `amf:done` means amf merged its PR (`--merge` or `amf pr merge` on its `amf/issue-N` branch).
 - **Stuck issues recover.** Each poll, `watch` puts `amf:in-progress` issues
   no amf is working on back to `amf:ready` after `AMF_STALE_TIMEOUT`
   (`--stale-timeout`; default twice the agent timeout, at least 2h).

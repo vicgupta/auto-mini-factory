@@ -28,7 +28,7 @@ amf:ready ──▶ amf:in-progress ──▶ amf:pr-open (PR opened, not merged
 - `amf:pr-open` means amf produced a PR for the issue, a draft one
   (`--draft`) included, that is open and not merged: no `--merge`, or the
   merge failed.
-- `amf:done` means amf merged the issue's PR.
+- `amf:done` means amf merged the issue's PR (with `--merge` or `amf pr merge`).
 - Before Claim, amf skips an issue with an open PR from `amf/issue-N`
   (relabeling it `amf:pr-open`) or with an `amf/issue-N` branch on origin
   (unless it is `amf:failed`); `amf run N --force`, and `amf auto`, skip
@@ -407,6 +407,14 @@ GitHub's 409 refusal is reported. Only a 405 whose message contains
 apart, stopping on Ctrl-C. Other errors, including conflicts, required
 checks or reviews, and disallowed merge methods, fail immediately with
 GitHub's message. These failures exit 1 and leave the PR open.
+
+After a successful merge, a head branch `amf/issue-N` in this repository
+marks issue N merged: it reads the issue and, touching only labels that
+change, adds `amf:done` and removes `amf:failed`, `amf:pr-open` and
+`amf:in-progress`, printing `Labeled #N amf:done` if anything changed.
+Forks and other branch names leave labels alone. A labeling failure is a
+stderr warning; the command still succeeds. `run`, `watch` and `auto` set
+the same final labels after their own `--merge`.
 
 On success, stdout is `Merged #N <url>`, `Squashed and merged #N <url>` or
 `Rebased and merged #N <url>`. `--delete-branch` then deletes the head using

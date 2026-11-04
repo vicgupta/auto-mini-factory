@@ -60,6 +60,8 @@ reviews still apply. --delete-branch deletes the head afterwards only when it
 is in this repository; a deletion failure is an error after the merge has
 already succeeded. Prints Merged #N <url>, Squashed and merged #N <url>, or
 Rebased and merged #N <url>.
+When the head is amf/issue-N in this repository, issue N is labeled
+amf:done and loses amf:failed, amf:pr-open and amf:in-progress.
 `,
 	"pr view": `Usage:
   amf pr view <number> [flags]
