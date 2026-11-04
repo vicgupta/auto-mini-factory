@@ -791,6 +791,8 @@ Without a pipeline (see below), amf runs one agent once. With Claude Code:
    a draft with `--draft` (default off; `amf run` and `amf watch` take it). On
    a `--force` retry whose PR is still open, it updates that PR's title and body
    instead, and leaves it a draft or ready for review as it was.
+6. Comments the PR link on the issue, labels it `amf:pr-open` (a draft PR
+   counts; `amf:done` once `--merge` merged it), removes the worktree.
 
 A `--force` run (or `amf auto`) on an issue whose open PR is behind the
 default branch (GitHub's compare reports `behind_by` > 0) doesn't rebuild the
@@ -809,8 +811,6 @@ The `.github/` refusal applies to the merged branch too. Then the issue is
 labeled and commented, and `--merge` merges, as in steps 5–6. An open PR
 that is up to date is rebuilt as above. Close the PR to force a rebuild of a
 stale one.
-6. Comments the PR link on the issue, labels it `amf:pr-open` (a draft PR
-   counts; `amf:done` once `--merge` merged it), removes the worktree.
 
 With [`--merge`](#merge-methods), amf also merges the PR before commenting,
 with a merge commit (or `--merge=squash`, `--merge=rebase`), pinned to the
