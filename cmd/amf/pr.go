@@ -466,7 +466,7 @@ func textMergeable(pr prViewResponse) string {
 // its head branch after. It never touches the linked issue's labels.
 func cmdPRClose(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := newCommandFlags("pr close", stderr)
-	comment := fs.String("comment", "", "post a comment on the issue before closing")
+	comment := fs.String("comment", "", "post a comment on the pull request before closing")
 	deleteBranch := fs.Bool("delete-branch", false, "delete the head branch after closing, if it is in this repository")
 	pos, err := parseArgs(fs, args)
 	if err != nil {

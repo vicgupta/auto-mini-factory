@@ -120,6 +120,15 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 				}
 				return nil
 			}
+			// amf help pr <typo> is an unknown topic too, not pr's overview.
+			if subs, ok := helpSubcommands[rest[0]]; ok && len(rest) > 1 && !slices.Contains(subs, rest[1]) {
+				fmt.Fprintf(stderr, "amf: unknown help topic %q\n", key)
+				if s := suggestFrom(rest[1], subs); s != "" {
+					fmt.Fprintf(stderr, "Did you mean %q?\n", rest[0]+" "+s)
+				}
+				fmt.Fprintf(stderr, "\n%s", helpTopics[rest[0]])
+				return errUsage
+			}
 			if t, ok := helpTopics[rest[0]]; ok {
 				_, err := fmt.Fprint(stdout, t)
 				return err
