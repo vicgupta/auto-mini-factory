@@ -598,6 +598,26 @@ func (g *GitHub) OpenPR(ctx context.Context, head string) (pr PullRequest, ok bo
 	return prs[0], true, nil
 }
 
+// MergedPR reports whether a pull request from head, a branch in this
+// repository, was merged, returning the most recent merged one.
+func (g *GitHub) MergedPR(ctx context.Context, head string) (pr PullRequest, ok bool, err error) {
+	owner, _, _ := strings.Cut(g.repo, "/")
+	q := url.Values{"head": {owner + ":" + head}, "state": {"closed"}, "per_page": {"30"}}
+	var prs []struct {
+		PullRequest
+		MergedAt *string `json:"merged_at"`
+	}
+	if err := g.do(ctx, "GET", g.repoPath("/pulls?%s", q.Encode()), nil, &prs); err != nil {
+		return PullRequest{}, false, err
+	}
+	for _, p := range prs {
+		if p.MergedAt != nil {
+			return p.PullRequest, true, nil
+		}
+	}
+	return PullRequest{}, false, nil
+}
+
 // MergePR merges pull request n with method (merge, squash or rebase) and
 // returns the commit it made. With sha set, GitHub refuses (409) unless the
 // PR's head is still that commit.

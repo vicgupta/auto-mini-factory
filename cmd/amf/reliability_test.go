@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -248,5 +249,66 @@ func TestFailedRetryKeepsPROpen(t *testing.T) {
 	}
 	if got := gh.labels(1); !slices.Equal(got, []string{"amf:pr-open"}) {
 		t.Errorf("labels = %v, want amf:pr-open kept", got)
+	}
+}
+
+func TestSweepFailed(t *testing.T) {
+	root, _ := setupRepo(t)
+	gh, srv := newFakeGitHub(t)
+	failed := func(extra ...string) []Label {
+		ls := []Label{{Name: labelFailed}}
+		for _, e := range extra {
+			ls = append(ls, Label{Name: e})
+		}
+		return ls
+	}
+	gh.issues[1] = &Issue{Number: 1, State: "open", Labels: failed()} // open, green PR
+	gh.issues[2] = &Issue{Number: 2, State: "open", Labels: failed()} // no PR
+	gh.issues[3] = &Issue{Number: 3, State: "open", Labels: failed(labelReady)}
+	gh.prs = []map[string]string{
+		{"head": "amf/issue-1", "base": "main", "state": "open"},
+		{"head": "amf/issue-3", "base": "main", "state": "open"},
+	}
+	gh.checkRuns["abc123"] = []checkRun{{Name: "build", Status: "completed", Conclusion: "success"}}
+	r, log := newTestRunner(t, srv, root, "claude")
+	r.sweepFailed(context.Background())
+	want := map[int][]string{1: {labelPROpen}, 2: {labelFailed}, 3: {labelFailed, labelReady}}
+	for n, l := range want {
+		if got := gh.labels(n); !slices.Equal(got, l) {
+			t.Errorf("#%d labels = %v, want %v\nlog:\n%s", n, got, l, log)
+		}
+	}
+
+	// Failing checks leave amf:failed in place.
+	gh.issues[1].Labels = failed()
+	gh.checkRuns["abc123"][0].Conclusion = "failure"
+	r.sweepFailed(context.Background())
+	if got := gh.labels(1); !slices.Equal(got, []string{labelFailed}) {
+		t.Errorf("#1 with failing checks = %v", got)
+	}
+}
+
+func TestFailureKeepsDoneOnlyWhenMerged(t *testing.T) {
+	for _, merged := range []bool{true, false} {
+		t.Run(fmt.Sprint("merged=", merged), func(t *testing.T) {
+			root, _ := setupRepo(t)
+			gh, srv := newFakeGitHub(t)
+			gh.issues[7] = &Issue{Number: 7, Title: "again", State: "open", Labels: []Label{{Name: labelDone}, {Name: labelReady}}}
+			if merged {
+				gh.prs = []map[string]string{{"head": "amf/issue-7", "base": "main", "state": "merged"}}
+			}
+			r, _ := newTestRunner(t, srv, root, fakeClaude(t, "exit 1\n"))
+			r.Force = true
+			if err := r.Run(context.Background(), 7); err == nil {
+				t.Fatal("want a failure")
+			}
+			want := labelFailed
+			if merged {
+				want = labelDone
+			}
+			if got := gh.labels(7); !slices.Equal(got, []string{want}) {
+				t.Errorf("labels = %v, want %s", got, want)
+			}
+		})
 	}
 }

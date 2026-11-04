@@ -396,7 +396,7 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
 		defer f.mu.Unlock()
 		out := []map[string]any{}
 		for i, pr := range f.prs {
-			if (q.Get("head") == "" || "vic:"+pr["head"] == q.Get("head")) && (q.Get("state") == "all" || pr["state"] == q.Get("state")) {
+			if (q.Get("head") == "" || "vic:"+pr["head"] == q.Get("head")) && (q.Get("state") == "all" || pr["state"] == q.Get("state") || q.Get("state") == "closed" && pr["state"] == "merged") {
 				n := 101 + i
 				repoName := pr["head_repo"]
 				if repoName == "" {
@@ -405,6 +405,8 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
 				var mergedAt any
 				if pr["merged_at"] != "" {
 					mergedAt = pr["merged_at"]
+				} else if pr["state"] == "merged" {
+					mergedAt = "2026-01-01T00:00:00Z"
 				}
 				draft := i < len(f.drafts) && f.drafts[i]
 				out = append(out, map[string]any{"number": n, "html_url": fmt.Sprintf("https://github.com/vic/demo/pull/%d", n), "title": pr["title"], "state": pr["state"], "draft": draft, "merged_at": mergedAt, "head": map[string]any{"ref": pr["head"], "repo": map[string]string{"full_name": repoName}}, "base": map[string]string{"ref": pr["base"]}})
