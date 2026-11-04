@@ -24,7 +24,7 @@ running a platform.
 | Command | What it does |
 |---|---|
 | `amf init` | write `.env` and create amf's labels |
-| `amf issue` | manage issues: `create`, `list`, `run`, `watch` |
+| `amf issue` | manage issues: `create`, `list`, `label`, `run`, `watch` |
 | `amf pr` | manage pull requests: `list`, `merge`, `view`, `diff`, `close`, `reopen`, `ready`, `draft` |
 | `amf run` | process one issue into a PR (alias of `issue run`) |
 | `amf watch` | process `amf:ready` issues as they arrive (alias of `issue watch`) |
@@ -215,7 +215,8 @@ already has.
 ### Check your setup
 
 `amf doctor` checks everything amf needs, one line each, without changing
-anything:
+anything (`amf doctor --fix-labels` also corrects amf status labels that
+disagree with the issue's pull requests):
 
 ```
 $ amf doctor

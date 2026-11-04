@@ -16,7 +16,7 @@ const prUsage = `usage: amf pr <command>
 
 Commands:
   list [--state open|closed|merged|all] [--limit n] [--issue n] [--json]  list pull requests, newest first
-  merge <N> [--squash | --rebase] [--delete-branch]  merge a pull request
+  merge <N> [--squash | --rebase] [--delete-branch] [--update-branch] [--wait-for-checks]  merge a pull request
   view <N> [--json]  show a pull request
   diff <N> [--name-only]  show a pull request's diff, or one changed path per line
   close <N> [--comment text] [--delete-branch]  close a pull request

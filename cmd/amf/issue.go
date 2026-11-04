@@ -11,6 +11,7 @@ const issueUsage = `usage: amf issue <command>
 Commands:
   create "Title" [--body text | --file path] [--label name] [--no-label]  create an issue (the body may also come from stdin)
   list [--state open|closed|all] [--label name] [--search text] [--limit n] [--json]  list issues, newest first, with their amf labels
+  label <N> [--add name]... [--remove name]...  add or remove an issue's labels
   run <N> [flags]  process one issue into a PR: see amf help run
   watch [flags]  process amf:ready issues as they arrive: see amf help watch
 
@@ -18,7 +19,7 @@ amf issue "Title" … is a shortcut for amf issue create "Title" …
 Run amf help issue <command> or amf issue <command> --help for its flags.
 `
 
-var issueSubcommands = []string{"create", "list", "run", "watch", "help"}
+var issueSubcommands = []string{"create", "list", "label", "run", "watch", "help"}
 
 // cmdIssueGroup dispatches `amf issue <command>`, keeping the old
 // `amf issue "Title"` form working as a shortcut for `create`.
@@ -32,6 +33,8 @@ func cmdIssueGroup(ctx context.Context, args []string, stdin io.Reader, stdout, 
 		return cmdIssueCreate(ctx, args[1:], stdin, stdout, stderr)
 	case "list":
 		return cmdList(ctx, args[1:], stdout, stderr)
+	case "label":
+		return cmdIssueLabel(ctx, args[1:], stdout, stderr)
 	case "run":
 		return cmdRun(ctx, args[1:], stderr)
 	case "watch":
