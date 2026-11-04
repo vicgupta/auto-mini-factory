@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"archive/zip"
 	"bytes"
+	"cmp"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
@@ -474,8 +475,27 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
 			"html_url": fmt.Sprintf("https://github.com/vic/demo/pull/%d", n),
 			"state":    state,
 			"merged":   merged,
-			"head":     map[string]any{"sha": "abc123", "ref": pr["head"], "repo": repo},
+			"head":     map[string]any{"sha": cmp.Or(pr["head_sha"], "abc123"), "ref": pr["head"], "repo": repo},
+			"base":     map[string]any{"ref": cmp.Or(pr["base"], "main")},
 		})
+	})
+	mux.HandleFunc("PUT "+repo+"/pulls/{n}/update-branch", func(w http.ResponseWriter, r *http.Request) {
+		var in map[string]string
+		decode(t, r, &in)
+		n, _ := strconv.Atoi(r.PathValue("n"))
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if n < 101 || n > 100+len(f.prs) {
+			writeJSON(w, 404, map[string]string{"message": "Not Found"})
+			return
+		}
+		pr := f.prs[n-101]
+		if pr["update_conflict"] != "" || in["expected_head_sha"] != cmp.Or(pr["head_sha"], "abc123") {
+			writeJSON(w, 422, map[string]string{"message": "merge conflict between base and head"})
+			return
+		}
+		pr["head_sha"] = "def456"
+		writeJSON(w, 202, map[string]string{"message": "Updating pull request branch."})
 	})
 	mux.HandleFunc("GET "+repo+"/pulls/{n}/files", func(w http.ResponseWriter, r *http.Request) {
 		n, _ := strconv.Atoi(r.PathValue("n"))

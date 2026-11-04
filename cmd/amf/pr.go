@@ -190,6 +190,8 @@ func cmdPRMerge(ctx context.Context, args []string, stdout, stderr io.Writer) er
 	squash := fs.Bool("squash", false, "squash and merge")
 	rebase := fs.Bool("rebase", false, "rebase and merge")
 	deleteBranch := fs.Bool("delete-branch", false, "delete the head branch after merging, if it is in this repository")
+	update := fs.Bool("update-branch", false, "first merge the base branch into the head if it is behind")
+	waitChecks := fs.Bool("wait-for-checks", false, "wait for the head's checks to pass before merging (up to 30 minutes)")
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return errUsage
@@ -198,7 +200,7 @@ func cmdPRMerge(ctx context.Context, args []string, stdout, stderr io.Writer) er
 		return errors.New("--squash and --rebase can't be used together")
 	}
 	if len(pos) != 1 {
-		fmt.Fprintln(stderr, "usage: amf pr merge <N> [--squash | --rebase] [--delete-branch]")
+		fmt.Fprintln(stderr, "usage: amf pr merge <N> [--squash | --rebase] [--delete-branch] [--update-branch] [--wait-for-checks]")
 		return errUsage
 	}
 	n, err := parsePRNumber(pos[0])
@@ -235,6 +237,16 @@ func cmdPRMerge(ctx context.Context, args []string, stdout, stderr io.Writer) er
 	if pr.Head.SHA == "" {
 		return fmt.Errorf("github did not report a head SHA for #%d", n)
 	}
+	if *update {
+		if pr, err = updatePRBranch(ctx, gh, n, pr, stdout); err != nil {
+			return err
+		}
+	}
+	if *waitChecks {
+		if err := waitPRChecks(ctx, gh, n, pr.Head.SHA, stdout); err != nil {
+			return err
+		}
+	}
 	if _, _, err := gh.mergePRWithRetry(ctx, n, method, pr.Head.SHA, mergeRetry, nil); err != nil {
 		return err
 	}
@@ -249,6 +261,73 @@ func cmdPRMerge(ctx context.Context, args []string, stdout, stderr io.Writer) er
 		if err := gh.DeleteBranch(ctx, pr.Head.Ref); err != nil {
 			return fmt.Errorf("merged #%d but could not delete %s: %w", n, pr.Head.Ref, err)
 		}
+	}
+	return nil
+}
+
+// How long amf pr merge --update-branch waits for GitHub to move the head,
+// and how --wait-for-checks waits for checks; vars so tests can shorten them.
+var (
+	prUpdatePoll    = 2 * time.Second
+	prUpdateTimeout = time.Minute
+	prChecksTimeout = 30 * time.Minute
+	prChecksPoll    = 10 * time.Second
+	prNoChecksGrace = 2 * time.Minute
+)
+
+// updatePRBranch merges pr's base into its head when the head is behind,
+// then waits for GitHub to report the new head, which it returns.
+func updatePRBranch(ctx context.Context, gh *GitHub, n int, pr prDetails, stdout io.Writer) (prDetails, error) {
+	_, behind, err := gh.Compare(ctx, pr.Base.Ref, pr.Head.SHA)
+	if err != nil {
+		return pr, fmt.Errorf("could not compare #%d with %s: %w", n, pr.Base.Ref, err)
+	}
+	if behind == 0 {
+		fmt.Fprintf(stdout, "#%d is up to date with %s\n", n, pr.Base.Ref)
+		return pr, nil
+	}
+	if err := gh.UpdateBranch(ctx, n, pr.Head.SHA); err != nil {
+		return pr, fmt.Errorf("could not update #%d with %s (%d %s behind): %w", n, pr.Base.Ref, behind, plural(behind, "commit", "commits"), err)
+	}
+	old := pr.Head.SHA
+	deadline := time.Now().Add(prUpdateTimeout)
+	for {
+		next, err := gh.GetPR(ctx, n)
+		if err == nil && next.Head.SHA != "" && next.Head.SHA != old {
+			fmt.Fprintf(stdout, "Updated #%d with %s (was %d %s behind)\n", n, pr.Base.Ref, behind, plural(behind, "commit", "commits"))
+			return next, nil
+		}
+		if time.Now().After(deadline) {
+			return pr, fmt.Errorf("asked GitHub to update #%d, but its head has not moved after %s; try again shortly", n, prUpdateTimeout)
+		}
+		select {
+		case <-ctx.Done():
+			return pr, ctx.Err()
+		case <-time.After(prUpdatePoll):
+		}
+	}
+}
+
+// waitPRChecks waits for the check runs on sha, pr n's head, to pass. A
+// head that reports no checks within prNoChecksGrace is merged as is.
+func waitPRChecks(ctx context.Context, gh *GitHub, n int, sha string, stdout io.Writer) error {
+	fmt.Fprintf(stdout, "Waiting up to %s for checks on #%d (%s)...\n", prChecksTimeout, n, shortSHA(sha))
+	wctx, cancel := context.WithTimeout(ctx, prChecksTimeout)
+	defer cancel()
+	state, summary, err := gh.waitChecks(wctx, sha, true, prChecksPoll, prNoChecksGrace)
+	switch {
+	case state == "timeout" && ctx.Err() != nil:
+		return ctx.Err()
+	case state == "timeout":
+		return fmt.Errorf("timed out after %s waiting for checks on #%d (%s); not merging", prChecksTimeout, n, summary)
+	case err != nil:
+		return fmt.Errorf("could not read checks on #%d: %w", n, err)
+	case state == "failed":
+		return fmt.Errorf("checks failed on #%d (%s); not merging", n, summary)
+	case state == "none":
+		fmt.Fprintf(stdout, "No checks reported on #%d after %s; merging\n", n, prNoChecksGrace)
+	default:
+		fmt.Fprintf(stdout, "Checks passed on #%d (%s)\n", n, summary)
 	}
 	return nil
 }
@@ -749,4 +828,12 @@ func cmdPRDraftState(ctx context.Context, args []string, stdout, stderr io.Write
 		fmt.Fprintf(stdout, "#%d is now a draft %s\n", n, pr.HTMLURL)
 	}
 	return nil
+}
+
+// shortSHA is a commit's first seven characters, as git shows it.
+func shortSHA(sha string) string {
+	if len(sha) > 7 {
+		return sha[:7]
+	}
+	return sha
 }

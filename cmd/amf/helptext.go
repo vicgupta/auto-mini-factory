@@ -60,6 +60,10 @@ reviews still apply. --delete-branch deletes the head afterwards only when it
 is in this repository; a deletion failure is an error after the merge has
 already succeeded. Prints Merged #N <url>, Squashed and merged #N <url>, or
 Rebased and merged #N <url>.
+--update-branch first merges the base into a head that is behind (GitHub's
+Update branch) and merges the new head; --wait-for-checks waits up to 30
+minutes for the head's checks to pass, failing if one fails (a head with
+no checks after 2 minutes is merged).
 When the head is amf/issue-N in this repository, issue N is labeled
 amf:done and loses amf:failed, amf:pr-open and amf:in-progress.
 `,
@@ -155,7 +159,7 @@ var helpExamples = map[string]string{
 	"pipeline":  "  amf pipeline\n  amf pipeline --fetch\n",
 	"update":    "  amf update --check\n  amf update --version v0.0.7\n",
 	"pr list":   "  amf pr list --state merged --limit 5\n  amf pr list --issue 42 --json\n",
-	"pr merge":  "  amf pr merge 57 --squash --delete-branch\n",
+	"pr merge":  "  amf pr merge 57 --squash --delete-branch\n  amf pr merge 57 -u -w --squash\n",
 	"pr view":   "  amf pr view 57 --json\n",
 	"pr diff":   "  amf pr diff 57 --name-only\n",
 	"pr close":  "  amf pr close 57 --comment \"Superseded by #58\" --delete-branch\n",
