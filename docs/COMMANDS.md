@@ -27,6 +27,18 @@ For common failures and fixes, see the [troubleshooting guide](TROUBLESHOOTING.m
 | `amf version` | print amf's version |
 | `amf help` | show help for a command or topic |
 
+## Exit status
+
+- `0` — success.
+- `1` — a command failed (for example, a GitHub error, agent failure, or refused merge).
+- `2` — a usage error (for example, no command, an unknown command or flag, or missing arguments).
+
+`amf --help` and `amf help <command>` exit `0`; unknown commands exit `2`.
+Some commands currently return `2` for `amf <command> --help` (or `-h`),
+including `amf run --help`. Use `amf help <command>` when scripts need help
+to exit successfully. Command-specific value validation can return `1`,
+such as `amf run 0`.
+
 ## issue commands
 
 | Command | What it does |
