@@ -26,6 +26,8 @@ type doctor struct {
 	w     *tabwriter.Writer
 	fails int
 	login string // the token's account, once GitHub accepted it
+	// fixLabels makes the label state check relabel, not only report.
+	fixLabels bool
 }
 
 func (d *doctor) line(status, check, format string, a ...any) {
@@ -38,15 +40,17 @@ func (d *doctor) line(status, check, format string, a ...any) {
 // cmdDoctor checks everything amf needs to run here, without changing
 // anything: no clone, no labels, no push.
 func cmdDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) error {
-	pos, err := parseArgs(newCommandFlags("doctor", stderr), args)
+	fs := newCommandFlags("doctor", stderr)
+	fixLabels := fs.Bool("fix-labels", false, "relabel issues whose amf status label disagrees with their pull requests")
+	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return errUsage
 	}
 	if len(pos) != 0 {
-		fmt.Fprintln(stderr, "usage: amf doctor")
+		fmt.Fprintln(stderr, "usage: amf doctor [--fix-labels]")
 		return errUsage
 	}
-	d := &doctor{w: tabwriter.NewWriter(stdout, 0, 4, 2, ' ', 0)}
+	d := &doctor{w: tabwriter.NewWriter(stdout, 0, 4, 2, ' ', 0), fixLabels: *fixLabels}
 	d.check(ctx)
 	d.w.Flush()
 	if d.fails > 0 {
@@ -592,6 +596,7 @@ func (d *doctor) checkGitHub(ctx context.Context, gh *GitHub, cfg Config) string
 	} else {
 		d.line("ok", "labels", "all %d amf labels exist", len(amfLabels))
 	}
+	d.checkLabelState(ctx, gh, d.fixLabels)
 	return repo.DefaultBranch
 }
 

@@ -14,7 +14,7 @@ For common failures and fixes, see the [troubleshooting guide](TROUBLESHOOTING.m
 | Command | What it does |
 |---|---|
 | `amf init` | write `.env` and create amf's labels |
-| `amf issue` | manage issues: `create`, `list`, `run`, `watch` |
+| `amf issue` | manage issues: `create`, `list`, `label`, `run`, `watch` |
 | `amf pr` | manage pull requests: `list`, `merge`, `view`, `diff`, `close`, `reopen`, `ready`, `draft` |
 | `amf run` | process one issue into a PR (alias of `issue run`) |
 | `amf watch` | process `amf:ready` issues as they arrive (alias of `issue watch`) |
@@ -32,6 +32,7 @@ For common failures and fixes, see the [troubleshooting guide](TROUBLESHOOTING.m
 |---|---|
 | `amf issue create "Title" [--body text \| --file path] [--label name] [--no-label]` | create an issue (the body may also come from stdin) |
 | `amf issue list [--state open\|closed\|all] [--label name] [--search text] [--limit n] [--json]` | list issues, newest first, with their amf labels |
+| `amf issue label <N> [--add name]... [--remove name]...` | add or remove an issue's labels |
 | `amf issue run <N> [flags]` | process one issue into a PR: see amf help run |
 | `amf issue watch [flags]` | process amf:ready issues as they arrive: see amf help watch |
 
@@ -40,7 +41,7 @@ For common failures and fixes, see the [troubleshooting guide](TROUBLESHOOTING.m
 | Command | What it does |
 |---|---|
 | `amf pr list [--state open\|closed\|merged\|all] [--limit n] [--issue n] [--json]` | list pull requests, newest first |
-| `amf pr merge <N> [--squash \| --rebase] [--delete-branch]` | merge a pull request |
+| `amf pr merge <N> [--squash \| --rebase] [--delete-branch] [--update-branch] [--wait-for-checks]` | merge a pull request |
 | `amf pr view <N> [--json]` | show a pull request |
 | `amf pr diff <N> [--name-only]` | show a pull request's diff, or one changed path per line |
 | `amf pr close <N> [--comment text] [--delete-branch]` | close a pull request |
@@ -106,6 +107,26 @@ With `--json`:
 
 ```json
 [{"number":42,"title":"Fix login","state":"open","url":"https://github.com/owner/repo/issues/42","labels":["amf:ready","bug"]}]
+```
+
+### amf issue label
+
+```text
+amf issue label <N> [--add L]... [--remove L]...
+```
+
+Adds and removes labels on one issue (not a pull request). --add and
+--remove repeat, or take comma-separated names; at least one is required,
+and a label can't be in both. Labels already present, or already absent,
+cost no API call. Adding an amf status label (amf:in-progress, amf:pr-open,
+amf:done or amf:failed) also removes the issue's other status label;
+adding two fails. Prints #N: added ...; removed ..., or #N unchanged.
+There is no --json flag.
+
+Example output:
+
+```text
+#42: added amf:done; removed amf:failed
 ```
 
 ### amf pr list
@@ -400,7 +421,7 @@ work; `amf issue create`'s old `-b` and `-f` are now the short forms of
 
 ## Flag reference
 
-Generated from each command's `--help`; `amf init`, `amf doctor`,
+Generated from each command's `--help`; `amf init`,
 `amf version`, `amf pr reopen`, `amf pr ready` and `amf pr draft` take only
 `-h, --help`.
 
@@ -422,6 +443,19 @@ Generated from each command's `--help`; `amf init`, `amf doctor`,
 | `-L, --limit <n>` | print at most N issues, 0 means no limit |
 | `-S, --search <text>` | only issues whose title contains this text, ignoring case |
 | `-s, --state <state>` | open, closed or all (default open) |
+
+### amf issue label
+
+| Flag | What it does |
+|---|---|
+| `--add <value>` | add this label (repeatable, or comma-separated) |
+| `--remove <value>` | remove this label (repeatable, or comma-separated) |
+
+### amf doctor
+
+| Flag | What it does |
+|---|---|
+| `--fix-labels` | relabel issues whose amf status label disagrees with their pull requests |
 
 ### amf run
 
@@ -1009,6 +1043,9 @@ creates `amf:pr-open` if the repo lacks it; `amf init` creates all five.
 PR is open with passing checks to `amf:pr-open`.
 `amf issue` adds `amf:ready`, and `amf watch` picks up open `amf:ready` issues
 oldest first. To retry an issue, add `amf:ready` again or run `amf run N`.
+`amf issue label N --add L --remove L` changes labels by hand (adding a
+status label drops the old one), and `amf doctor` warns about status labels
+that disagree with the issue's PRs; `amf doctor --fix-labels` corrects them.
 If amf is killed mid-run and an issue is stuck on `amf:in-progress`, run
 `amf run N`, or let `amf watch` recover it: each poll it puts
 `amf:in-progress` issues no amf is working on back to `amf:ready` once the

@@ -17,7 +17,7 @@ Usage:
 
 Commands:
   init       write .env and create amf's labels
-  issue      manage issues: create, list, run, watch
+  issue      manage issues: create, list, label, run, watch
   pr         manage pull requests: list, merge, view, diff, close, reopen, ready, draft
   run        process one issue into a PR (alias of issue run)
   watch      process amf:ready issues as they arrive (alias of issue watch)
@@ -131,6 +131,12 @@ const doctorHelp = `Usage:
   amf doctor [flags]
 
 Checks the setup here, one line per check, changing nothing.
+
+The label state check compares each issue labeled amf:done, amf:failed or
+amf:pr-open with the pull requests from its amf/issue-N branch, and warns
+about any that disagree: amf:done without a merged PR, amf:failed or
+amf:pr-open with a merged PR, amf:pr-open with no open PR, or two status
+labels. --fix-labels relabels them instead (the only change doctor makes).
 `
 
 const updateHelp = `Usage:
@@ -306,7 +312,7 @@ var helpSubcommands = map[string][]string{
 var helpArgs = map[string][]string{
 	"init": {"init"}, "run": {"run"}, "watch": {"watch"}, "auto": {"auto"}, "list": {"issue", "list"},
 	"pipeline": {"pipeline"}, "doctor": {"doctor"}, "update": {"update"}, "version": {"version"},
-	"issue create": {"issue", "create"}, "issue list": {"issue", "list"}, "issue run": {"run"}, "issue watch": {"watch"},
+	"issue create": {"issue", "create"}, "issue list": {"issue", "list"}, "issue label": {"issue", "label"}, "issue run": {"run"}, "issue watch": {"watch"},
 	"pr list": {"pr", "list"}, "pr merge": {"pr", "merge"}, "pr view": {"pr", "view"}, "pr diff": {"pr", "diff"},
 	"memory sync": {"memory", "sync"}, "memory similar": {"memory", "similar"}, "memory show": {"memory", "show"},
 	"pr close": {"pr", "close"}, "pr reopen": {"pr", "reopen"}, "pr ready": {"pr", "ready"}, "pr draft": {"pr", "draft"},

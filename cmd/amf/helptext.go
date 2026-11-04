@@ -35,6 +35,15 @@ stdin when it is not a terminal.
 a blank label is rejected. Surrounding whitespace in the title and label is
 trimmed. Prints #N <url>.
 `,
+	"issue label": `Usage:
+  amf issue label <issue-number> [flags]
+
+Adds and removes labels on an issue: --add and --remove may repeat or take
+comma-separated names. Labels already present (or absent) are skipped.
+Adding an amf status label (amf:in-progress, amf:pr-open, amf:done,
+amf:failed) removes the issue's other status label, so an issue keeps one.
+Prints #N: added ...; removed ..., or #N unchanged.
+`,
 	"pr list": `Usage:
   amf pr list [flags]
 
@@ -134,8 +143,9 @@ var helpExamples = map[string]string{
 	"memory similar": "  amf memory similar 42\n  amf memory similar \"login redirect loops\" --limit 10 --json\n",
 	"memory show":    "  amf memory show 42 --json\n",
 	"init":           "  amf init\n",
-	"doctor":         "  amf doctor\n",
+	"doctor":         "  amf doctor\n  amf doctor --fix-labels\n",
 	"version":        "  amf version\n",
+	"issue label":    "  amf issue label 42 --add amf:done\n  amf issue label 42 --remove amf:failed --add amf:ready\n",
 	"issue create": `  amf issue create "Fix the login redirect" --body "Users land on /404 after login"
   amf issue create "Add a dark mode" --file spec.md --no-label
 `,
