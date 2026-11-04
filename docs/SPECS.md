@@ -83,7 +83,9 @@ amf:ready ──▶ amf:in-progress ──▶ amf:pr-open (PR opened, not merged
   `amf help <command>`, which prints the same text to stdout) shows a usage
   line, a description, every visible flag in one aligned column as
   `-x, --long <value>  description (default ...)`, with `-h, --help` last,
-  and examples. `amf help flags` lists the shared letters.
+  and examples. `amf help flags` lists the shared letters and states that
+  durations are Go durations: `30s`, `5m`, `1h30m`, `2h`. The descriptions of
+  `--interval`, `--agent-timeout` and `--stale-timeout` identify Go durations.
 - `--agent-timeout` limits each agent run, not the whole issue; the old
   `--timeout` is accepted as a deprecated alias of it, hidden from help. Both must be at least
   1m and at most 24h, and 0 and negatives are errors; every out-of-range or
