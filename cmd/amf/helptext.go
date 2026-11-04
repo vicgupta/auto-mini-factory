@@ -162,11 +162,16 @@ Closed or merged PRs fail. Issue labels are left as they are. Prints
 
 // helpExamples are the short examples at the end of a command's help.
 var helpExamples = map[string]string{
+	"auth":           "  amf auth status\n  amf auth login --client-id Ov23liABC123\n",
+	"issue":          "  amf issue create \"Fix the login redirect\" --body \"Users land on /404 after login\"\n  amf issue list --label amf:ready\n",
+	"pr":             "  amf pr list\n  amf pr view 57\n",
+	"memory":         "  amf memory sync\n  amf memory similar 42\n",
+	"help":           "  amf help run\n  amf help pr merge\n",
 	"memory sync":    "  amf memory sync\n  amf memory sync --full --memory-backend markdown\n",
 	"memory similar": "  amf memory similar 42\n  amf memory similar \"login redirect loops\" --limit 10 --json\n",
 	"memory show":    "  amf memory show 42 --json\n",
 	"init":           "  amf init\n",
-	"doctor":         "  amf doctor\n  amf doctor --fix-labels\n",
+	"doctor":         "  amf doctor\n  amf doctor --dir ~/work\n  amf doctor --fix-labels\n",
 	"version":        "  amf version\n",
 	"issue label":    "  amf issue label 42 --add amf:done\n  amf issue label 42 --remove amf:failed --add amf:ready\n",
 	"issue create": `  amf issue create "Fix the login redirect" --body "Users land on /404 after login"
@@ -188,6 +193,7 @@ var helpExamples = map[string]string{
   amf auto "add a health check endpoint" --no-checkpoint --merge=squash
   amf auto --continue --approve
   amf auto status
+  amf auto --abort
 `,
 	"pipeline":  "  amf pipeline\n  amf pipeline --fetch\n",
 	"update":    "  amf update --check\n  amf update --version v0.0.7\n",
@@ -204,6 +210,11 @@ var helpExamples = map[string]string{
 
 func init() {
 	helpExamples["issue list"] = helpExamples["list"]
+	helpExamples["issue run"] = helpExamples["run"]
+	helpExamples["issue watch"] = helpExamples["watch"]
+	for group := range helpSubcommands {
+		helpExamples[group+" help"] = helpExamples[group]
+	}
 	subHelp["issue list"] = listHelp
 	subHelp["issue run"] = runHelp
 	subHelp["issue watch"] = watchHelp

@@ -27,6 +27,21 @@ For common failures and fixes, see the [troubleshooting guide](TROUBLESHOOTING.m
 | `amf version` | print amf's version |
 | `amf help` | show help for a command or topic |
 
+Setup and utility examples:
+
+```sh
+amf init                         # write .env and create amf's labels
+amf doctor                       # check the setup here
+amf doctor --dir ~/work           # check the setup in another directory
+amf update --check                # check for a newer release
+amf update --version v0.0.7       # install a specific release
+amf version                      # show the installed version
+amf pipeline                     # inspect this checkout's pipeline
+amf pipeline --fetch             # also check remote skills
+amf help run                     # show a command's flags and examples
+amf help pr merge                # show a subcommand's flags and examples
+```
+
 ## issue commands
 
 | Command | What it does |
@@ -340,6 +355,10 @@ merged PRs fail. No command-specific flags.
 Prints Reopened #N <url>, or #N is already open.
 Leaves linked issue labels unchanged. There is no --json flag.
 
+```sh
+amf pr reopen 57
+```
+
 Example output:
 
 ```text
@@ -357,6 +376,10 @@ Closed or merged PRs fail. No command-specific flags.
 Prints #N is ready for review <url>, or #N is already ready for review.
 Leaves linked issue labels unchanged. There is no --json flag.
 
+```sh
+amf pr ready 57
+```
+
 Example output:
 
 ```text
@@ -373,6 +396,10 @@ Converts an open PR to a draft using GitHub GraphQL.
 Closed or merged PRs fail. No command-specific flags.
 Prints #N is now a draft <url>, or #N is already a draft.
 Leaves linked issue labels unchanged. There is no --json flag.
+
+```sh
+amf pr draft 57
+```
 
 Example output:
 

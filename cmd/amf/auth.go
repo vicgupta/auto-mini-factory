@@ -416,7 +416,7 @@ func configuredAPIURL(paths []string) string {
 
 var authSubcommands = []string{"login", "status", "logout", "token", "help"}
 
-const authUsage = `Usage:
+var authUsage = `Usage:
   amf auth login [--host host] [--client-id id] [--scopes "repo"] [--no-browser]
   amf auth status [--host host]
   amf auth logout [--host host]
@@ -447,7 +447,7 @@ client ID with --client-id or AMF_GITHUB_CLIENT_ID. To register one: GitHub
 Settings > Developer settings > OAuth Apps > New OAuth App, any homepage
 and callback URL, check Enable Device Flow, then copy the Client ID (no
 client secret is needed).
-`
+` + "\nExamples:\n" + helpExamples["auth"]
 
 const authLoginHelp = `Usage:
   amf auth login [flags]

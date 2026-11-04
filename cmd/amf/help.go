@@ -10,7 +10,7 @@ import (
 
 // usage is the short overview amf, amf help, -h and --help print: one line
 // per command and help topic. The details live in helpTopics.
-const usage = `amf turns GitHub issues into pull requests with coding agents: Claude Code, Codex or opencode.
+var usage = `amf turns GitHub issues into pull requests with coding agents: Claude Code, Codex or opencode.
 
 Usage:
   amf <command> [arguments]
@@ -40,7 +40,7 @@ every command takes.
 
 Run amf help <command> or amf <command> -h for details.
 Every flag has a long form and common ones a short one: see amf help flags.
-`
+` + "\nExamples:\n" + helpExamples["help"]
 
 const runHelp = `Usage:
   amf run <issue-number> [flags]
@@ -161,13 +161,13 @@ const versionHelp = `Usage:
 Prints amf's version (also amf --version).
 `
 
-const helpHelp = `Usage:
+var helpHelp = `Usage:
   amf help [command [subcommand] | topic]
 
 Without an argument, prints the overview of commands and topics. With one,
 prints that command's or topic's details: amf help run prints the same as
 amf run --help, and amf help pr merge the same as amf pr merge --help.
-`
+` + "\nExamples:\n" + helpExamples["help"]
 
 const agentsHelp = `Choosing the agent
 

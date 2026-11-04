@@ -104,6 +104,35 @@ func TestDocumentationCommands(t *testing.T) {
 	}
 }
 
+func TestHelpExamplesCoverCommands(t *testing.T) {
+	commands := slices.Clone(topCommands)
+	for group, subcommands := range helpSubcommands {
+		for _, subcommand := range subcommands {
+			commands = append(commands, group+" "+subcommand)
+		}
+	}
+	for _, command := range commands {
+		t.Run(command, func(t *testing.T) {
+			examples := helpExamples[command]
+			if strings.TrimSpace(examples) == "" {
+				t.Fatalf("amf %s has no examples", command)
+			}
+			var out, stderr strings.Builder
+			if err := run(context.Background(), append([]string{"help"}, strings.Fields(command)...), nil, &out, &stderr); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(out.String(), "\nExamples:\n"+examples) || stderr.Len() != 0 {
+				t.Errorf("amf help %s: missing examples in stdout %q; stderr %q", command, out.String(), stderr.String())
+			}
+		})
+	}
+	for _, example := range []string{"amf auto status", "amf auto --abort"} {
+		if !strings.Contains(helpExamples["auto"], example+"\n") {
+			t.Errorf("auto help lacks %q", example)
+		}
+	}
+}
+
 func TestDocumentationEnvironment(t *testing.T) {
 	var want [][]string
 	entry := regexp.MustCompile(`(?m)^  ([A-Z][A-Z0-9_]+) \(default: ([^\n]+)\)\n((?:    [^\n]+\n)+)`)

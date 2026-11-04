@@ -308,6 +308,11 @@ Relative flag values resolve against the directory amf was started in, before
 running binary where it is, and its temporary download sits next to it.
 
 ```sh
+amf version                      # show the installed version
+amf doctor --dir ~/work           # check the setup in another directory
+amf pipeline                     # inspect this checkout's pipeline
+amf pipeline --fetch             # also check remote skills
+
 amf issue "Add dark mode" --body "Use CSS variables for the palette"
 amf issue "Fix login bug" --file bug.md
 echo "details" | amf issue "Title"     # body from stdin
@@ -332,7 +337,13 @@ amf auto "Add a dark mode toggle" --checkpoint-after 2 --wait-for-checks # revie
 amf auto "Add a dark mode toggle" --approve # approve the checkpoint without a terminal
 amf auto "Add a dark mode toggle" --no-checkpoint # merge all issues without pausing
 amf auto --continue        # approve the checkpoint and resume
+amf auto status            # inspect saved progress
+amf auto --abort           # forget the saved run, leaving GitHub issues and PRs unchanged
 amf run 42 --dry-run        # make the change locally and show the PR, touching nothing on GitHub
+
+amf pr reopen 57            # reopen a closed, unmerged PR
+amf pr ready 57             # mark an open draft PR ready for review
+amf pr draft 57             # convert an open PR to a draft
 
 amf memory sync             # backfill the repo's memory from GitHub (then only what changed)
 amf memory similar 42       # past issues, PRs and runs like issue 42

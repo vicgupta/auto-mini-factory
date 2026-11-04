@@ -6,7 +6,7 @@ import (
 	"io"
 )
 
-const issueUsage = `usage: amf issue <command>
+var issueUsage = `usage: amf issue <command>
 
 Commands:
   create "Title" [--body text | --file path] [--label name] [--no-label]  create an issue (the body may also come from stdin)
@@ -17,7 +17,7 @@ Commands:
 
 amf issue "Title" … is a shortcut for amf issue create "Title" …
 Run amf help issue <command> or amf issue <command> --help for its flags.
-`
+` + "\nExamples:\n" + helpExamples["issue"]
 
 var issueSubcommands = []string{"create", "list", "label", "run", "watch", "help"}
 
