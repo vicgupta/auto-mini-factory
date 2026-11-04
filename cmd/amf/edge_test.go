@@ -3670,3 +3670,28 @@ func TestDoctorAutoStateEdges(t *testing.T) {
 		})
 	}
 }
+
+func TestHelpUnknownSubcommandTopic(t *testing.T) {
+	for _, tc := range []struct {
+		args       []string
+		want, hint string
+	}{
+		{[]string{"help", "pr", "mrge"}, `unknown help topic "pr mrge"`, `Did you mean "pr merge"?`},
+		{[]string{"help", "issue", "lst"}, `unknown help topic "issue lst"`, `Did you mean "issue list"?`},
+		{[]string{"help", "memory", "nope"}, `unknown help topic "memory nope"`, ""},
+	} {
+		var out, errb bytes.Buffer
+		err := run(context.Background(), tc.args, nil, &out, &errb)
+		if !errors.Is(err, errUsage) || out.Len() != 0 {
+			t.Fatalf("%v: err %v, stdout %q", tc.args, err, &out)
+		}
+		if e := errb.String(); !strings.Contains(e, tc.want) || !strings.Contains(e, tc.hint) {
+			t.Fatalf("%v: stderr %q", tc.args, e)
+		}
+	}
+	// The group's own help still works.
+	var out bytes.Buffer
+	if err := run(context.Background(), []string{"help", "pr", "help"}, nil, &out, io.Discard); err != nil || !strings.Contains(out.String(), "merge") {
+		t.Fatalf("amf help pr help: %v %q", err, &out)
+	}
+}

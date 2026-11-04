@@ -292,6 +292,13 @@ func newCommandFlags(key string, w io.Writer) *flag.FlagSet {
 	return fs
 }
 
+// helpSubcommands lists the subcommands amf help <group> <subcommand> knows.
+var helpSubcommands = map[string][]string{
+	"pr":     prSubcommands,
+	"issue":  issueSubcommands,
+	"memory": {"sync", "similar", "show", "help"},
+}
+
 // helpArgs maps each amf help <topic> that is a command with flags to the
 // arguments that run it, so amf help run prints what amf run --help does.
 var helpArgs = map[string][]string{

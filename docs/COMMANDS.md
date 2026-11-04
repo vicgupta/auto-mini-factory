@@ -522,7 +522,7 @@ Generated from each command's `--help`; `amf init`, `amf doctor`,
 
 | Flag | What it does |
 |---|---|
-| `-c, --comment <text>` | post a comment on the issue before closing |
+| `-c, --comment <text>` | post a comment on the pull request before closing |
 | `-d, --delete-branch` | delete the head branch after closing, if it is in this repository |
 
 ### amf pipeline
