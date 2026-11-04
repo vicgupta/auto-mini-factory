@@ -928,6 +928,37 @@ and exit code are preserved.
     The PR exists by now, so if setting the label or commenting fails, amf
     logs a warning and the run still succeeds.
 
+### Stale pull requests
+
+When the guard is skipped (`amf run N --force`, `amf auto`) and the issue's
+`amf/issue-N` PR is open and behind the default branch (compare
+`behind_by` > 0), amf brings that PR up to date instead of rebuilding it,
+after Claim and the author check:
+
+1. Fetch the default branch and `amf/issue-N`; create the worktree and reset
+   it to `origin/amf/issue-N`.
+2. `git merge --no-ff -m "Merge origin/<default> into amf/issue-N"
+   origin/<default>`.
+3. Clean: no agent runs. Conflicts: the files `git diff --name-only
+   --diff-filter=U` lists go to one agent, the pipeline's code stage agent,
+   else the first agent of the run plan, with a prompt naming only those
+   files and telling it to keep both sides and not commit. Its log is
+   `.amf/logs/issue-N-conflicts.log`. A file left with a line starting
+   `<<<<<<< ` or `>>>>>>> `, or a path still unmerged after `git add -A`,
+   fails the run (the merge is aborted, nothing is pushed). Otherwise amf
+   commits the merge.
+4. Conflicts with no usable agent: amf comments on the PR listing the
+   conflicted files, aborts the merge, pushes nothing and fails the run
+   with `merging origin/<default> into amf/issue-N conflicts in …, and no
+   usable agent can resolve it`.
+5. The `.github/` refusal applies to the merged tree. Push without
+   `--force` (the merge only adds commits), then continue at Comment and
+   label, and `--merge`, as for an updated PR. The PR's title and body are
+   left as they were.
+
+An open PR that isn't behind (or a compare that fails) is rebuilt by the
+usual steps.
+
 ### With a pipeline
 
 1. **Skills.** Download each stage's skill: HTTPS only, following only HTTPS

@@ -59,7 +59,12 @@ opening a PR or merging.
 
 An issue that already has an open amf pull request is labeled amf:pr-open
 and skipped, and one whose amf/issue-N branch is on origin without an open
-PR is skipped: --force runs it anyway, updating the open PR. An issue is
+PR is skipped: --force runs it anyway, updating the open PR.
+A --force run on an open PR that is behind the default branch first merges
+the default branch into it: a clean merge is pushed without an agent; on
+conflicts one agent resolves only the conflicted files; with no usable
+agent amf comments on the PR naming them.
+An issue is
 amf:pr-open while its PR is open and amf:done once GitHub confirms it is
 merged. watch moves an amf:failed issue whose PR is open with passing
 checks to amf:pr-open.

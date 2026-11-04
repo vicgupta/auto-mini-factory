@@ -304,9 +304,14 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 		return trusted
 	}
 
-	pr, updated, err := r.process(ctx, issue, base, pipeline, agent)
+	pr, updated, err := r.refreshStale(ctx, issue, base, pipeline, agent)
 	if err != nil {
 		return err
+	}
+	if !updated {
+		if pr, updated, err = r.process(ctx, issue, base, pipeline, agent); err != nil {
+			return err
+		}
 	}
 
 	r.lastPR = pr
