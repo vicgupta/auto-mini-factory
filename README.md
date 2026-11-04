@@ -70,6 +70,16 @@ For all settings and defaults, run `amf help env` or see the
 
 ## Documentation
 
+amf never invokes a pager. Long output from `amf pr diff` and `amf memory show`
+goes directly to stdout, even in a terminal; there is nothing to disable.
+There is no `--no-pager` flag, and `PAGER` (including `PAGER=cat`) has no effect
+on amf's output. To page it yourself, pipe to a pager:
+
+```sh
+amf pr diff 42 | less
+amf memory show 42 | less
+```
+
 `amf help <command>` prints a command's details. See:
 
 - [Command reference](docs/COMMANDS.md): commands, flags, exit status, paths and logs
