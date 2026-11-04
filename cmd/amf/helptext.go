@@ -50,6 +50,35 @@ at least one label is required. Labels already absent are skipped.
 Accepts open or closed issues, but not pull requests.
 Prints #N: removed ..., or #N unchanged.
 `,
+	"issue close": `Usage:
+  amf issue close <issue-number> [flags]
+
+Closes an issue, optionally commenting first. Accepts 42 or #42, but not
+pull requests. Labels are left as they are. Needs no git checkout.
+
+--comment posts its text before closing, with configured secrets redacted.
+--delete-branch deletes this repository's remote amf/issue-N branch after
+closing. A deletion failure (including a missing branch) reports an error;
+the issue stays closed. Local branches and worktrees are left as they are.
+An already closed issue succeeds without commenting or deleting.
+Prints Closed #N <url>, or #N is already closed.
+`,
+	"issue reopen": `Usage:
+  amf issue reopen <issue-number>
+
+Reopens a closed issue. Accepts 42 or #42, but not pull requests.
+An open issue succeeds unchanged. Labels are left as they are.
+Needs no git checkout. Prints Reopened #N <url>, or #N is already open.
+`,
+	"issue view": `Usage:
+  amf issue view <issue-number> [flags]
+
+Shows an open or closed issue: title, state, author, every label, URL and
+body. Labels are shown in GitHub's order, or - when there are none.
+Accepts 42 or #42, but not pull requests. Needs no git checkout.
+--json prints one object with number, title, state, url, labels, author and
+body; labels is an array of names ([] when empty).
+`,
 	"pr list": `Usage:
   amf pr list [flags]
 
@@ -182,6 +211,9 @@ var helpSeeAlso = map[string][]string{
 	"issue create":   {"issue label", "issue list", "run"},
 	"issue label":    {"issue unlabel", "issue list", "run", "watch"},
 	"issue unlabel":  {"issue label", "issue list", "watch"},
+	"issue close":    {"issue reopen", "issue view"},
+	"issue reopen":   {"issue close", "issue view"},
+	"issue view":     {"issue list", "issue close", "issue label"},
 	"pr list":        {"pr view", "pr diff", "pr merge"},
 	"pr merge":       {"pr view", "pr sweep", "run"},
 	"pr sweep":       {"pr merge", "watch"},
@@ -210,6 +242,9 @@ var helpExamples = map[string]string{
 	"version":        "  amf version\n",
 	"issue label":    "  amf issue label 42 amf:ready bug\n  amf issue label 42 --remove amf:failed --add amf:ready\n",
 	"issue unlabel":  "  amf issue unlabel 42 amf:ready bug\n",
+	"issue close":    "  amf issue close 42 --comment \"Superseded by #43\"\n  amf issue close 42 --delete-branch\n",
+	"issue reopen":   "  amf issue reopen 42\n",
+	"issue view":     "  amf issue view 42\n  amf issue view 42 --json\n",
 	"issue create": `  amf issue create "Fix the login redirect" --body "Users land on /404 after login"
   amf issue create "Add a dark mode" --file spec.md --no-label
 `,
@@ -261,10 +296,10 @@ A letter keeps its meaning on every command that has the flag.
   -b  --body             issue create
   -B  --no-browser       auth login
   -C  --client-id        auth login
-  -c  --comment          pr close
+  -c  --comment          issue close, pr close
   -c  --continue         auto
   -c  --check            update
-  -d  --delete-branch    pr merge, pr close
+  -d  --delete-branch    issue close, pr merge, pr close
   -e  --eval-rounds      run, watch, auto
   -f  --file             issue create
   -f  --force            run, auth token
@@ -272,7 +307,7 @@ A letter keeps its meaning on every command that has the flag.
   -H  --host             auth login, auth status, auth logout, auth token
   -i  --interval         watch
   -i  --issue            pr list
-  -j  --json             issue list, pr list, pr sweep, pr view, memory
+  -j  --json             issue list, issue view, pr list, pr sweep, pr view, memory
   -l  --label            issue create, issue list, watch
   -L  --limit            issue list, pr list, memory
   -m  --merge            run, watch, auto, pr sweep

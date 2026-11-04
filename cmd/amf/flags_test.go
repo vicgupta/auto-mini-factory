@@ -17,6 +17,7 @@ import (
 
 // helpCommands is every command and subcommand with a FlagSet.
 var helpCommands = [][]string{
+	{"issue", "close"}, {"issue", "reopen"}, {"issue", "view"},
 	{"issue", "label"}, {"issue", "unlabel"},
 	{"init"}, {"auth", "login"}, {"auth", "status"}, {"auth", "logout"}, {"auth", "token"}, {"issue", "create"}, {"issue", "list"}, {"list"}, {"run"}, {"watch"}, {"auto"},
 	{"pr", "list"}, {"pr", "merge"}, {"pr", "view"}, {"pr", "diff"}, {"pr", "close"},
