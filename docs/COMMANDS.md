@@ -14,6 +14,7 @@ For common failures and fixes, see the [troubleshooting guide](TROUBLESHOOTING.m
 | Command | What it does |
 |---|---|
 | `amf init` | write `.env` and create amf's labels |
+| `amf auth` | get a GitHub token: login, status, logout, token |
 | `amf issue` | manage issues: `create`, `list`, `label`, `run`, `watch` |
 | `amf pr` | manage pull requests: `list`, `merge`, `sweep`, `view`, `diff`, `close`, `reopen`, `ready`, `draft` |
 | `amf run` | process one issue into a PR (alias of `issue run`) |
@@ -421,14 +422,17 @@ the same letter. `amf help flags` prints this table; `amf <command> --help`
 |---|---|---|
 | `-a` | `--agent` | run, watch, auto |
 | `-b` | `--body` | issue create |
+| `-B` | `--no-browser` | auth login |
+| `-C` | `--client-id` | auth login |
 | `-c` | `--check` | update |
 | `-c` | `--comment` | pr close |
 | `-c` | `--continue` | auto |
 | `-d` | `--delete-branch` | pr merge, pr close |
 | `-e` | `--eval-rounds` | run, watch, auto |
 | `-f` | `--file` | issue create |
-| `-f` | `--force` | run |
+| `-f` | `--force` | run, auth token |
 | `-h` | `--help` | every command |
+| `-H` | `--host` | auth login, auth status, auth logout, auth token |
 | `-i` | `--interval` | watch |
 | `-i` | `--issue` | pr list |
 | `-j` | `--json` | issue list, pr list, pr sweep, pr view, memory |
@@ -436,6 +440,7 @@ the same letter. `amf help flags` prints this table; `amf <command> --help`
 | `-L` | `--limit` | issue list, pr list, memory |
 | `-m` | `--merge` | run, watch, auto, pr sweep |
 | `-n` | `--dry-run` | run, auto, pr sweep |
+| `-o` | `--scopes` | auth login |
 | `-r` | `--rebase` | pr merge |
 | `-s` | `--squash` | pr merge |
 | `-s` | `--state` | issue list, pr list |
@@ -476,11 +481,92 @@ work; `amf issue create`'s old `-b` and `-f` are now the short forms of
 `--body` and `--file`; and `--timeout` is a hidden, deprecated alias of
 `--agent-timeout`.
 
+## amf auth
+
+```text
+amf auth login [--host host] [--client-id id] [--scopes "repo"] [--no-browser]
+amf auth status [--host host]
+amf auth logout [--host host]
+amf auth token [--host host] [--force]
+```
+
+amf needs a GitHub token. Every command that talks to GitHub takes the first of:
+
+1. `GITHUB_TOKEN`, then `GH_TOKEN`, from the environment or `.env` (`--env-file`)
+2. `gh auth token --hostname <host>`, if the GitHub CLI is on `PATH` (3 second
+   timeout; any error is ignored)
+3. the token `amf auth login` saved for the host
+
+With none, it stops with `GITHUB_TOKEN is not set, and neither gh nor amf auth
+login has a token: run amf auth login, or set GITHUB_TOKEN`. `amf doctor`, `amf
+auth status` and the `config.load` debug event say which source was used, never
+the token.
+
+- `amf auth login` runs GitHub's OAuth device flow: it prints a one-time code
+  and https://github.com/login/device, opens that page (`--no-browser` skips
+  it), polls until you authorize amf (honoring `interval` and `slow_down`;
+  `access_denied` and `expired_token` stop it), checks the token with
+  `GET /user`, prints the login and saves the token. `--scopes` defaults to
+  `repo`; add `workflow` (`--scopes "repo workflow"`) to let amf merge pull
+  requests that change `.github/workflows`.
+- `amf auth status` shows the host, the token source, the token type (from its
+  prefix), the account and the scopes from GitHub's `X-OAuth-Scopes` header.
+- `amf auth logout` deletes the saved token for the host.
+- `amf auth token` prints the token for scripts (`GH_TOKEN=$(amf auth token)`),
+  and refuses when stdout is a terminal unless `--force` is given.
+
+The host defaults to `AMF_API_URL`'s (`github.com` for `https://api.github.com`).
+`--host ghe.example.com` targets GitHub Enterprise Server: the device flow at
+`https://ghe.example.com/login/...` and the API at `https://ghe.example.com/api/v3`.
+
+**Where tokens are stored.** `hosts.json` (mode 0600, folder 0700), keyed by
+host, in `AMF_CONFIG_DIR` or else `amf` in the user config folder
+(`~/.config/amf` on Linux, `~/Library/Application Support/amf` on macOS,
+`%AppData%\amf` on Windows). This is the one deliberate exception to
+[paths defaulting to the current directory](#paths-default-to-the-current-directory):
+a credential must never land in a checkout an agent works in. The OS keychain
+is not used yet (future work).
+
+**The OAuth app.** `amf auth login` needs the client ID of a GitHub OAuth app
+with the device flow enabled, from `--client-id`, else `AMF_GITHUB_CLIENT_ID`,
+else one built into the release (`-ldflags "-X main.defaultClientID=<id>"`). To
+register one:
+
+1. GitHub **Settings > Developer settings > OAuth Apps > New OAuth App**
+   (https://github.com/settings/applications/new).
+2. Any name, homepage URL and authorization callback URL (e.g. the repo's URL);
+   the device flow doesn't use the callback.
+3. Check **Enable Device Flow** and register the app.
+4. Copy the **Client ID**. No client secret is needed.
+5. Run `amf auth login --client-id <id>`, or set `AMF_GITHUB_CLIENT_ID=<id>`.
+
 ## Flag reference
 
 Generated from each command's `--help`; `amf init`,
 `amf version`, `amf pr reopen`, `amf pr ready` and `amf pr draft` take only
 `-h, --help`.
+
+### amf auth login
+
+| Flag | What it does |
+|---|---|
+| `-C, --client-id <id>` | the OAuth app's client id (default: AMF_GITHUB_CLIENT_ID) |
+| `-H, --host <host>` | the GitHub host (default: AMF_API_URL's, github.com) |
+| `-B, --no-browser` | don't open the browser; just print the link |
+| `-o, --scopes <scopes>` | the OAuth scopes to ask for, separated by spaces or commas (default repo) |
+
+### amf auth status, amf auth logout
+
+| Flag | What it does |
+|---|---|
+| `-H, --host <host>` | the GitHub host (default: AMF_API_URL's, github.com) |
+
+### amf auth token
+
+| Flag | What it does |
+|---|---|
+| `-f, --force` | print the token even to a terminal |
+| `-H, --host <host>` | the GitHub host (default: AMF_API_URL's, github.com) |
 
 ### amf issue create
 

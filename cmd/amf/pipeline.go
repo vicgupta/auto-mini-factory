@@ -889,7 +889,7 @@ func (r *Runner) agentEnv(env []string, agent, wt string) []string {
 	if agent == agentClaude {
 		env = r.claudeEnv(env)
 	} else {
-		env = withoutEnv(env, "GITHUB_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "OPENCODE_CONFIG")
+		env = withoutEnv(env, "GITHUB_TOKEN", "GH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "OPENCODE_CONFIG")
 	}
 	if agent != agentOpencode {
 		env = withoutEnv(env, "OPENCODE_API_KEY")

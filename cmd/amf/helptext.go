@@ -218,14 +218,17 @@ A letter keeps its meaning on every command that has the flag.
 
   -a  --agent            run, watch, auto
   -b  --body             issue create
+  -B  --no-browser       auth login
+  -C  --client-id        auth login
   -c  --comment          pr close
   -c  --continue         auto
   -c  --check            update
   -d  --delete-branch    pr merge, pr close
   -e  --eval-rounds      run, watch, auto
   -f  --file             issue create
-  -f  --force            run
+  -f  --force            run, auth token
   -h  --help             every command
+  -H  --host             auth login, auth status, auth logout, auth token
   -i  --interval         watch
   -i  --issue            pr list
   -j  --json             issue list, pr list, pr sweep, pr view, memory
@@ -233,6 +236,7 @@ A letter keeps its meaning on every command that has the flag.
   -L  --limit            issue list, pr list, memory
   -m  --merge            run, watch, auto, pr sweep
   -n  --dry-run          run, auto, pr sweep
+  -o  --scopes           auth login
   -r  --rebase           pr merge
   -s  --state            issue list, pr list
   -s  --squash           pr merge

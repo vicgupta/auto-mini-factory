@@ -76,6 +76,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	switch cmd, rest := args[0], args[1:]; cmd {
 	case "init":
 		return cmdInit(ctx, rest, stdout, stderr)
+	case "auth":
+		return cmdAuth(ctx, rest, stdout, stderr)
 	case "pr":
 		return cmdPR(ctx, rest, stdout, stderr)
 	case "list": // undocumented alias of amf issue list, kept for existing scripts
@@ -109,7 +111,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		// amf help <command or topic> prints its details.
 		if cmd == "help" && len(rest) > 0 {
 			key := rest[0]
-			if len(rest) > 1 && (key == "pr" || key == "issue" || key == "memory") {
+			if len(rest) > 1 && (key == "pr" || key == "issue" || key == "memory" || key == "auth") {
 				key += " " + rest[1]
 			}
 			if a, ok := helpArgs[key]; ok {
@@ -679,7 +681,7 @@ func isTerminal(r io.Reader) bool {
 	return err == nil && st.Mode()&os.ModeCharDevice != 0
 }
 
-var topCommands = []string{"init", "issue", "pr", "run", "watch", "auto", "memory", "pipeline", "doctor", "update", "version", "help"}
+var topCommands = []string{"init", "auth", "issue", "pr", "run", "watch", "auto", "memory", "pipeline", "doctor", "update", "version", "help"}
 
 // suggestCommand returns the command closest to a mistyped one, or "" when
 // nothing is close enough to be a likely typo.

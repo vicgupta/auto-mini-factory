@@ -585,6 +585,31 @@ base `https://host/api/v3` maps to `https://host/api/graphql`. A GraphQL
 response whose `errors` array is non-empty (for example, a token without
 permission) fails with its first message and leaves the PR as it was.
 
+### `amf auth`
+
+The token comes from one function (`resolveToken`), first hit wins:
+`GITHUB_TOKEN`, then `GH_TOKEN` (environment, then the env file); then
+`gh auth token --hostname <host>` (3 s timeout, errors ignored); then the token
+`amf auth login` saved for the host in `hosts.json`. None: the error
+`GITHUB_TOKEN is not set, and neither gh nor amf auth login has a token`. The
+source (never the token) goes in `config.load`'s debug event and `amf doctor`.
+The host is `AMF_API_URL`'s (`api.github.com` → `github.com`; `<h>/api/v3` → `<h>`),
+or `--host`.
+
+- `login`: device flow over `net/http` — `POST /login/device/code`
+  (`client_id`, `scope`, default `repo`), print the user code and verification
+  URL, open it unless `--no-browser`, poll `POST /login/oauth/access_token`
+  every `interval` s (`slow_down` adds 5 s or takes GitHub's interval;
+  `authorization_pending` keeps polling; `access_denied`, `expired_token` and
+  `device_flow_disabled` stop with a message; `expires_in` bounds it). Then
+  `GET /user`, save `{user, oauth_token, scopes}` under the host (temp file +
+  rename, 0600; folder 0700), and print the login. The client ID is
+  `--client-id`, `AMF_GITHUB_CLIENT_ID`, or `main.defaultClientID` (ldflags);
+  empty: an error with the OAuth app registration steps.
+- `status`: host, source, token type by prefix, account, `X-OAuth-Scopes`.
+- `logout`: removes the host's entry (the file, when empty).
+- `token`: prints the token; refuses a terminal stdout without `--force`.
+
 ### `amf init`
 
 1. Builds `.env` from a template of `GITHUB_TOKEN`, `GITHUB_REPO`,
@@ -646,9 +671,10 @@ changes anything (issue labels, below). The checks, in order:
 | `amf` | The running version is the latest release | `warn`: a newer release (run `amf update`), a development build, or no answer from GitHub |
 | `git` | `git` runs; shows its version | `FAIL` |
 | `.env` | A `.env` was found where `run` looks; shows its path | `warn` if there is none (the environment is used); `FAIL` if it doesn't parse |
-| `GITHUB_TOKEN` | Set; says whether from `.env` or the environment | `FAIL` if unset or a placeholder |
+| `GITHUB_TOKEN` | A token was found; says its source: `.env`, the environment, `gh auth token` or `amf auth login` | `FAIL` if none or a placeholder |
 | `GITHUB_REPO` | Set and `owner/name` | `FAIL` |
 | `github` | `GET /user` accepts the token; shows the login. A 403 (a token that can't read `/user`) is `ok`, without a login | `FAIL` on 401 or no connection |
+| `scopes` | The token's `X-OAuth-Scopes` (classic and OAuth tokens); `ok` with none reported (fine-grained tokens) | `warn` if scopes are reported without `repo` |
 | `repo` | The repo is readable; shows its default branch | `FAIL` on 404; `warn` if the account can't push |
 | `labels` | All four amf labels exist | `warn`, naming the missing ones |
 | `label state` | Every open or closed issue labeled `amf:done`, `amf:failed` or `amf:pr-open` (and not `amf:in-progress`) agrees with the PRs from its `amf/issue-N` branch in this repo: a merged PR means `amf:done`; otherwise an open PR means `amf:pr-open` (an `amf:failed` issue with an open PR is left to `watch`'s sweep), and neither means `amf:failed`. An issue with two status labels should keep one. Shows how many issues were checked | `warn` per disagreeing issue, naming the label it should have and `amf doctor --fix-labels`; with `--fix-labels`, `ok #N relabeled A → B: why` per issue, or `warn` if relabeling fails. Never causes exit 1 |
@@ -723,7 +749,7 @@ space, a trailing comment. A leading byte order mark is ignored.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `GITHUB_TOKEN` | required | API access: Contents, Issues, Pull requests (read & write) |
+| `GITHUB_TOKEN` | gh auth token, then amf auth login | API access: Contents, Issues, Pull requests (read & write). `GH_TOKEN` is read too. Unset, amf uses gh's token, then the one `amf auth login` saved (`amf help auth`) |
 | `GITHUB_REPO` | required | `owner/name`; github.com URLs are accepted |
 | `CLAUDE_CODE_OAUTH_TOKEN` | unset | Claude subscription token, passed to Claude. Makes `claude` usable without `--agent` |
 | `ANTHROPIC_API_KEY` | unset | Claude API key, passed to Claude when there's no `CLAUDE_CODE_OAUTH_TOKEN`. Makes `claude` usable without `--agent` |
@@ -740,6 +766,8 @@ space, a trailing comment. A leading byte order mark is ignored.
 | `AMF_LOG_LEVEL` | `info` (terminal), `debug` (event log) | `debug`, `info`, `warn` or `error`, for both the terminal and the event log of `run` and `watch`; `--log-level` overrides it |
 | `AMF_CODEX` | `codex` | Path to the Codex CLI |
 | `AMF_OPENCODE` | `opencode` | Path to the opencode CLI |
+| `AMF_GITHUB_CLIENT_ID` | unset | The GitHub OAuth app `amf auth login` uses, when `--client-id` isn't given |
+| `AMF_CONFIG_DIR` | the user config folder's amf | Where `amf auth login` saves tokens (`hosts.json`); environment only |
 | `AMF_API_URL` | `https://api.github.com` | GitHub API base URL. `amf pr ready` and `amf pr draft` derive their GraphQL endpoint from it: `…/graphql` appended, or a GitHub Enterprise Server `…/api/v3` becomes `…/api/graphql` |
 | `AMF_CLONE_URL` | `https://github.com/<repo>.git` | Where to clone `GITHUB_REPO` from |
 
@@ -840,7 +868,7 @@ and exit code are preserved.
      smallest complete change, run the project's tests and build, not touch
      `.github/`, git or GitHub, and reply with only a PR description.
    - **Environment:** `PWD` is the worktree, and no agent gets
-     `GITHUB_TOKEN`. Only Claude gets `CLAUDE_CODE_OAUTH_TOKEN`, and only
+     `GITHUB_TOKEN` or `GH_TOKEN`. Only Claude gets `CLAUDE_CODE_OAUTH_TOKEN`, and only
      opencode gets `OPENCODE_API_KEY`: amf removes each from the other
      agents' environments, even when it's exported in the shell. When
      `CLAUDE_CODE_OAUTH_TOKEN` is set, it's passed to Claude and Claude's
@@ -1114,6 +1142,7 @@ redirect to a URL ending in the tag, and serve the archive and
 | `.amf/runs/<run_id>/events.jsonl` | The event log of one `run` or `watch` process, unless `--log-file` says otherwise |
 | `.amf/runs/<run_id>/summary.json` | That process's summary, rewritten after each issue and at exit |
 | `.amf/opencode.json` | The config amf runs opencode with |
+| `<config-dir>/hosts.json` | Tokens saved by `amf auth login`, per host (0600, folder 0700); `<config-dir>` is `AMF_CONFIG_DIR` or `os.UserConfigDir()/amf` |
 | `<memory-dir>/amf-memory/<host>/<owner>/<repo>/` | The repo's memory (see [Repo memory](#repo-memory)) |
 
 amf only ever adds to `.git/info/exclude`. It never edits a tracked `.gitignore`.
@@ -1250,9 +1279,10 @@ get without it. Other commands don't log there.
 - `amf pr merge` is a person explicitly choosing a PR to merge. It allows
   changes to `AGENTS.md` and uses GitHub's branch protection rules; the
   unattended `run`/`watch --merge` refusal still applies.
-- No agent gets `GITHUB_TOKEN`, and each agent's environment holds only
+- No agent gets `GITHUB_TOKEN` or `GH_TOKEN`, and each agent's environment holds only
   its own key (step 6), but agents can read local files, including `.env`
-  (and so every key in it, and `AMF_POSTGRES_URL`'s password).
+  (and so every key in it, and `AMF_POSTGRES_URL`'s password) and amf's
+  `hosts.json`, and can run `gh auth token`.
 - With `AMF_POSTGRES_URL` set, everything the agents print, which can
   include code and the contents of files they read, is stored in
   `amflogs` (redacted, as below). Anyone who can read that database can
@@ -1307,4 +1337,6 @@ binaries, looked up on `PATH` when bare.
 
 Left as they are: `amf update` writes to the running executable's path (and its
 temporary file next to it); `amf init` and `amf doctor` create temporary files
-next to the file they write or in the folder they test, and remove them at once.
+next to the file they write or in the folder they test, and remove them at once;
+`amf auth` keeps tokens in `AMF_CONFIG_DIR` or `os.UserConfigDir()/amf`, never
+the current directory, so a credential can't land in a checkout an agent works in.

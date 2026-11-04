@@ -929,13 +929,13 @@ func (r *Runner) claudeEnv(env []string) []string {
 	switch {
 	case r.ClaudeToken != "":
 		// The subscription token wins: an API key would take precedence over it.
-		env = withoutEnv(env, "GITHUB_TOKEN", "OPENCODE_API_KEY", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN")
+		env = withoutEnv(env, "GITHUB_TOKEN", "GH_TOKEN", "OPENCODE_API_KEY", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN")
 		return append(env, "CLAUDE_CODE_OAUTH_TOKEN="+r.ClaudeToken)
 	case r.AnthropicKey != "":
-		env = withoutEnv(env, "GITHUB_TOKEN", "OPENCODE_API_KEY", "ANTHROPIC_API_KEY")
+		env = withoutEnv(env, "GITHUB_TOKEN", "GH_TOKEN", "OPENCODE_API_KEY", "ANTHROPIC_API_KEY")
 		return append(env, "ANTHROPIC_API_KEY="+r.AnthropicKey)
 	}
-	return withoutEnv(env, "GITHUB_TOKEN", "OPENCODE_API_KEY")
+	return withoutEnv(env, "GITHUB_TOKEN", "GH_TOKEN", "OPENCODE_API_KEY")
 }
 
 func withoutEnv(env []string, keys ...string) []string {

@@ -100,9 +100,11 @@ func (d *doctor) check(ctx context.Context) {
 	case !parsed:
 		d.line("skip", "GITHUB_TOKEN", ".env didn't parse")
 	case !tokenOK:
-		d.line("FAIL", "GITHUB_TOKEN", "not set (run amf init, then edit .env)")
-	default:
+		d.line("FAIL", "GITHUB_TOKEN", "not set, and neither gh nor amf auth login has a token (run amf auth login, or set GITHUB_TOKEN in .env)")
+	case strings.HasPrefix(cfg.TokenSource, "GITHUB_TOKEN from "):
 		d.line("ok", "GITHUB_TOKEN", "set, from %s", source("GITHUB_TOKEN", envFile))
+	default:
+		d.line("ok", "GITHUB_TOKEN", "not set; using the token from %s", cfg.TokenSource)
 	}
 	switch {
 	case !parsed:
@@ -540,10 +542,14 @@ func (d *doctor) checkGitHub(ctx context.Context, gh *GitHub, cfg Config) string
 	var user struct {
 		Login string `json:"login"`
 	}
-	err := gh.do(ctx, "GET", "/user", nil, &user)
+	h, err := gh.send(ctx, "GET", "/user", nil, &user)
 	switch {
 	case isStatus(err, http.StatusUnauthorized):
-		d.line("FAIL", "github", "GitHub rejected GITHUB_TOKEN; check it in .env, or create a new one")
+		if strings.HasPrefix(cfg.TokenSource, "GITHUB_TOKEN ") {
+			d.line("FAIL", "github", "GitHub rejected GITHUB_TOKEN; check it in .env, or create a new one")
+		} else {
+			d.line("FAIL", "github", "GitHub rejected the token from %s; renew it, or run amf auth login", cfg.TokenSource)
+		}
 		d.line("skip", "repo", "needs a working GITHUB_TOKEN")
 		d.line("skip", "labels", "needs a working GITHUB_TOKEN")
 		return ""
@@ -555,6 +561,14 @@ func (d *doctor) checkGitHub(ctx context.Context, gh *GitHub, cfg Config) string
 	case user.Login != "":
 		d.login = user.Login
 		d.line("ok", "github", "token accepted for @%s at %s", user.Login, cfg.APIURL)
+		switch scopes := h.Get("X-OAuth-Scopes"); {
+		case scopes == "":
+			d.line("ok", "scopes", "none reported (a %s; its permissions are set on GitHub)", tokenType(cfg.Token))
+		case !hasScope(scopes, "repo") && !hasScope(scopes, "public_repo"):
+			d.line("warn", "scopes", "%s; amf needs repo (amf auth login --scopes repo)", scopes)
+		default:
+			d.line("ok", "scopes", "%s (a %s)", scopes, tokenType(cfg.Token))
+		}
 	default:
 		d.line("ok", "github", "%s is reachable", cfg.APIURL)
 	}
