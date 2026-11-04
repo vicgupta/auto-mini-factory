@@ -64,11 +64,19 @@ func TestDoctorAllGood(t *testing.T) {
 	t.Setenv("AMF_OPENCODE", fakeAgent(t, "opencode", `echo "opencode v2"`))
 	t.Setenv("AMF_TRUSTED", "vic,teammate")
 
+	if err := saveAutoState(autoStatePath(root), &autoState{
+		Version: autoStateVersion, Sentence: "Build a useful tool",
+		Issues: []autoIssue{{Status: "merged"}, {Status: "pending"}, {Status: "failed"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
 	out, err := doctorOutput(t)
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
 	wantLines(t, out,
+		`warn +auto state +"Build a useful tool": 1 merged, 2 remaining; run amf auto --continue or amf auto --abort$`,
 		`warn +amf +a development build \(dev\); the latest release is v9\.9\.9$`,
 		`ok +git +git version`,
 		`warn +\.env +none in `,
