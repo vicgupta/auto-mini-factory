@@ -439,10 +439,18 @@ The first line is `#N <title>`, followed by fields aligned at column 12:
 - `issue:` is `#N` for a head branch named exactly `amf/issue-N` with a
   positive decimal number without leading zeroes; any other branch is `-`.
 - `mergeable:` is `unknown` when GitHub's `mergeable` is `null` (or
-  `mergeable_state` is `unknown`), and the command does not retry. It is
+  `mergeable_state` is `unknown`) after the command re-reads the PR up to
+  three times, pausing 1, 2 and 3 seconds, while GitHub computes it. It is
   `no (conflicts)` when `mergeable` is false or `mergeable_state` is `dirty`,
   `yes` when it is true with a `clean` or empty state, and `blocked (<state>)`
   for any other state, such as `blocked`, `unstable` or `behind`.
+- `behind:` (open PRs only) is `up to date with <base>`, `N commit(s) behind
+  <base>` from GitHub's compare of the base branch with the head commit, or
+  `unknown` when GitHub can't compare them.
+- `checks:` (open PRs only) sums up the head commit's check runs: `none` when
+  none has reported, else `pending`, `passed` (every run succeeded, or was
+  neutral or skipped) or `failed`, then the counts in parentheses, such as
+  `passed (5 checks: 5 success)`; `unknown` when GitHub can't list them.
 - `changes:` is `+<additions> −<deletions> in N file` (`files` unless N is 1),
   using a Unicode minus sign.
 - `url:` is the PR's GitHub page.
@@ -455,7 +463,9 @@ newlines removed and one final newline added; an empty body adds nothing.
 `draft` (boolean), `url`, `head` and `base` (branch names), `author`, `issue`
 (the associated issue integer or `null`), `mergeable` (boolean or `null`),
 `mergeable_state` (GitHub's value, `""` when absent), `additions`,
-`deletions`, `changed_files` and `body`. The body and title are kept as GitHub
+`deletions`, `changed_files`, `behind_by` and `ahead_by` (integers, or `null`
+for a closed PR or when GitHub can't compare), `checks` (`{"state", "summary"}`
+as above, or `null`) and `body`. The body and title are kept as GitHub
 sent them, and HTML is not escaped.
 
 GitHub answers 404 both for an issue number and for a number that doesn't

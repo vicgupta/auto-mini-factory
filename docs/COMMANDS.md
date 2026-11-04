@@ -169,12 +169,17 @@ amf pr view <N> [--json]
 ```
 
 Shows title, state, branches, author, inferred issue, mergeability, change
-counts, URL and body. Mergeability may be unknown; it is not polled.
+counts, URL and body. For an open PR it adds `behind:` (commits behind the
+base branch) and `checks:` (none, pending, passed or failed, with counts, for
+the head commit). While GitHub is still computing mergeability, amf re-reads
+the PR up to three times (about 6 seconds) before showing unknown.
 --json prints one object with number, title, state, draft, url, head, base,
 author, issue, mergeable, mergeable_state, additions, deletions,
-changed_files and body. number and change counts are integers, draft is a
-boolean, issue is an integer or null, mergeable is a boolean or null, and
-the rest are strings. state is open, closed or merged; drafts remain open.
+changed_files, behind_by, ahead_by, checks and body. number and change counts
+are integers, draft is a boolean, issue is an integer or null, mergeable is a
+boolean or null, behind_by and ahead_by are integers or null (closed PRs, or
+GitHub couldn't compare), checks is {state, summary} or null, and the rest
+are strings. state is open, closed or merged; drafts remain open.
 issue is inferred from a canonical amf/issue-N branch, including forks.
 
 Example output:
@@ -186,6 +191,8 @@ branch:    amf/issue-42 → main
 author:    octocat
 issue:     #42
 mergeable: yes
+behind:    2 commits behind main
+checks:    passed (5 checks: 5 success)
 changes:   +3 −1 in 1 file
 url:       https://github.com/owner/repo/pull/57
 ```
@@ -193,7 +200,7 @@ url:       https://github.com/owner/repo/pull/57
 With `--json`:
 
 ```json
-{"number":57,"title":"Fix login","state":"open","draft":false,"url":"https://github.com/owner/repo/pull/57","head":"amf/issue-42","base":"main","author":"octocat","issue":42,"mergeable":true,"mergeable_state":"clean","additions":3,"deletions":1,"changed_files":1,"body":""}
+{"number":57,"title":"Fix login","state":"open","draft":false,"url":"https://github.com/owner/repo/pull/57","head":"amf/issue-42","base":"main","author":"octocat","issue":42,"mergeable":true,"mergeable_state":"clean","additions":3,"deletions":1,"changed_files":1,"behind_by":2,"ahead_by":1,"checks":{"state":"passed","summary":"5 checks: 5 success"},"body":""}
 ```
 
 ### amf pr diff

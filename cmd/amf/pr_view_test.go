@@ -9,6 +9,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 )
 
 func viewFixture() prViewResponse {
@@ -27,6 +28,7 @@ func viewFixture() prViewResponse {
 	}
 	pr.User.Login = "vic"
 	pr.Head.Ref = "amf/issue-56"
+	pr.Head.SHA = "abc123"
 	pr.Base.Ref = "main"
 	return pr
 }
@@ -45,6 +47,8 @@ branch:    amf/issue-56 → main
 author:    vic
 issue:     #56
 mergeable: yes
+behind:    unknown
+checks:    none
 changes:   +120 −14 in 5 files
 url:       https://github.com/vic/demo/pull/101
 
@@ -103,6 +107,7 @@ func TestPRViewStates(t *testing.T) {
 }
 
 func TestPRViewMergeable(t *testing.T) {
+	noMergeablePause(t)
 	gh, srv := newFakeGitHub(t)
 	listJSONEnv(t, srv)
 	no, yes := false, true
@@ -134,8 +139,14 @@ func TestPRViewMergeable(t *testing.T) {
 			if want := fmt.Sprintf("mergeable: %s\n", tc.want); !strings.Contains(out.String(), want) {
 				t.Fatalf("output %q, want %q", &out, want)
 			}
-			if gh.viewGets != 1 {
-				t.Fatalf("fetched the PR %d times, want once", gh.viewGets)
+			// An unknown mergeability is re-read a few times; a known
+			// one is read once.
+			want := 1
+			if tc.want == "unknown" {
+				want += len(mergeablePolls)
+			}
+			if gh.viewGets != want {
+				t.Fatalf("fetched the PR %d times, want %d", gh.viewGets, want)
 			}
 		})
 	}
@@ -186,7 +197,7 @@ func TestPRViewJSON(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &row); err != nil {
 		t.Fatal(err)
 	}
-	if len(row) != 15 {
+	if len(row) != 18 {
 		t.Fatalf("got %d fields: %#v", len(row), row)
 	}
 	want := map[string]any{
@@ -194,7 +205,7 @@ func TestPRViewJSON(t *testing.T) {
 		"url": "https://github.com/vic/demo/pull/101", "head": "amf/issue-56", "base": "main",
 		"author": "vic", "issue": float64(56), "mergeable": true, "mergeable_state": "clean",
 		"additions": float64(120), "deletions": float64(14), "changed_files": float64(5),
-		"body": "<b>body</b>",
+		"body": "<b>body</b>", "behind_by": nil, "ahead_by": nil,
 	}
 	for k, v := range want {
 		if got := row[k]; got != v {
@@ -298,5 +309,71 @@ func TestPRViewGroup(t *testing.T) {
 	out.Reset()
 	if err := run(context.Background(), []string{"help"}, nil, &out, io.Discard); err != nil || !strings.Contains(out.String(), "\n  pr ") {
 		t.Fatalf("help: %v, %q", err, &out)
+	}
+}
+
+func noMergeablePause(t *testing.T) {
+	saved := mergeablePolls
+	mergeablePolls = make([]time.Duration, len(saved))
+	t.Cleanup(func() { mergeablePolls = saved })
+}
+
+func TestPRViewBehindAndChecks(t *testing.T) {
+	noMergeablePause(t)
+	gh, srv := newFakeGitHub(t)
+	listJSONEnv(t, srv)
+	gh.views[101] = viewFixture()
+	gh.compares["main...abc123"] = [2]int{2, 3}
+	gh.checkRuns["abc123"] = []checkRun{
+		{Name: "build", Status: "completed", Conclusion: "success"},
+		{Name: "test", Status: "in_progress"},
+	}
+	var out bytes.Buffer
+	if err := run(context.Background(), []string{"pr", "view", "101"}, nil, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"behind:    3 commits behind main\n", "checks:    pending (2 checks: 1 success, 1 in_progress)\n"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output %q, want %q", &out, want)
+		}
+	}
+
+	gh.compares["main...abc123"] = [2]int{2, 0}
+	gh.checkRuns["abc123"][1] = checkRun{Name: "test", Status: "completed", Conclusion: "failure"}
+	out.Reset()
+	if err := run(context.Background(), []string{"pr", "view", "101", "--json"}, nil, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	var row struct {
+		BehindBy *int        `json:"behind_by"`
+		AheadBy  *int        `json:"ahead_by"`
+		Checks   *viewChecks `json:"checks"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &row); err != nil {
+		t.Fatal(err)
+	}
+	if row.BehindBy == nil || *row.BehindBy != 0 || row.AheadBy == nil || *row.AheadBy != 2 || row.Checks == nil || row.Checks.State != "failed" {
+		t.Fatalf("json: %s", &out)
+	}
+
+	// A closed pull request shows neither, and costs no extra calls.
+	pr := viewFixture()
+	pr.State = "closed"
+	gh.views[101] = pr
+	out.Reset()
+	if err := run(context.Background(), []string{"pr", "view", "101"}, nil, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "behind:") || strings.Contains(out.String(), "checks:") {
+		t.Fatalf("closed PR output: %q", &out)
+	}
+	gh.compares["main...abc123"] = [2]int{0, 1}
+	out.Reset()
+	gh.views[101] = viewFixture()
+	if err := run(context.Background(), []string{"pr", "view", "101"}, nil, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "behind:    1 commit behind main\n") {
+		t.Fatalf("singular: %q", &out)
 	}
 }

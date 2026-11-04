@@ -530,17 +530,10 @@ func (r *Runner) checkSummary(ctx context.Context, commit string, wait, poll tim
 		if wait == 0 {
 			return last
 		}
-		completed, passed := len(runs) > 0, true
-		for _, c := range runs {
-			completed = completed && c.Status == "completed"
-			if c.Conclusion != "success" && c.Conclusion != "neutral" && c.Conclusion != "skipped" {
-				passed = false
-			}
-		}
-		if completed {
-			if passed {
-				return "passed: " + last
-			}
+		switch checksState(runs) {
+		case "passed":
+			return "passed: " + last
+		case "failed":
 			return "failed: " + last
 		}
 		select {
@@ -549,6 +542,28 @@ func (r *Runner) checkSummary(ctx context.Context, commit string, wait, poll tim
 		case <-time.After(poll):
 		}
 	}
+}
+
+// checksState is "none" when no check has reported, "pending" while any is
+// still running, else "passed" when every one succeeded (or was neutral or
+// skipped) and "failed" otherwise.
+func checksState(runs []checkRun) string {
+	if len(runs) == 0 {
+		return "none"
+	}
+	passed := true
+	for _, c := range runs {
+		if c.Status != "completed" {
+			return "pending"
+		}
+		if c.Conclusion != "success" && c.Conclusion != "neutral" && c.Conclusion != "skipped" {
+			passed = false
+		}
+	}
+	if passed {
+		return "passed"
+	}
+	return "failed"
 }
 
 func summarizeCheckRuns(runs []checkRun) string {

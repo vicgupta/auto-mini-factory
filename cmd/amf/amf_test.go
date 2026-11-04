@@ -222,6 +222,12 @@ type fakeGitHub struct {
 	writes []string
 	// events are GET /issues/{n}/events responses.
 	events map[int][]IssueEvent
+	// compares are GET /compare/{base}...{head} responses, keyed by
+	// "base...head" as {ahead, behind}; a missing key is 404.
+	compares map[string][2]int
+	// checkRuns are GET /commits/{sha}/check-runs responses; a missing sha
+	// has none.
+	checkRuns map[string][]checkRun
 }
 
 type fakeError struct {
@@ -230,7 +236,7 @@ type fakeError struct {
 }
 
 func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
-	f := &fakeGitHub{t: t, issues: map[int]*Issue{}, comments: map[int][]string{}, repoLabels: map[string]LabelSpec{}, views: map[int]prViewResponse{}, diffs: map[int]string{}, files: map[int][]prFile{}}
+	f := &fakeGitHub{t: t, issues: map[int]*Issue{}, comments: map[int][]string{}, repoLabels: map[string]LabelSpec{}, views: map[int]prViewResponse{}, compares: map[string][2]int{}, checkRuns: map[string][]checkRun{}, diffs: map[int]string{}, files: map[int][]prFile{}}
 	mux := http.NewServeMux()
 	const repo = "/repos/vic/demo"
 	mux.HandleFunc("GET "+repo, func(w http.ResponseWriter, r *http.Request) {
@@ -556,6 +562,22 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
 		}
 		pr["state"], pr["merge_method"], pr["merge_sha"] = "merged", in["merge_method"], in["sha"]
 		writeJSON(w, 200, map[string]any{"sha": "f00dfeed", "merged": true, "message": "Pull Request successfully merged"})
+	})
+
+	mux.HandleFunc("GET "+repo+"/compare/{spec}", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		c, ok := f.compares[r.PathValue("spec")]
+		if !ok {
+			writeJSON(w, 404, map[string]string{"message": "Not Found"})
+			return
+		}
+		writeJSON(w, 200, map[string]int{"ahead_by": c[0], "behind_by": c[1]})
+	})
+	mux.HandleFunc("GET "+repo+"/commits/{sha}/check-runs", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		writeJSON(w, 200, map[string]any{"check_runs": append([]checkRun{}, f.checkRuns[r.PathValue("sha")]...)})
 	})
 
 	mux.HandleFunc("POST /graphql", func(w http.ResponseWriter, r *http.Request) {
