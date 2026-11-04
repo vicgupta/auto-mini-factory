@@ -28,47 +28,92 @@ amf help memory describes the backends.
 
 Creates an issue labeled amf:ready. The body comes from --body, --file, or
 stdin when it is not a terminal.
+
+--body sets the body, even when empty; --file reads a file, or stdin for
+--file -. --body and a nonempty --file conflict. --label replaces amf:ready;
+--no-label creates an unlabeled issue and conflicts with an explicit --label;
+a blank label is rejected. Surrounding whitespace in the title and label is
+trimmed. Prints #N <url>.
 `,
 	"pr list": `Usage:
   amf pr list [flags]
 
 Lists pull requests, newest first, with the issue each was opened for.
+Drafts are included.
+
+--state open (the default) lists open PRs; closed excludes merged ones,
+merged selects only merged ones, and all includes everything. --issue keeps
+the PRs for one issue, before --limit applies (0, the default, means no
+limit). The issue comes only from a canonical amf/issue-N head branch in
+this repository. Text columns are PR, ISSUE, STATE, TITLE (- for no issue);
+--json prints an array of {number, title, state, draft, url, head, base,
+issue}, or [] for no matches.
 `,
 	"pr merge": `Usage:
   amf pr merge <number> [flags]
 
 Merges a pull request: a merge commit, or --squash or --rebase.
+
+--squash and --rebase conflict. Merged, closed and draft PRs are refused.
+The merge is pinned to the fetched head SHA; GitHub's required checks and
+reviews still apply. --delete-branch deletes the head afterwards only when it
+is in this repository; a deletion failure is an error after the merge has
+already succeeded. Prints Merged #N <url>, Squashed and merged #N <url>, or
+Rebased and merged #N <url>.
 `,
 	"pr view": `Usage:
   amf pr view <number> [flags]
 
 Shows a pull request: title, state, branches, checks and body.
+
+Also shows the author, inferred issue, mergeability (which may be unknown;
+it is not polled), change counts and URL. --json prints one object with
+number, title, state, draft, url, head, base, author, issue, mergeable,
+mergeable_state, additions, deletions, changed_files and body; issue and
+mergeable may be null.
 `,
 	"pr diff": `Usage:
   amf pr diff <number> [flags]
 
 Shows a pull request's diff, or one changed path per line.
+
+--name-only prints one changed path per line, fetching every page of
+changed files.
 `,
 	"pr close": `Usage:
   amf pr close <number> [flags]
 
 Closes a pull request, optionally commenting first. Issue labels are left as
 they are.
+
+--comment posts its text before closing. --delete-branch deletes the head
+afterwards only when it is in this repository. A PR already closed succeeds
+without commenting or deleting; a merged PR fails. Prints Closed #N <url>, or
+#N is already closed.
 `,
 	"pr reopen": `Usage:
   amf pr reopen <number>
 
 Reopens a closed pull request.
+
+An open PR succeeds unchanged; a merged PR fails. Issue labels are left as
+they are. Prints Reopened #N <url>, or #N is already open.
 `,
 	"pr ready": `Usage:
   amf pr ready <number>
 
 Marks a draft pull request ready for review.
+
+Closed or merged PRs fail. Issue labels are left as they are. Prints
+#N is ready for review <url>, or #N is already ready for review.
 `,
 	"pr draft": `Usage:
   amf pr draft <number>
 
 Converts a pull request to a draft.
+
+Closed or merged PRs fail. Issue labels are left as they are. Prints
+#N is now a draft <url>, or #N is already a draft.
 `,
 }
 

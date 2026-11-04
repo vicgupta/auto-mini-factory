@@ -3601,6 +3601,32 @@ func TestUsageIsOverview(t *testing.T) {
 	}
 }
 
+func TestSubcommandHelpTopics(t *testing.T) {
+	// amf help <group> <subcommand> prints the same as <group> <subcommand>
+	// --help: the summary from subHelp, then the flags.
+	for group, commands := range map[string][]string{"pr": prSubcommands, "issue": issueSubcommands} {
+		for _, command := range commands {
+			if command == "help" {
+				continue
+			}
+			t.Run(group+"/"+command, func(t *testing.T) {
+				topic := group + " " + command
+				want, ok := subHelp[topic]
+				if !ok || want == "" {
+					t.Fatalf("missing help for %s", topic)
+				}
+				var out, stderr strings.Builder
+				if err := run(context.Background(), []string{"help", group, command}, nil, &out, &stderr); err != nil {
+					t.Fatal(err)
+				}
+				if !strings.HasPrefix(out.String(), strings.TrimRight(want, "\n")) || !strings.Contains(out.String(), "\nFlags:\n") || stderr.Len() != 0 {
+					t.Fatalf("stdout %q, stderr %q", out.String(), stderr.String())
+				}
+			})
+		}
+	}
+}
+
 func TestDoctorAutoStateEdges(t *testing.T) {
 	for _, tc := range []struct {
 		name, state, want string
