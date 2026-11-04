@@ -41,6 +41,14 @@ every command takes.
 
 Run amf help <command> or amf <command> -h for details.
 Every flag has a long form and common ones a short one: see amf help flags.
+
+Exit status:
+  0  success
+  1  command failed (GitHub error, agent failure, refused merge, etc.)
+  2  usage error (no command, unknown command or flag, missing arguments)
+amf help <command> exits 0; unknown commands exit 2.
+Some commands return 2 for -h; use amf help <command> in scripts.
+Command-specific value validation can return 1 (for example, amf run 0).
 `
 
 const outputHelp = `Output
@@ -58,6 +66,9 @@ const runHelp = `Usage:
   amf run <issue-number> [flags]
 
 Processes one issue into a pull request (alias of amf issue run).
+
+Exit status: 0 success, 1 command failed, 2 usage error (also --help).
+Use amf help run for help that exits 0.
 
 --merge makes run and watch merge each PR they open or update, without
 review: a merge commit, or --merge=squash or --merge=rebase (also written
