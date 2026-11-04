@@ -49,6 +49,12 @@ amf:ready ──▶ amf:in-progress ──▶ amf:pr-open (PR opened, not merged
 
 ## Commands
 
+**Paging:** amf never invokes a pager. `amf pr diff` and `amf memory show`
+write directly to stdout, even in a terminal; there is nothing to disable.
+There is no `--no-pager` flag, and `PAGER` (including `PAGER=cat`) has no effect
+on amf's output. Users can opt into paging with `amf pr diff 42 | less` or
+`amf memory show 42 | less`, as documented in the README.
+
 | Command | Behavior |
 |---|---|
 | `amf init` | Writes `./.env` and creates the labels (see below). |
