@@ -98,6 +98,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return cmdDoctor(ctx, rest, stdout, stderr)
 	case "update":
 		return cmdUpdate(ctx, rest, stdout, stderr)
+	case "man":
+		return cmdMan(ctx, rest, stdout, stderr)
 	case "--version":
 		fmt.Fprintln(stdout, "amf", buildVersion())
 		return nil
@@ -681,7 +683,7 @@ func isTerminal(r io.Reader) bool {
 	return err == nil && st.Mode()&os.ModeCharDevice != 0
 }
 
-var topCommands = []string{"init", "auth", "issue", "pr", "run", "watch", "auto", "memory", "pipeline", "doctor", "update", "version", "help"}
+var topCommands = []string{"init", "auth", "issue", "pr", "run", "watch", "auto", "memory", "pipeline", "doctor", "update", "man", "version", "help"}
 
 // suggestCommand returns the command closest to a mistyped one, or "" when
 // nothing is close enough to be a likely typo.

@@ -24,8 +24,36 @@ For common failures and fixes, see the [troubleshooting guide](TROUBLESHOOTING.m
 | `amf pipeline` | check the plan/code/eval pipeline in this checkout's `AGENTS.md` |
 | `amf doctor` | check the setup here, changing nothing |
 | `amf update` | replace this amf binary with the latest (or given) release |
+| `amf man` | generate a man page from amf's help text |
 | `amf version` | print amf's version |
 | `amf help` | show help for a command or topic |
+
+## Man page
+
+Generate a section 1 man page from the installed binary's help text, including
+command flags, examples and configuration settings:
+
+```sh
+amf man > amf.1
+man ./amf.1
+```
+
+From a source checkout, use `go run ./cmd/amf man > amf.1` instead.
+Generation needs no configuration, GitHub access or external tools.
+
+On macOS or Linux, install it in your local manual directory (use `sudo` for
+the `install` commands if needed):
+
+```sh
+install -d /usr/local/share/man/man1
+install -m 644 amf.1 /usr/local/share/man/man1/amf.1
+man amf
+```
+
+For an installation without root, use `~/.local/share/man/man1` instead and
+set `MANPATH="$HOME/.local/share/man:${MANPATH:-}"` if your system doesn't
+search it automatically. Regenerate and reinstall after updating amf.
+The binary installer and `amf update` do not install the man page.
 
 ## Exit status
 
