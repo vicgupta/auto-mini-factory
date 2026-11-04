@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -237,5 +239,56 @@ func TestDeleteBranchMissingRef(t *testing.T) {
 	gh := newGitHub(Config{APIURL: "http://127.0.0.1:1", Repo: "vic/demo"})
 	if err := gh.DeleteBranch(context.Background(), ""); err == nil || err.Error() != "github did not report a head branch" {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestPRMergeLabelsIssueDone(t *testing.T) {
+	gh, srv := newFakeGitHub(t)
+	listJSONEnv(t, srv)
+	gh.prs = []map[string]string{
+		{"head": "amf/issue-1", "state": "open"},
+		{"head": "amf/issue-2", "state": "open", "head_repo": "other/demo"},
+		{"head": "feature/x", "state": "open"},
+		{"head": "amf/issue-4", "state": "open"},
+	}
+	gh.drafts = make([]bool, len(gh.prs))
+	gh.issues[1] = &Issue{Number: 1, State: "closed", Labels: []Label{{Name: labelFailed}, {Name: labelPROpen}, {Name: "bug"}}}
+	gh.issues[2] = &Issue{Number: 2, State: "open", Labels: []Label{{Name: labelPROpen}}}
+	gh.issues[4] = &Issue{Number: 4, State: "closed", Labels: []Label{{Name: labelDone}}}
+
+	var out bytes.Buffer
+	if err := run(context.Background(), []string{"pr", "merge", "101", "--squash"}, nil, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Labeled #1 amf:done\n") {
+		t.Fatalf("output %q", &out)
+	}
+	if got := labelNames(*gh.issues[1]); !reflect.DeepEqual(got, []string{"bug", labelDone}) {
+		t.Fatalf("issue 1 labels %v", got)
+	}
+
+	// A fork's amf/issue-N branch and a non-amf branch leave issues alone.
+	for _, n := range []string{"102", "103"} {
+		gh.writes = nil
+		if err := run(context.Background(), []string{"pr", "merge", n}, nil, io.Discard, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		for _, w := range gh.writes {
+			if strings.Contains(w, "/labels") {
+				t.Fatalf("PR %s: unexpected label write %s", n, w)
+			}
+		}
+	}
+	if got := labelNames(*gh.issues[2]); !reflect.DeepEqual(got, []string{labelPROpen}) {
+		t.Fatalf("issue 2 labels %v", got)
+	}
+
+	// An issue already amf:done costs no label writes and prints nothing.
+	gh.writes, out = nil, bytes.Buffer{}
+	if err := run(context.Background(), []string{"pr", "merge", "104"}, nil, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "Labeled") || slices.ContainsFunc(gh.writes, func(w string) bool { return strings.Contains(w, "/labels") }) {
+		t.Fatalf("output %q, writes %v", &out, gh.writes)
 	}
 }

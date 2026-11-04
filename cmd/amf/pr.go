@@ -240,6 +240,7 @@ func cmdPRMerge(ctx context.Context, args []string, stdout, stderr io.Writer) er
 	}
 	verb := mergedVerb[method]
 	fmt.Fprintf(stdout, "%s%s #%d %s\n", strings.ToUpper(verb[:1]), verb[1:], n, pr.HTMLURL)
+	markMergedIssue(ctx, gh, cfg.Repo, pr, stdout, stderr)
 	if *deleteBranch {
 		if pr.Head.Repo == nil || !strings.EqualFold(pr.Head.Repo.FullName, cfg.Repo) {
 			fmt.Fprintf(stderr, "Skipping branch deletion for #%d: head repository is a fork or is unavailable.\n", n)
@@ -250,6 +251,24 @@ func cmdPRMerge(ctx context.Context, args []string, stdout, stderr io.Writer) er
 		}
 	}
 	return nil
+}
+
+// markMergedIssue labels the issue an amf/issue-N pull request in this
+// repository was opened for amf:done, now that it is merged, removing
+// amf:failed, amf:pr-open and amf:in-progress. A labeling failure is only a
+// warning: the merge itself succeeded.
+func markMergedIssue(ctx context.Context, gh *GitHub, repo string, pr prDetails, stdout, stderr io.Writer) {
+	issue := issueFromHead(pr.Head.Ref)
+	if issue == nil || pr.Head.Repo == nil || !strings.EqualFold(pr.Head.Repo.FullName, repo) {
+		return
+	}
+	changed, err := gh.SetIssueStatus(ctx, *issue, labelDone)
+	switch {
+	case err != nil:
+		fmt.Fprintf(stderr, "amf: merged, but could not label #%d %s: %v\n", *issue, labelDone, err)
+	case changed:
+		fmt.Fprintf(stdout, "Labeled #%d %s\n", *issue, labelDone)
+	}
 }
 
 // viewedPR is the public JSON schema of amf pr view, kept apart from
