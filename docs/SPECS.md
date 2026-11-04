@@ -242,7 +242,13 @@ amf:ready ──▶ amf:in-progress ──▶ amf:pr-open (PR opened, not merged
 **Exit codes:** 0 on success, 1 on error, 2 on a usage error (no command,
 an unknown one, a bad flag or the wrong arguments; no command or an unknown
 one also prints the usage to stderr; an unknown command close to a real
-one, such as `lst`, first prints `Did you mean "list"?`). Errors print as `amf: <error>` on
+one, such as `lst`, first prints `Did you mean "issue list"?`). The README,
+command reference and usage overview document these statuses, and `run`'s
+help repeats them. `amf --help` and `amf help <command>` exit 0; some
+command-specific `--help` and `-h` paths, including `amf run --help`,
+currently exit 2. Scripts needing help to exit successfully should use
+`amf help <command>`. Command-specific value validation can exit 1, such as
+`amf run 0`. Errors print as `amf: <error>` on
 stderr. SIGINT and
 SIGTERM cancel the current step, with the run's process group killed as on
 expiry; the issue is still marked failed.
