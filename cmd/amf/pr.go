@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
+	"time"
 )
 
 const prUsage = `usage: amf pr <command>
@@ -254,21 +255,88 @@ func cmdPRMerge(ctx context.Context, args []string, stdout, stderr io.Writer) er
 // viewedPR is the public JSON schema of amf pr view, kept apart from
 // GitHub's response.
 type viewedPR struct {
-	Number         int    `json:"number"`
-	Title          string `json:"title"`
-	State          string `json:"state"`
-	Draft          bool   `json:"draft"`
-	URL            string `json:"url"`
-	Head           string `json:"head"`
-	Base           string `json:"base"`
-	Author         string `json:"author"`
-	Issue          *int   `json:"issue"`
-	Mergeable      *bool  `json:"mergeable"`
-	MergeableState string `json:"mergeable_state"`
-	Additions      int    `json:"additions"`
-	Deletions      int    `json:"deletions"`
-	ChangedFiles   int    `json:"changed_files"`
-	Body           string `json:"body"`
+	Number         int         `json:"number"`
+	Title          string      `json:"title"`
+	State          string      `json:"state"`
+	Draft          bool        `json:"draft"`
+	URL            string      `json:"url"`
+	Head           string      `json:"head"`
+	Base           string      `json:"base"`
+	Author         string      `json:"author"`
+	Issue          *int        `json:"issue"`
+	Mergeable      *bool       `json:"mergeable"`
+	MergeableState string      `json:"mergeable_state"`
+	Additions      int         `json:"additions"`
+	Deletions      int         `json:"deletions"`
+	ChangedFiles   int         `json:"changed_files"`
+	BehindBy       *int        `json:"behind_by"`
+	AheadBy        *int        `json:"ahead_by"`
+	Checks         *viewChecks `json:"checks"`
+	Body           string      `json:"body"`
+}
+
+// viewChecks sums up the check runs on an open pull request's head commit.
+type viewChecks struct {
+	State   string `json:"state"`   // none, pending, passed or failed
+	Summary string `json:"summary"` // e.g. "5 checks: 5 success"
+}
+
+// mergeablePolls are the pauses amf pr view takes re-reading a pull request
+// whose mergeability GitHub is still computing.
+var mergeablePolls = []time.Duration{time.Second, 2 * time.Second, 3 * time.Second}
+
+// prStatus is what decides whether an open pull request can merge, beyond
+// GitHub's mergeable flag: how far its branch is behind its base, and its
+// checks. Each part is nil when GitHub can't say.
+type prStatus struct {
+	ahead, behind *int
+	checks        *viewChecks
+}
+
+// openPRStatus re-reads pr while its mergeability is unknown (briefly), then
+// compares its head with its base and sums up its head's check runs.
+func openPRStatus(ctx context.Context, gh *GitHub, n int, pr prViewResponse) (prViewResponse, prStatus) {
+	var st prStatus
+	if pr.State != "open" {
+		return pr, st
+	}
+	for _, d := range mergeablePolls {
+		if pr.Mergeable != nil && pr.MergeableState != "unknown" {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return pr, st
+		case <-time.After(d):
+		}
+		again, err := gh.GetPRView(ctx, n)
+		if err != nil {
+			break
+		}
+		pr = again
+	}
+	if pr.Head.SHA == "" {
+		return pr, st
+	}
+	if ahead, behind, err := gh.Compare(ctx, pr.Base.Ref, pr.Head.SHA); err == nil {
+		st.ahead, st.behind = &ahead, &behind
+	}
+	if runs, err := gh.CheckRuns(ctx, pr.Head.SHA); err == nil {
+		st.checks = &viewChecks{State: checksState(runs), Summary: summarizeCheckRuns(runs)}
+	}
+	return pr, st
+}
+
+// textBehind describes how far an open pull request's branch is behind base.
+func textBehind(st prStatus, base string) string {
+	switch {
+	case st.behind == nil:
+		return "unknown"
+	case *st.behind == 0:
+		return "up to date with " + base
+	default:
+		return fmt.Sprintf("%d %s behind %s", *st.behind, plural(*st.behind, "commit", "commits"), base)
+	}
 }
 
 func cmdPRView(ctx context.Context, args []string, stdout, stderr io.Writer) error {
@@ -300,6 +368,7 @@ func cmdPRView(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	if err != nil {
 		return err
 	}
+	pr, st := openPRStatus(ctx, gh, n, pr)
 	issue := issueFromHead(pr.Head.Ref)
 	if *asJSON {
 		out := viewedPR{
@@ -317,6 +386,9 @@ func cmdPRView(ctx context.Context, args []string, stdout, stderr io.Writer) err
 			Additions:      pr.Additions,
 			Deletions:      pr.Deletions,
 			ChangedFiles:   pr.ChangedFiles,
+			BehindBy:       st.behind,
+			AheadBy:        st.ahead,
+			Checks:         st.checks,
 			Body:           pr.Body,
 		}
 		enc := json.NewEncoder(stdout)
@@ -349,6 +421,21 @@ func cmdPRView(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	}
 	if _, err := fmt.Fprintf(stdout, "%-10s %s\n", "mergeable:", textMergeable(pr)); err != nil {
 		return err
+	}
+	if pr.State == "open" {
+		if _, err := fmt.Fprintf(stdout, "%-10s %s\n", "behind:", textBehind(st, pr.Base.Ref)); err != nil {
+			return err
+		}
+		checks := "unknown"
+		if st.checks != nil {
+			checks = st.checks.State
+			if st.checks.State != "none" {
+				checks += " (" + st.checks.Summary + ")"
+			}
+		}
+		if _, err := fmt.Fprintf(stdout, "%-10s %s\n", "checks:", checks); err != nil {
+			return err
+		}
 	}
 	if _, err := fmt.Fprintf(stdout, "%-10s +%d −%d in %d %s\n", "changes:", pr.Additions, pr.Deletions, pr.ChangedFiles, files); err != nil {
 		return err

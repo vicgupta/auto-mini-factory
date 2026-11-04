@@ -113,6 +113,7 @@ type prViewResponse struct {
 	} `json:"user"`
 	Head struct {
 		Ref string `json:"ref"`
+		SHA string `json:"sha"`
 	} `json:"head"`
 	Base struct {
 		Ref string `json:"ref"`
@@ -708,4 +709,14 @@ func (g *GitHub) CheckRuns(ctx context.Context, sha string) ([]checkRun, error) 
 	}
 	err := g.do(ctx, "GET", g.repoPath("/commits/%s/check-runs?per_page=100", url.PathEscape(sha)), nil, &out)
 	return out.CheckRuns, err
+}
+
+// Compare reports how many commits head is ahead of and behind base.
+func (g *GitHub) Compare(ctx context.Context, base, head string) (ahead, behind int, err error) {
+	var out struct {
+		AheadBy  int `json:"ahead_by"`
+		BehindBy int `json:"behind_by"`
+	}
+	err = g.do(ctx, "GET", g.repoPath("/compare/%s...%s?per_page=1", url.PathEscape(base), url.PathEscape(head)), nil, &out)
+	return out.AheadBy, out.BehindBy, err
 }

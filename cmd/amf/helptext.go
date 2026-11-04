@@ -66,11 +66,16 @@ Rebased and merged #N <url>.
 
 Shows a pull request: title, state, branches, checks and body.
 
-Also shows the author, inferred issue, mergeability (which may be unknown;
-it is not polled), change counts and URL. --json prints one object with
-number, title, state, draft, url, head, base, author, issue, mergeable,
-mergeable_state, additions, deletions, changed_files and body; issue and
-mergeable may be null.
+Also shows the author, inferred issue, mergeability, change counts and URL.
+For an open pull request it also shows how many commits its branch is behind
+the base, and its head commit's checks: none, pending, passed or failed.
+While GitHub is still computing mergeability, it is re-read a few times
+(about 6 seconds in all) before showing unknown.
+
+--json prints one object with number, title, state, draft, url, head, base,
+author, issue, mergeable, mergeable_state, additions, deletions,
+changed_files, behind_by, ahead_by, checks ({state, summary}) and body;
+issue, mergeable, behind_by, ahead_by and checks may be null.
 `,
 	"pr diff": `Usage:
   amf pr diff <number> [flags]
