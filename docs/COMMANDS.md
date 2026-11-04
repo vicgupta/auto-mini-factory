@@ -791,6 +791,24 @@ Without a pipeline (see below), amf runs one agent once. With Claude Code:
    a draft with `--draft` (default off; `amf run` and `amf watch` take it). On
    a `--force` retry whose PR is still open, it updates that PR's title and body
    instead, and leaves it a draft or ready for review as it was.
+
+A `--force` run (or `amf auto`) on an issue whose open PR is behind the
+default branch (GitHub's compare reports `behind_by` > 0) doesn't rebuild the
+change. amf checks out `amf/issue-N` from origin in the worktree and runs
+`git merge origin/<default>`:
+
+- a clean merge is pushed (without `--force`), with no agent run;
+- on conflicts, one agent (the pipeline's code stage, else the first agent
+  amf would run) gets a prompt naming only the conflicted files and resolves
+  them; amf fails the run if conflict markers or unmerged paths remain,
+  otherwise commits the merge and pushes it;
+- on conflicts with no usable agent, amf comments on the PR listing the
+  conflicted files, leaves the branch unchanged and fails the run.
+
+The `.github/` refusal applies to the merged branch too. Then the issue is
+labeled and commented, and `--merge` merges, as in steps 5–6. An open PR
+that is up to date is rebuilt as above. Close the PR to force a rebuild of a
+stale one.
 6. Comments the PR link on the issue, labels it `amf:pr-open` (a draft PR
    counts; `amf:done` once `--merge` merged it), removes the worktree.
 
