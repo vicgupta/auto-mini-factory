@@ -3695,3 +3695,272 @@ func TestHelpUnknownSubcommandTopic(t *testing.T) {
 		t.Fatalf("amf help pr help: %v %q", err, &out)
 	}
 }
+
+func TestQuietRun(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		fail bool
+	}{
+		{"long", []string{"run", "42", "--quiet"}, false},
+		{"short before command", []string{"-q", "issue", "run", "42"}, false},
+		{"force alias", []string{"issue", "run", "42", "-f", "-q"}, false},
+		{"failure", []string{"run", "42", "--quiet"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, origin := setupRepo(t)
+			gh, srv := newFakeGitHub(t)
+			gh.issues[42] = readyIssue(42, "Quiet issue")
+			t.Chdir(t.TempDir()) // Exercise the progress printed before the event logger exists.
+			t.Setenv("GITHUB_TOKEN", "test-token")
+			t.Setenv("GITHUB_REPO", "vic/demo")
+			t.Setenv("AMF_API_URL", srv.URL)
+			t.Setenv("AMF_CLONE_URL", origin)
+			t.Setenv("AMF_PRIMARY_AGENT", "claudecode")
+			t.Setenv("AMF_SECONDARY_AGENT", "none")
+			t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+			script := shResult + "cat >/dev/null\necho x > x.txt\nresult 'Done.'\n"
+			if tc.fail {
+				script = "cat >/dev/null\nexit 1\n"
+			}
+			t.Setenv("AMF_CLAUDE", fakeAgent(t, "claude", script))
+			var stdout, stderr bytes.Buffer
+			args := append(slices.Clone(tc.args), "--clone-dir", root, "--log-level", "debug")
+			err := run(context.Background(), args, nil, &stdout, &stderr)
+			if (err != nil) != tc.fail {
+				t.Fatalf("error = %v; stderr: %s", err, &stderr)
+			}
+			if stdout.Len() != 0 {
+				t.Errorf("unexpected stdout: %s", &stdout)
+			}
+			for _, line := range strings.Split(strings.TrimSpace(stderr.String()), "\n") {
+				if !strings.HasPrefix(line, "amf: summary:") && !(tc.fail && strings.HasPrefix(line, "amf: troubleshooting:")) {
+					t.Errorf("unexpected progress: %s", line)
+				}
+			}
+			if !strings.Contains(stderr.String(), "amf: summary: 1 issue") {
+				t.Fatalf("missing summary: %s", &stderr)
+			}
+			files, _ := filepath.Glob(filepath.Join(root, ".amf", "runs", "*", "events.jsonl"))
+			if len(files) != 1 || !strings.Contains(mustRead(t, files[0]), `"event":"issue.picked"`) {
+				t.Fatalf("quiet must retain progress in event log: %v", files)
+			}
+		})
+	}
+}
+
+func TestOutputFlags(t *testing.T) {
+	for _, args := range [][]string{
+		{"--quiet", "version"}, {"version", "-q"}, {"version", "--quiet=false"},
+		{"--color=always", "version"}, {"version", "--color", "never"},
+	} {
+		var out bytes.Buffer
+		if err := run(context.Background(), args, nil, &out, &out); err != nil || out.String() != "amf "+buildVersion()+"\n" {
+			t.Errorf("%v: %v, output %q", args, err, out.String())
+		}
+	}
+	for _, args := range [][]string{
+		{"version", "--color"}, {"version", "--color="}, {"version", "--color=rainbow"}, {"version", "--quiet=maybe"},
+	} {
+		var stderr bytes.Buffer
+		if err := run(context.Background(), args, nil, io.Discard, &stderr); !errors.Is(err, errUsage) {
+			t.Errorf("%v: error = %v, stderr %q", args, err, stderr.String())
+		}
+	}
+}
+
+func TestDoctorColor(t *testing.T) {
+	root, origin := setupRepo(t)
+	_, srv := newFakeGitHub(t)
+	t.Chdir(root)
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	t.Setenv("GITHUB_REPO", "vic/demo")
+	t.Setenv("AMF_API_URL", srv.URL)
+	t.Setenv("AMF_CLONE_URL", origin)
+	t.Setenv("AMF_RELEASES_URL", fakeReleases(t, "v9.9.9", "amf v9.9.9", false).URL)
+	t.Setenv("AMF_CLAUDE", fakeAgent(t, "claude", "echo 'Claude 1.2.3'\n"))
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+	t.Setenv("AMF_CODEX", "amf-test-no-such-agent")
+	t.Setenv("AMF_OPENCODE", "amf-test-no-such-agent")
+	for _, tc := range []struct {
+		color, noColor string
+		want           bool
+	}{
+		{"auto", "", false}, // redirected output stays plain
+		{"auto", "1", false},
+		{"always", "", true},
+		{"always", "1", true}, // an explicit flag overrides the environment
+		{"never", "", false},
+	} {
+		t.Run(tc.color+"/NO_COLOR="+tc.noColor, func(t *testing.T) {
+			t.Setenv("NO_COLOR", tc.noColor)
+			var out bytes.Buffer
+			err := run(context.Background(), []string{"doctor", "--color=" + tc.color}, nil, &out, io.Discard)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Contains(out.String(), "\x1b["); got != tc.want {
+				t.Errorf("ANSI color = %t, want %t: %q", got, tc.want, out.String())
+			}
+		})
+	}
+}
+
+func TestQuietConsoleKeepsDiagnosticsAndPlainLogs(t *testing.T) {
+	root, _ := setupRepo(t)
+	_, srv := newFakeGitHub(t)
+	t.Chdir(root)
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	t.Setenv("GITHUB_REPO", "vic/demo")
+	t.Setenv("AMF_API_URL", srv.URL)
+	ctx := context.WithValue(context.Background(), outputKey{}, outputOptions{Quiet: true, Color: "always"})
+	var console bytes.Buffer
+	r, err := newRunner(ctx, defaultAgentTimeout, 2, "", logOptions{}, &console)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.event(slog.LevelInfo, "test.progress", 0, "progress")
+	r.event(slog.LevelWarn, "test.warning", 0, "warning")
+	r.event(slog.LevelError, "test.error", 0, "error")
+	r.Close()
+	for _, want := range []string{"warning", "error", "summary:", "\x1b["} {
+		if !strings.Contains(console.String(), want) {
+			t.Errorf("console missing %q: %q", want, console.String())
+		}
+	}
+	if strings.Contains(console.String(), "progress") {
+		t.Errorf("quiet printed progress: %s", &console)
+	}
+	files, _ := filepath.Glob(filepath.Join(root, ".amf", "runs", "*", "events.jsonl"))
+	if len(files) != 1 {
+		t.Fatalf("event files: %v", files)
+	}
+	log := mustRead(t, files[0])
+	if strings.Contains(log, "\x1b") || !strings.Contains(log, `"event":"test.progress"`) {
+		t.Errorf("stored log must remain plain and retain progress: %s", log)
+	}
+}
+
+func TestOutputFlagsStopAtDoubleDash(t *testing.T) {
+	var o outputOptions
+	args := []string{"issue", "create", "--", "--quiet", "--color=always"}
+	rest, err := extractOutputFlags(args, &o)
+	if err != nil || !slices.Equal(rest, args) || o.Quiet || o.Color != "" {
+		t.Fatalf("rest = %v, options = %+v, error = %v", rest, o, err)
+	}
+}
+
+func TestOutputFlagsPreserveValues(t *testing.T) {
+	for _, args := range [][]string{
+		{"issue", "create", "Title", "--body", "--quiet"},
+		{"issue", "Title", "-b", "--color=rainbow"},
+		{"issue", "create", "Title", "-f", "--quiet"},
+		{"pr", "close", "42", "--comment", "--color=never"},
+		{"pr", "close", "42", "-c", "--quiet"},
+		{"issue", "list", "-s", "--quiet"},
+		{"--env-file", "--quiet", "version"},
+	} {
+		var o outputOptions
+		rest, err := extractOutputFlags(append(slices.Clone(args), "-q"), &o)
+		if err != nil || !slices.Equal(rest, args) || !o.Quiet || o.Color != "" {
+			t.Errorf("%v: rest = %v, options = %+v, error = %v", args, rest, o, err)
+		}
+	}
+	for _, args := range [][]string{
+		{"run", "42", "-f", "-q"}, {"auto", "--continue", "-q"},
+		{"pr", "merge", "42", "-s", "-q"}, {"update", "-c", "-q"},
+	} {
+		var o outputOptions
+		_, err := extractOutputFlags(args, &o)
+		if err != nil || !o.Quiet {
+			t.Errorf("%v: options = %+v, error = %v", args, o, err)
+		}
+	}
+}
+
+func TestGlobalFlagValueMetadata(t *testing.T) {
+	commands := append(slices.Clone(helpCommands), []string{"issue", "run"}, []string{"issue", "watch"})
+	for _, cmd := range commands {
+		command, subcommand := cmd[0], ""
+		if len(cmd) > 1 {
+			subcommand = cmd[1]
+		}
+		for _, f := range helpFlags(commandHelpOutput(t, cmd)) {
+			m := flagLine.FindStringSubmatch(f.line)
+			want := strings.HasPrefix(m[3], " <")
+			for _, name := range []string{f.long, f.short} {
+				if name != "" && flagNeedsValue(name, command, subcommand) != want {
+					t.Errorf("amf %s: flag %s value metadata disagrees with help: %s", strings.Join(cmd, " "), name, f.line)
+				}
+			}
+		}
+	}
+}
+
+func TestColorOnTerminal(t *testing.T) {
+	for _, tc := range []struct {
+		mode, noColor, term string
+		want                bool
+	}{
+		{"auto", "", "xterm", true},
+		{"auto", "1", "xterm", false},
+		{"auto", "0", "xterm", false},
+		{"auto", "", "dumb", false},
+		{"always", "1", "dumb", true},
+		{"never", "", "xterm", false},
+	} {
+		t.Run(tc.mode+"/NO_COLOR="+tc.noColor+"/TERM="+tc.term, func(t *testing.T) {
+			t.Setenv("NO_COLOR", tc.noColor)
+			t.Setenv("TERM", tc.term)
+			if got := (outputOptions{Color: tc.mode}).colorForTerminal(true); got != tc.want {
+				t.Errorf("color = %t, want %t", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestQuietInit(t *testing.T) {
+	gh, srv := newFakeGitHub(t)
+	t.Chdir(t.TempDir())
+	t.Setenv("AMF_API_URL", srv.URL)
+	if err := os.WriteFile(".env", []byte("GITHUB_TOKEN=test-token\nGITHUB_REPO=vic/demo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := run(context.Background(), []string{"init", "-q"}, nil, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "amf: label ") || strings.Contains(out.String(), "amf: backed up") || !strings.Contains(out.String(), "amf: wrote") {
+		t.Errorf("quiet init must keep its result and hide progress: %s", &out)
+	}
+	if len(gh.repoLabels) != len(amfLabels) {
+		t.Errorf("quiet init did not create labels: %v", gh.repoLabels)
+	}
+}
+
+func TestQuietUpdate(t *testing.T) {
+	u, out := newTestUpdater(t, fakeReleases(t, "v9.9.9", "amf v9.9.9", false), "v0.0.7")
+	ctx := context.WithValue(context.Background(), outputKey{}, outputOptions{Quiet: true})
+	if err := u.run(ctx, "", false); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "Downloading") || !strings.Contains(out.String(), "Updated amf v0.0.7 -> v9.9.9") {
+		t.Errorf("quiet update must keep its result and hide progress: %s", out)
+	}
+}
+
+func TestQuietMerge(t *testing.T) {
+	gh, srv := newFakeGitHub(t)
+	listJSONEnv(t, srv)
+	gh.prs = []map[string]string{{"head": "feature/x", "base": "main", "state": "open"}}
+	gh.drafts = []bool{false}
+	gh.compares["main...abc123"] = [2]int{1, 0}
+	gh.checkRuns["abc123"] = []checkRun{{Name: "build", Status: "completed", Conclusion: "success"}}
+	var out bytes.Buffer
+	if err := run(context.Background(), []string{"pr", "merge", "101", "-u", "-w", "-q"}, nil, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if want := "Merged #101 https://github.com/vic/demo/pull/101\n"; out.String() != want {
+		t.Errorf("quiet merge output = %q, want %q", out.String(), want)
+	}
+}

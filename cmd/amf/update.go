@@ -109,7 +109,7 @@ func (u *updater) run(ctx context.Context, target string, check bool) error {
 		return nil
 	}
 
-	fmt.Fprintf(u.out, "Downloading amf %s for %s/%s\n", target, u.goos, u.goarch)
+	progress(ctx, u.out, "Downloading amf %s for %s/%s\n", target, u.goos, u.goarch)
 	bin, err := u.download(ctx, target)
 	if err != nil {
 		return err

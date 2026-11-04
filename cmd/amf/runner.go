@@ -120,6 +120,8 @@ type Runner struct {
 	// JSON, to the run's event file, which Close flushes and closes.
 	Events *slog.Logger
 	events *eventFile
+	// Quiet hides terminal progress but keeps diagnostics and the final summary.
+	Quiet bool
 	// checkout is how newRunner found Root: checkout (the enclosing one),
 	// clone (reused) or cloned.
 	checkout string

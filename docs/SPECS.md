@@ -84,6 +84,25 @@ amf:ready ──▶ amf:in-progress ──▶ amf:pr-open (PR opened, not merged
   line, a description, every visible flag in one aligned column as
   `-x, --long <value>  description (default ...)`, with `-h, --help` last,
   and examples. `amf help flags` lists the shared letters.
+- **Output controls.** Every command accepts `--quiet` (`-q`, default false)
+  and `--color=auto|always|never` (default `auto`), before or after the
+  command name and before `--`. Quiet suppresses progress, including
+  checkout and PostgreSQL connection announcements, while retaining warnings,
+  errors, help, command results and the final run summary. It raises the
+  terminal log threshold to at least `warn`, even with `--log-level debug`
+  or `AMF_LOG_LEVEL=debug`; file logging and summary files keep their
+  configured behavior. The final summary remains visible with quiet even
+  when the log threshold is `error` or the event log is off.
+  Color applies to run/watch/auto's `amf:` prefixes and doctor's status
+  labels. Auto uses color only when that output's destination is a terminal,
+  `NO_COLOR` is empty or unset, and `TERM` is not `dumb`. Any nonempty
+  `NO_COLOR` value disables automatic color; `--color=always` overrides it
+  and colors redirected status output too. `--color=never` disables color.
+  `NO_COLOR` and `TERM` are special process environment variables, documented
+  by `amf help env`; they are not read from `.env` or added to init's template
+  (existing `.env` entries are preserved).
+  Stored logs and JSON output remain plain. Invalid output flag values
+  are usage errors (exit 2), before configuration or GitHub access.
 - `--agent-timeout` limits each agent run, not the whole issue; the old
   `--timeout` is accepted as a deprecated alias of it, hidden from help. Both must be at least
   1m and at most 24h, and 0 and negatives are errors; every out-of-range or

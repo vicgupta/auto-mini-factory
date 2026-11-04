@@ -237,6 +237,7 @@ A letter keeps its meaning on every command that has the flag.
   -m  --merge            run, watch, auto, pr sweep
   -n  --dry-run          run, auto, pr sweep
   -o  --scopes           auth login
+  -q  --quiet            every command
   -r  --rebase           pr merge
   -s  --state            issue list, pr list
   -s  --squash           pr merge
@@ -261,4 +262,7 @@ keep working; --timeout is a hidden, deprecated alias of --agent-timeout.
 Flags without a short form are rarer ones, spelled out to stay clear.
 The global path flags --dir, --env-file and --clone-dir work on any command,
 before --, and have no short form.
+--quiet (-q) suppresses progress, keeping warnings, errors and the final
+summary. --color=auto|always|never controls status color (default auto).
+Auto uses color only on terminals, unless NO_COLOR is nonempty or TERM=dumb.
 `
