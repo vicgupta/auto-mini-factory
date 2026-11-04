@@ -14,8 +14,12 @@ import (
 // doctorOutput runs amf doctor and checks that every line is one check.
 func doctorOutput(t *testing.T) (string, error) {
 	t.Helper()
-	var out bytes.Buffer
-	err := run(context.Background(), []string{"doctor"}, nil, &out, io.Discard)
+	var out, stderr bytes.Buffer
+	err := run(context.Background(), []string{"doctor"}, nil, &out, &stderr)
+	link := "https://github.com/vicgupta/auto-mini-factory/blob/main/docs/TROUBLESHOOTING.md"
+	if got := strings.Contains(stderr.String(), link); got != (err != nil) {
+		t.Errorf("troubleshooting link present = %t, error = %v; stderr: %s", got, err, &stderr)
+	}
 	line := regexp.MustCompile(`^(ok|warn|FAIL|skip) +\S+( \S+)? {2,}\S.*$`)
 	for _, l := range strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n") {
 		if !line.MatchString(l) {
@@ -80,7 +84,7 @@ func TestDoctorAllGood(t *testing.T) {
 		`ok +GITHUB_REPO +vic/demo, from the environment$`,
 		`ok +github +token accepted for @vic at http`,
 		`ok +repo +vic/demo, default branch main$`,
-		`ok +labels +all 4 amf labels exist$`,
+		`ok +labels +all 5 amf labels exist$`,
 		`ok +trusted +only issues opened by @vic, @teammate$`,
 		`ok +checkout +.*/work \(origin .*origin\.git\)$`,
 		`ok +git push +your git credentials can push`,
@@ -204,7 +208,7 @@ func TestDoctorPipelineProblems(t *testing.T) {
 		t.Fatalf("error = %v\n%s", err, out)
 	}
 	wantLines(t, out,
-		`warn +labels +missing amf:ready, amf:in-progress, amf:done, amf:failed`,
+		`warn +labels +missing amf:ready, amf:in-progress, amf:pr-open, amf:done, amf:failed`,
 		`warn +trusted +AMF_TRUSTED is not set; amf works on issues opened by anyone`,
 		`ok +pipeline +origin/main: code \(codex, default model\) -> eval \(codex, default model\)$`,
 		`FAIL +skill eval +downloading skill https://127\.0\.0\.1:1/eval/SKILL\.md`,

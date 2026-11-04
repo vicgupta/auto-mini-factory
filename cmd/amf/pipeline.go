@@ -533,10 +533,10 @@ func logIssue(logPath string) int {
 // commitRound commits a code round and fails if the branch still doesn't
 // change anything relative to base.
 func commitRound(ctx context.Context, wt string, k int, base string, s *Stage) error {
-	if _, err := git(ctx, wt, "add", "-A"); err != nil {
+	if _, err := git(ctx, wt, "add", "-A", "--", ".", memoryExclude); err != nil {
 		return err
 	}
-	status, err := git(ctx, wt, "status", "--porcelain")
+	status, err := git(ctx, wt, "status", "--porcelain", "--", ".", memoryExclude)
 	if err != nil {
 		return err
 	}
@@ -735,7 +735,7 @@ func (r *Runner) runAgent(ctx context.Context, agent, stage, model, wt, prompt, 
 		if runErr == nil { // ctx was cancelled and the agent still exited cleanly
 			runErr = ctx.Err()
 		}
-		return "", fmt.Errorf("%s: %v (log: %s)", name, runErr, logPath)
+		return "", fmt.Errorf("%s: %w (log: %s)", name, runErr, logPath)
 	}
 	switch agent {
 	case agentCodex, agentOpencode:

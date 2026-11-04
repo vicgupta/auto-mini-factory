@@ -2,8 +2,9 @@
 
 This is what happens, step by step, when amf works on an issue with Claude
 Code, as of v0.9.0. It covers the default case, where the repo has no
-pipeline table and Claude runs once; "With a pipeline" at the end covers the
-rest. Each step names the function in `cmd/amf` that does it. [SPECS.md](SPECS.md) is
+pipeline table and Claude runs once; "With a pipeline" covers the rest.
+"From a sentence: `amf auto`" below walks through planning and merging several
+issues. Each step names the function in `cmd/amf` that does it. [SPECS.md](SPECS.md) is
 the authoritative description of amf's behavior.
 
 ## Before any issue: starting `amf run` or `amf watch` (`newRunner`, main.go)
@@ -49,10 +50,16 @@ each, one at a time.
 
 ## Claim
 
-8. **The issue is labeled `amf:in-progress`,** and its other status labels
+8. **The issue is labeled `amf:in-progress`,** unless it already has an
+   open PR from `amf/issue-N` (then it is labeled `amf:pr-open` and
+   skipped) or an `amf/issue-N` branch on origin (skipped, unless it is
+   `amf:failed`); `--force` skips that check. Otherwise and its other status labels
    and `amf:ready` are removed.
 9. **A failure handler is set up.** From here until the PR exists, any error
-   makes amf label the issue `amf:failed` and comment the reason. This also
+   makes amf label the issue `amf:failed` (or `amf:pr-open` if the branch
+   still has an open PR) and comment the reason, each agent tried with its
+   exit code and duration, whether the fallback ran, and the redacted end of
+   the log. This also
    happens on Ctrl-C, with up to 30 seconds allowed for those two GitHub
    calls.
 10. **The author is checked (trust).** If `AMF_TRUSTED` is set and doesn't
@@ -135,7 +142,8 @@ each, one at a time.
 
 ## Finish
 
-22. **The issue is labeled `amf:done`, and amf comments "amf opened <PR URL>
+22. **The issue is labeled `amf:pr-open` (`amf:done` once `--merge` merged
+    the PR), and amf comments "amf opened <PR URL>
     for this issue."** For a retry the comment says "updated". The PR exists
     by now, so if either GitHub call fails, amf only logs a warning and the
     run still counts as a success.
@@ -168,6 +176,130 @@ replaced:
 
 Each stage uses the agent and model the table names, and the steps from the
 push on are the same.
+
+## From a sentence: `amf auto`
+
+`amf auto "Add a dark mode toggle"` plans issues and processes them one at a
+time, merging each PR. It uses the same runner setup as `run` (`cmdAuto`,
+auto.go), then follows these steps:
+
+1. **Plan in a separate worktree** (`autoPlan`). amf fetches the default
+   branch and creates a detached `.amf/worktrees/auto-plan` at
+   `origin/<default>`. The planning agent is chosen as for a run without a
+   pipeline: `--agent` alone, or the primary and secondary agents in order.
+   The prompt (`autoPlanPrompt`) asks it to read the repo without changing
+   files and return JSON with a title, scope and acceptance criteria for
+   each issue, in execution order. Issues must fit in one PR each and avoid
+   `.github/` and `AGENTS.md`. `--max-issues` defaults to 5 and accepts 1–10.
+   An agent failure or invalid plan tries the next available agent; if none
+   succeeds, no issues are created. Output goes to
+   `.amf/logs/auto-plan-<agent>.log`, and the planning worktree is removed
+   afterwards. `--dry-run` prints the plan and stops without creating issues
+   or saving a new run.
+2. **Save the plan, then create issues** (`Auto`, `autoCreateIssues`). Before
+   creating anything on GitHub, amf writes the full plan to
+   `.amf/auto/state.json`. It creates each issue with a Scope section,
+   acceptance checkboxes and a footer identifying the original sentence and
+   its position in the plan (`autoIssueBody`). Each gets only `amf:auto`;
+   amf saves its assigned number and URL before printing them and creating
+   the next issue. Waiting issues have no `amf:ready`, so the default
+   `amf watch` leaves them alone, including during the checkpoint.
+3. **Run and merge sequentially** (`autoWork`). Immediately before each
+   issue, amf adds `amf:ready`, then calls `Run`: the same worktree, agent
+   or pipeline, commit, push and PR flow described above, with merging
+   enabled. The default is a merge commit; `--merge=squash` and
+   `--merge=rebase` select the other methods. Each issue starts from the
+   updated default branch after the previous merge. The normal safeguards
+   apply: changes under `.github/` are never pushed, and a change to
+   `AGENTS.md` is left as an open PR for review instead of merged. Issues
+   labeled `amf:auto` pass the author trust check regardless of
+   `AMF_TRUSTED`, because the plan came from the supplied sentence. A failed
+   run or merge stops auto at that issue and saves the error for retry.
+4. **Checkpoint before the rest** (`autoCheckpoint`). By default, after the
+   first merge, if issues remain, amf prints the merged issue, PR URL, merge
+   commit, agent, checks on that commit and remaining issues. It saves state
+   and asks for approval in a terminal: `y` or `yes` continues; any other
+   answer stops. Without a terminal it saves state and exits, waiting for
+   `amf auto --continue`. Declining or waiting for approval is a successful
+   exit, not a failed issue. Once approval is saved, there are no further
+   checkpoints.
+5. **Finish** (`autoWork`). After every issue merges, amf prints the total
+   and removes `.amf/auto/state.json`.
+
+### Checkpoint controls
+
+- `--checkpoint-after N` moves the single checkpoint to after N merges
+  (positive, default 1). It reports the latest merge and only happens if
+  issues remain, so a one-issue plan has no checkpoint.
+- `--approve` prints and accepts the checkpoint without prompting, including
+  without a terminal. It applies to the current invocation only.
+- `--no-checkpoint` skips the checkpoint and approval entirely, taking
+  precedence over the other checkpoint controls. Progress is still saved.
+- `--wait-for-checks` polls check runs on the checkpoint's merge commit every
+  10 seconds for up to 5 minutes, waiting for at least one run and for all
+  returned runs to complete. It reports pass/fail, timeout or unavailable
+  checks before approval; these results do not prevent approval.
+  Cancellation stops without approving. Without the flag, checks are
+  fetched once. These are check runs, not commit status contexts.
+
+### Saved state, recovery and abort
+
+`state.json` is versioned (currently version 1) and stores the sentence,
+repo, merge method, creation time, approval and checkpoint settings, plus
+each planned issue's title, scope, criteria, number, URL and progress
+(`pending`, `merged` or `failed`). After processing an issue it also records
+the PR URL and number, merge commit, agent and error, when available. Writes
+use a temporary file and rename it over the state file (`saveAutoState`).
+
+`amf auto --continue` takes no sentence and reuses this plan and merge
+method. It creates only issues whose saved number is still 0, skips issues
+saved as merged, and retries the remaining work. Before retrying an issue
+with a saved PR number, it checks GitHub: an already merged PR marks the
+issue merged and clears its saved error without rerunning it
+(`auto.reconciled`). A PR lookup error stops with state kept; a closed issue
+without a confirmed merged PR still fails.
+
+If the saved checkpoint is already due, `--continue` displays it again,
+including any enabled CI wait, and approves without prompting. Before the
+threshold is reached, it resumes work without granting early approval.
+The threshold and skip/wait settings persist: `--checkpoint-after N`
+overrides the saved threshold, while `--no-checkpoint` and
+`--wait-for-checks` enable their saved settings. An unfinished run blocks a
+new sentence unless `--dry-run` is used. An unsupported state version or a
+saved repo different from `GITHUB_REPO` prevents continuation.
+
+`amf auto status` reads the saved sentence, merge method and each issue's
+number (or `not created`), title, status, PR and commit (`cmdAutoState`). It
+is a local snapshot; it does not reconcile with GitHub or run agents.
+
+To abandon a run, stop any active auto process, then use `amf auto --abort`.
+It removes state, even if corrupt or unsupported, and leaves GitHub issues
+and PRs unchanged. `amf auto --abort --close-issues` first closes created
+issues whose saved status is not `merged`; it skips uncreated issues and
+keeps state if any close fails so the command can be retried. Closing needs
+GitHub credentials and a matching saved repo. Add `amf:ready` to remaining
+open issues if you want `amf watch` to process them instead.
+
+Status and abort take no sentence or execution flags. Inside a checkout,
+status and plain abort need no configuration or GitHub access. Outside one,
+they read configuration to locate `./<repo name>/.amf/auto/state.json`
+without cloning. Neither creates logs. With no saved run, both print
+`No amf auto run saved.` and exit successfully.
+
+### Auto events (`auto.go`)
+
+These events accompany the normal issue, agent, git and GitHub events:
+
+| Event | When it is emitted |
+|---|---|
+| `auto.plan` | Planning starts, a planning agent fails, issues have been created, or planning worktree cleanup fails. |
+| `auto.checkpoint` | The checkpoint is displayed, with PR, commit, agent, checks and remaining count. |
+| `auto.approved` | Approval is recorded; `how` is `prompt`, `flag` or `continue`. |
+| `auto.declined` | The terminal prompt was answered without approval; waiting without a terminal does not emit this event. |
+| `auto.resume` | A saved run resumes, with the sentence and remaining count. |
+| `auto.reconciled` | A saved PR is already merged, so its issue is skipped. |
+| `auto.stopped` | An issue run or merge fails, with the issue and error. |
+| `auto.done` | All planned issues are merged. |
 
 ## Two things worth knowing
 

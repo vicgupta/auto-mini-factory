@@ -50,26 +50,21 @@ func (m *mergeFlag) Set(s string) error {
 
 func addMergeFlag(fs *flag.FlagSet) *mergeFlag {
 	m := &mergeFlag{}
-	fs.Var(m, "merge", "merge each PR amf opens or updates: --merge for a merge commit, or --merge=squash or --merge=rebase")
+	fs.Var(m, "merge", "merge each PR amf opens or updates: --merge (or -m) alone for a merge commit, or a method after = or as the next word: --merge=squash, -m squash, -m rebase")
 	return m
 }
 
-// check rejects an unknown method, and `--merge squash`, where the flag
-// package takes squash as a positional argument.
-func (m *mergeFlag) check(pos []string) error {
+// check rejects an unknown method. `--merge squash` and `-m squash` reach
+// here as --merge=squash: expandShortFlags joins a following method word.
+func (m *mergeFlag) check(_ []string) error {
 	if m.value != "" && !slices.Contains(mergeMethods, m.value) {
 		return fmt.Errorf("--merge: want merge, squash or rebase, got %q", m.value)
-	}
-	for _, p := range pos {
-		if m.value != "" && slices.Contains(mergeMethods, p) {
-			return fmt.Errorf("--merge takes its method after =: --merge=%s, not --merge %s", p, p)
-		}
 	}
 	return nil
 }
 
 // mergeError is a PR amf opened or updated but couldn't merge. The PR stays
-// open and the issue amf:done, but run exits 1.
+// open and the issue amf:pr-open, but run exits 1.
 type mergeError struct {
 	url string
 	err error

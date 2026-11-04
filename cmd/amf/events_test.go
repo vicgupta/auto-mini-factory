@@ -70,7 +70,7 @@ echo x > x.txt; result 'Done.'
 	done := make(chan error, 1)
 	go func() { done <- r.Watch(ctx, "amf:ready", 20*time.Millisecond) }()
 	// #3 comes after #2 in a cycle, so wait for its skip too.
-	for !slices.Contains(gh.labels(1), "amf:done") || !slices.Contains(gh.labels(2), "amf:failed") ||
+	for !slices.Contains(gh.labels(1), "amf:pr-open") || !slices.Contains(gh.labels(2), "amf:failed") ||
 		!strings.Contains(file.String(), `"event":"watch.skip"`) {
 		if ctx.Err() != nil {
 			t.Fatalf("issues not processed; log:\n%s", log)
@@ -95,7 +95,7 @@ echo x > x.txt; result 'Done.'
 	wantEvent(t, ev, "issue.picked", map[string]any{"issue": float64(1), "title": "Goes through", "author": nil, "labels": nil})
 	wantEvent(t, ev, "issue.author_check", map[string]any{"issue": float64(1), "trusted": true})
 	wantEvent(t, ev, "issue.status", map[string]any{"issue": float64(1), "from": "amf:ready", "to": "amf:in-progress"})
-	wantEvent(t, ev, "issue.status", map[string]any{"issue": float64(1), "from": "amf:in-progress", "to": "amf:done"})
+	wantEvent(t, ev, "issue.status", map[string]any{"issue": float64(1), "from": "amf:in-progress", "to": "amf:pr-open"})
 	wantEvent(t, ev, "issue.status", map[string]any{"issue": float64(2), "from": "amf:in-progress", "to": "amf:failed"})
 	wantEvent(t, ev, "issue.pipeline", map[string]any{"issue": float64(1), "declared": false, "agents": []any{"claude"}})
 	wantEvent(t, ev, "issue.worktree", map[string]any{"issue": float64(1), "path": nil, "branch": "amf/issue-1", "base": "main"})
@@ -349,7 +349,8 @@ func TestConfigLoadEvent(t *testing.T) {
 	}
 	r.Close()
 	out := mustRead(t, own)
-	e := wantEvent(t, eventsByName(eventLines(t, out)), "config.load", map[string]any{"paths": nil, "file": ".env", "keys": nil})
+	cwd, _ := os.Getwd()
+	e := wantEvent(t, eventsByName(eventLines(t, out)), "config.load", map[string]any{"paths": nil, "file": filepath.Join(cwd, ".env"), "keys": nil})
 	if e == nil {
 		return
 	}
@@ -452,7 +453,7 @@ echo x > x.txt; result 'Done.'
 	go func() { done <- r.Watch(ctx, "amf:ready", 20*time.Millisecond) }()
 	// #3 comes after #2 in a cycle, so wait for its skip, then for a few
 	// more polls, each skipping #3 again.
-	for !slices.Contains(gh.labels(1), "amf:done") || !slices.Contains(gh.labels(2), "amf:failed") ||
+	for !slices.Contains(gh.labels(1), "amf:pr-open") || !slices.Contains(gh.labels(2), "amf:failed") ||
 		r.stats.snapshot().Issues.Skipped == 0 {
 		if ctx.Err() != nil {
 			t.Fatalf("issues not processed; log:\n%s", log)

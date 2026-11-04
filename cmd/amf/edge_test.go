@@ -34,6 +34,195 @@ import (
 	"unicode/utf8"
 )
 
+func TestRunTroubleshooting(t *testing.T) {
+	for _, scenario := range []string{"configuration", "agent unavailable", "merge refused", "success", "help"} {
+		t.Run(scenario, func(t *testing.T) {
+			root, origin := setupRepo(t)
+			gh, srv := newFakeGitHub(t)
+			gh.issues[1] = readyIssue(1, "One")
+			t.Chdir(root)
+			t.Setenv("GITHUB_TOKEN", "test-token")
+			t.Setenv("GITHUB_REPO", "vic/demo")
+			t.Setenv("AMF_API_URL", srv.URL)
+			t.Setenv("AMF_CLONE_URL", origin)
+			t.Setenv("AMF_PRIMARY_AGENT", "claudecode")
+			t.Setenv("AMF_SECONDARY_AGENT", "none")
+			t.Setenv("AMF_CLAUDE", fakeAgent(t, "claude", shResult+"cat >/dev/null\necho x > x.txt\nresult 'Done.'\n"))
+			t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+			args := []string{"run", "1", "--log-file", "off"}
+			wantErr := ""
+			switch scenario {
+			case "configuration":
+				t.Setenv("GITHUB_TOKEN", "")
+				wantErr = "GITHUB_TOKEN is not set"
+			case "agent unavailable":
+				t.Setenv("AMF_CLAUDE", "amf-test-no-such-agent")
+				t.Setenv("AMF_CODEX", "amf-test-no-such-agent")
+				t.Setenv("AMF_OPENCODE", "amf-test-no-such-agent")
+				wantErr = "no coding agent is available"
+			case "merge refused":
+				gh.mergeErrs = []fakeError{{405, "Required checks pending"}}
+				args = append(args, "--merge")
+				wantErr = "Required checks pending"
+			case "help":
+				args = []string{"run", "--help"}
+				wantErr = "usage"
+			}
+			var stderr bytes.Buffer
+			err := run(context.Background(), args, nil, io.Discard, &stderr)
+			if wantErr == "" {
+				if err != nil {
+					t.Fatalf("run: %v\n%s", err, &stderr)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), wantErr) {
+				t.Fatalf("error = %v, want %q\n%s", err, wantErr, &stderr)
+			}
+			link := "https://github.com/vicgupta/auto-mini-factory/blob/main/docs/TROUBLESHOOTING.md"
+			wantLink := wantErr != "" && scenario != "help"
+			if got := strings.Contains(stderr.String(), link); got != wantLink {
+				t.Errorf("troubleshooting link present = %t, want %t; stderr: %s", got, wantLink, &stderr)
+			}
+		})
+	}
+}
+
+func TestAutoAbortCloseIssues(t *testing.T) {
+	for _, scenario := range []string{"success", "close fails", "wrong repo"} {
+		t.Run(scenario, func(t *testing.T) {
+			root, _ := setupRepo(t)
+			t.Chdir(root)
+			gh, srv := newFakeGitHub(t)
+			apiURL := srv.URL
+			if scenario == "close fails" {
+				flaky := failingGitHub(t, srv, func(r *http.Request) bool {
+					return r.Method == "PATCH" && strings.HasSuffix(r.URL.Path, "/issues/3")
+				})
+				apiURL = flaky.URL
+			}
+			t.Setenv("GITHUB_TOKEN", "test-token")
+			t.Setenv("GITHUB_REPO", "vic/demo")
+			t.Setenv("AMF_API_URL", apiURL)
+			gh.issues[1] = &Issue{Number: 1, State: "closed"}
+			gh.issues[2] = &Issue{Number: 2, State: "open"}
+			gh.issues[3] = &Issue{Number: 3, State: "open"}
+			st := &autoState{Version: autoStateVersion, Repo: "vic/demo", Issues: []autoIssue{
+				{Number: 1, Status: "merged"},
+				{Number: 2, Status: "failed"},
+				{Number: 3, Status: "pending"},
+				{Status: "pending"}, // Not yet created: no issue #0 to close.
+			}}
+			if scenario == "wrong repo" {
+				st.Repo = "other/repo"
+			}
+			path := autoStatePath(root)
+			if err := saveAutoState(path, st); err != nil {
+				t.Fatal(err)
+			}
+			before, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var out bytes.Buffer
+			err = cmdAuto(context.Background(), []string{"--abort", "--close-issues"}, nil, &out, &bytes.Buffer{})
+			if scenario != "success" {
+				want := "differs from GITHUB_REPO"
+				if scenario == "close fails" {
+					want = "closing issue #3"
+				}
+				if err == nil || !strings.Contains(err.Error(), want) {
+					t.Fatalf("error = %v, want %q", err, want)
+				}
+				after, err := os.ReadFile(path)
+				if err != nil || !bytes.Equal(before, after) {
+					t.Fatalf("failed abort changed state: %v", err)
+				}
+				if scenario == "wrong repo" {
+					if len(gh.writes) != 0 {
+						t.Fatalf("wrong repo changed GitHub: %v", gh.writes)
+					}
+					return
+				}
+				// Retry after a partial failure must tolerate issue #2 already closed.
+				t.Setenv("AMF_API_URL", srv.URL)
+				if err := cmdAuto(context.Background(), []string{"--abort", "--close-issues"}, nil, &out, &bytes.Buffer{}); err != nil {
+					t.Fatal(err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Stat(path); !os.IsNotExist(err) {
+				t.Fatalf("state left after abort: %v", err)
+			}
+			for _, n := range []int{2, 3} {
+				if gh.issues[n].State != "closed" {
+					t.Errorf("issue #%d left open", n)
+				}
+			}
+			for _, write := range gh.writes {
+				if strings.HasSuffix(write, "/issues/1") {
+					t.Error("abort changed merged issue")
+				}
+			}
+		})
+	}
+}
+
+func TestAutoStateInvalidOrAbsent(t *testing.T) {
+	root, _ := setupRepo(t)
+	t.Chdir(root)
+	t.Setenv("GITHUB_TOKEN", "")
+	path := autoStatePath(root)
+	for _, data := range []string{"not json", `{"version":999}`} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		for _, args := range [][]string{{"status"}, {"--abort", "--close-issues"}} {
+			if err := cmdAuto(context.Background(), args, nil, &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
+				t.Fatalf("%v accepted invalid state %q", args, data)
+			}
+		}
+		if err := cmdAuto(context.Background(), []string{"--abort"}, nil, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+			t.Fatalf("plain abort of invalid state: %v", err)
+		}
+	}
+	for _, args := range [][]string{{"--abort"}, {"--abort", "--close-issues"}} {
+		var out bytes.Buffer
+		if err := cmdAuto(context.Background(), args, nil, &out, &bytes.Buffer{}); err != nil || !strings.Contains(out.String(), "No amf auto run") {
+			t.Fatalf("%v with no run: %v, output: %s", args, err, &out)
+		}
+	}
+}
+
+func TestAutoStateOutsideCheckout(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	t.Setenv("GITHUB_REPO", "vic/demo")
+	var out bytes.Buffer
+	if err := cmdAuto(context.Background(), []string{"status"}, nil, &out, &bytes.Buffer{}); err != nil || !strings.Contains(out.String(), "No amf auto run") {
+		t.Fatalf("status without clone: %v, output: %s", err, &out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "demo")); !os.IsNotExist(err) {
+		t.Fatalf("status created a clone: %v", err)
+	}
+	path := autoStatePath(filepath.Join(dir, "demo"))
+	if err := saveAutoState(path, &autoState{Version: autoStateVersion, Sentence: "saved outside", Merge: "rebase"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmdAuto(context.Background(), []string{"status"}, nil, &out, &bytes.Buffer{}); err != nil || !strings.Contains(out.String(), "saved outside") {
+		t.Fatalf("status: %v, output: %s", err, &out)
+	}
+	if err := cmdAuto(context.Background(), []string{"--abort"}, nil, &out, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("state left after abort: %v", err)
+	}
+}
+
 func TestAutoCrashAfterFirstCreate(t *testing.T) {
 	r, gh, log := newAutoRunner(t, autoClaude)
 	ctx := context.Background()
@@ -100,6 +289,62 @@ func TestAutoCrashAfterFirstCreate(t *testing.T) {
 	}
 }
 
+func TestAutoContinueAfterAllMerged(t *testing.T) {
+	r, _, _ := newAutoRunner(t, autoClaude)
+	st := &autoState{Version: autoStateVersion, Repo: r.Repo, Merge: "merge", Issues: []autoIssue{{Number: 1, Status: "merged"}}}
+	path := autoStatePath(r.Root)
+	if err := saveAutoState(path, st); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := r.Auto(context.Background(), "", autoOptions{Continue: true}, nil, &out); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "checkpoint") || !strings.Contains(out.String(), "amf auto is done") {
+		t.Fatalf("checkpoint after final merge:\n%s", &out)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("completed state remains: %v", err)
+	}
+}
+
+func TestAutoCheckpointSaveFailure(t *testing.T) {
+	for _, afterApproval := range []bool{false, true} {
+		t.Run(fmt.Sprintf("after approval=%v", afterApproval), func(t *testing.T) {
+			r, _, _ := newAutoRunner(t, autoClaude)
+			st := &autoState{Version: autoStateVersion, Repo: r.Repo, Merge: "merge", Issues: []autoIssue{
+				{Number: 1, Status: "merged"}, {Number: 2, Status: "pending"},
+			}}
+			path := autoStatePath(r.Root)
+			if err := saveAutoState(path, st); err != nil {
+				t.Fatal(err)
+			}
+			blockSave := func() {
+				if err := os.Mkdir(path+".tmp", 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if !afterApproval {
+				blockSave()
+			}
+			approve := func(string) (bool, bool) {
+				if !afterApproval {
+					t.Fatal("asked for approval after save failure")
+				}
+				blockSave()
+				return true, true
+			}
+			if err := r.autoWork(context.Background(), st, path, approve, &bytes.Buffer{}); err == nil {
+				t.Fatal("checkpoint swallowed save failure")
+			}
+			saved, err := loadAutoState(path)
+			if err != nil || saved.Approved {
+				t.Fatalf("saved state = %+v, %v", saved, err)
+			}
+		})
+	}
+}
+
 func TestAutoCheckpointWithWatch(t *testing.T) {
 	root, _ := setupRepo(t)
 	gh, srv := newFakeGitHub(t)
@@ -157,7 +402,7 @@ func TestAutoCheckpointWithWatch(t *testing.T) {
 	if err := watch.Watch(recoverCtx, labelReady, time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
-	if got := gh.labels(2); !slices.Equal(got, []string{labelAuto, labelDone}) {
+	if got := gh.labels(2); !slices.Equal(got, []string{labelAuto, labelPROpen}) {
 		t.Fatalf("recovered issue labels = %v", got)
 	}
 	if got := gh.labels(3); !slices.Equal(got, []string{labelAuto}) {
@@ -716,7 +961,7 @@ func TestCommandLineErrors(t *testing.T) {
 		{[]string{"issue", "create", "T", "-f"}, "usage"},
 		{[]string{"issue", "   "}, "usage"},
 		{[]string{"issue", "A", "B"}, "usage"},
-		{[]string{"issue", "T", "-b", "x", "-f", "y.md"}, "use -b or -f"},
+		{[]string{"issue", "T", "-b", "x", "-f", "y.md"}, "use --body or --file"},
 		{[]string{"issue", "T", "-f", "/nonexistent/body.md"}, "no such file"},
 		{[]string{"issue", "T", "--label", ""}, "--label can't be empty"},
 		{[]string{"issue", "T", "--label", "  "}, "--label can't be empty"},
@@ -754,7 +999,7 @@ func TestListHelp(t *testing.T) {
 			if err := run(context.Background(), args, nil, &stdout, &stderr); err != nil {
 				t.Fatalf("help: %v", err)
 			}
-			if stdout.Len() != 0 || !strings.Contains(stderr.String(), "Usage of list:") || !strings.Contains(stderr.String(), "-state") {
+			if stdout.Len() != 0 || !strings.Contains(stderr.String(), "amf issue list [flags]") || !strings.Contains(stderr.String(), "-s, --state <state>") {
 				t.Fatalf("stdout = %q, stderr = %q; want empty stdout and list flag help on stderr", stdout.String(), stderr.String())
 			}
 		})
@@ -790,7 +1035,7 @@ func TestWatchHelp(t *testing.T) {
 					t.Fatalf("stdout = %q, want empty stdout", stdout.String())
 				}
 				if tc.want == nil {
-					for _, want := range []string{watchHelp, "Usage of watch:", "-interval duration", "-label string"} {
+					for _, want := range []string{watchHelp, "Flags:", "-i, --interval <duration>", "-l, --label <name>"} {
 						if !strings.Contains(stderr.String(), want) {
 							t.Errorf("stderr = %q, want watch help containing %q", stderr.String(), want)
 						}
@@ -825,7 +1070,7 @@ func TestIssueCreateHelp(t *testing.T) {
 				if err := run(context.Background(), args, stdin, &stdout, &stderr); err != nil {
 					t.Fatalf("help: %v", err)
 				}
-				if stdout.Len() != 0 || !strings.Contains(stderr.String(), "Usage of issue:") || !strings.Contains(stderr.String(), "-no-label") {
+				if stdout.Len() != 0 || !strings.Contains(stderr.String(), "amf issue create \"Title\" [flags]") || !strings.Contains(stderr.String(), "    --no-label") {
 					t.Fatalf("stdout = %q, stderr = %q; want empty stdout and creation flag help on stderr", stdout.String(), stderr.String())
 				}
 				if stdin.reads != 0 {
@@ -916,7 +1161,7 @@ func TestIssueEmptyBodyConflictsWithFile(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			stdin := &trackedReader{text: "must not read"}
 			err := run(context.Background(), tc.args, stdin, io.Discard, io.Discard)
-			if err == nil || err.Error() != "use -b or -f, not both" {
+			if err == nil || err.Error() != "use --body or --file, not both" {
 				t.Fatalf("error = %v, want body/file conflict", err)
 			}
 			if stdin.reads != 0 {
@@ -1311,6 +1556,7 @@ func TestRerunUpdatesOpenPR(t *testing.T) {
 
 	// The PR is still open when the issue is retried.
 	gh.issues[1].Labels = append(gh.issues[1].Labels, Label{Name: "amf:ready"})
+	r.Force = true // without it, the guard skips an issue with an open PR
 	r.Claude = fakeAgent(t, "claude", shResult+"cat >/dev/null\necho two > f.txt\nresult 'Second try.'\n")
 	if err := r.Run(context.Background(), 1); err != nil {
 		t.Fatalf("re-run: %v\nlog:\n%s", err, log)
@@ -1330,7 +1576,7 @@ func TestRerunUpdatesOpenPR(t *testing.T) {
 	if c := gh.comments[1]; len(c) != 2 || !strings.Contains(c[1], "amf updated https://github.com/vic/demo/pull/101") {
 		t.Errorf("comments = %q", c)
 	}
-	if got := gh.labels(1); !reflect.DeepEqual(got, []string{"amf:done"}) {
+	if got := gh.labels(1); !reflect.DeepEqual(got, []string{"amf:pr-open"}) {
 		t.Errorf("labels = %v", got)
 	}
 
@@ -1386,7 +1632,7 @@ result 'ok'
 	done := make(chan error)
 	go func() { done <- r.Watch(ctx, "amf:ready", 20*time.Millisecond) }()
 	deadline := time.Now().Add(15 * time.Second)
-	for !slices.Contains(gh.labels(1), "amf:failed") || !slices.Contains(gh.labels(2), "amf:done") {
+	for !slices.Contains(gh.labels(1), "amf:failed") || !slices.Contains(gh.labels(2), "amf:pr-open") {
 		if time.Now().After(deadline) {
 			cancel()
 			t.Fatalf("issues not processed; log:\n%s", mu.String())
@@ -1689,7 +1935,7 @@ echo good > feature.txt; result 'Fresh.'`, "result 'VERDICT: PASS'")
 	if got := mustGit(t, origin, "rev-list", "--count", "main..amf/issue-1"); got != "1" {
 		t.Errorf("branch has %s commits", got)
 	}
-	if got := gh.labels(1); !reflect.DeepEqual(got, []string{"amf:done"}) {
+	if got := gh.labels(1); !reflect.DeepEqual(got, []string{"amf:pr-open"}) {
 		t.Errorf("labels = %v", got)
 	}
 }
@@ -1762,7 +2008,7 @@ func TestRunSucceedsOnceThePRExists(t *testing.T) {
 		if err := r.Run(context.Background(), 1); err != nil {
 			t.Fatalf("Run: %v", err)
 		}
-		if got := gh.labels(1); !reflect.DeepEqual(got, []string{"amf:done"}) {
+		if got := gh.labels(1); !reflect.DeepEqual(got, []string{"amf:pr-open"}) {
 			t.Errorf("labels = %v", got)
 		}
 		if !strings.Contains(log.String(), "#1: could not comment") {
@@ -1791,7 +2037,7 @@ func TestRunSucceedsOnceThePRExists(t *testing.T) {
 		if c := gh.comments[1]; len(c) != 1 || !strings.Contains(c[0], "amf opened") {
 			t.Errorf("comments = %q", c)
 		}
-		if !strings.Contains(log.String(), "#1: could not set amf:done") {
+		if !strings.Contains(log.String(), "#1: could not set amf:pr-open") {
 			t.Errorf("log:\n%s", log)
 		}
 	})
@@ -1998,7 +2244,7 @@ result 'ok'`))
 		}
 	}
 	waitFor("#2 not processed", func() bool {
-		return slices.Contains(gh.labels(2), "amf:done") && strings.Count(file.String(), `"reason":"excluded_label"`) >= 4
+		return slices.Contains(gh.labels(2), "amf:pr-open") && strings.Count(file.String(), `"reason":"excluded_label"`) >= 4
 	})
 	for n, want := range map[int][]string{1: {"amf:ready", "blocked"}, 3: {"amf:ready", "blocked", "needs-human"}} {
 		if got := gh.labels(n); !reflect.DeepEqual(got, want) {
@@ -2010,7 +2256,7 @@ result 'ok'`))
 	gh.mu.Lock()
 	gh.issues[1].Labels = []Label{{Name: "amf:ready"}}
 	gh.mu.Unlock()
-	waitFor("#1 not processed after its hold label went", func() bool { return slices.Contains(gh.labels(1), "amf:done") })
+	waitFor("#1 not processed after its hold label went", func() bool { return slices.Contains(gh.labels(1), "amf:pr-open") })
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatal(err)
@@ -2071,7 +2317,7 @@ func TestWatchExcludeLabelAcrossPages(t *testing.T) {
 	time.AfterFunc(20*time.Second, cancel)
 	done := make(chan error, 1)
 	go func() { done <- r.Watch(ctx, "team:backend", 20*time.Millisecond) }()
-	for !slices.Contains(gh.labels(101), "amf:done") {
+	for !slices.Contains(gh.labels(101), "amf:pr-open") {
 		if ctx.Err() != nil {
 			t.Fatalf("#101 not processed; log:\n%s", log)
 		}
@@ -2094,7 +2340,7 @@ func TestWatchExcludeLabelAcrossPages(t *testing.T) {
 	if err := r.Run(context.Background(), 1); err != nil {
 		t.Fatalf("amf run on a held issue: %v\nlog:\n%s", err, log)
 	}
-	if !slices.Contains(gh.labels(1), "amf:done") {
+	if !slices.Contains(gh.labels(1), "amf:pr-open") {
 		t.Errorf("#1 labels after amf run = %v", gh.labels(1))
 	}
 }
@@ -2183,7 +2429,7 @@ func TestDefaultAgentFallsBack(t *testing.T) {
 			if len(gh.prs) != 1 || !strings.Contains(gh.prs[0]["body"], tc.want) {
 				t.Fatalf("PRs = %v, want a body with %q", gh.prs, tc.want)
 			}
-			if got := gh.labels(1); !reflect.DeepEqual(got, []string{"amf:done"}) {
+			if got := gh.labels(1); !reflect.DeepEqual(got, []string{"amf:pr-open"}) {
 				t.Errorf("labels = %v", got)
 			}
 		})
@@ -2767,7 +3013,7 @@ func draftCLI(t *testing.T, args ...string) (*fakeGitHub, string) {
 		// The comment is amf's last write for an issue, after its label, so
 		// wait for it too: cancelling sooner can leave that request still
 		// being handled while the test reads the fake.
-		for !gh.commented(1) || !gh.commented(2) || !slices.Contains(gh.labels(1), labelDone) || !slices.Contains(gh.labels(2), labelDone) {
+		for !gh.commented(1) || !gh.commented(2) || !slices.Contains(gh.labels(1), labelPROpen) || !slices.Contains(gh.labels(2), labelPROpen) {
 			if ctx.Err() != nil {
 				t.Fatalf("amf %q: issues not processed:\n%s", args, stderr.String())
 			}
@@ -2820,7 +3066,7 @@ func TestDraftFlag(t *testing.T) {
 				if c := gh.comments[n]; len(c) != 1 || c[0] != fmt.Sprintf("amf opened https://github.com/vic/demo/pull/%d for this issue.", 100+n) {
 					t.Errorf("#%d comments = %q", n, c)
 				}
-				if got := gh.labels(n); !reflect.DeepEqual(got, []string{labelDone}) {
+				if got := gh.labels(n); !reflect.DeepEqual(got, []string{labelPROpen}) {
 					t.Errorf("#%d labels = %v", n, got)
 				}
 				if _, err := os.Stat(filepath.Join(root, ".amf", "worktrees", fmt.Sprintf("issue-%d", n))); !os.IsNotExist(err) {
@@ -2848,9 +3094,6 @@ func TestDraftFlagHelp(t *testing.T) {
 			t.Errorf("amf %s -h doesn't describe --draft:\n%s", cmd, stderr.String())
 		}
 	}
-	if !strings.Contains(runHelp, "also takes\n--draft") && !strings.Contains(runHelp, "also takes --draft") {
-		t.Error("amf help run doesn't mention --draft")
-	}
 }
 
 func TestPipelineDraftPR(t *testing.T) {
@@ -2872,7 +3115,7 @@ func TestPipelineDraftPR(t *testing.T) {
 	if c := gh.comments[1]; len(c) != 1 || !strings.Contains(c[0], "amf opened https://github.com/vic/demo/pull/101") {
 		t.Errorf("comments = %q", c)
 	}
-	if got := gh.labels(1); !reflect.DeepEqual(got, []string{labelDone}) {
+	if got := gh.labels(1); !reflect.DeepEqual(got, []string{labelPROpen}) {
 		t.Errorf("labels = %v", got)
 	}
 }
@@ -2908,7 +3151,7 @@ func TestRetryKeepsDraftState(t *testing.T) {
 			if c := gh.comments[1]; len(c) != 1 || !strings.Contains(c[0], "amf updated https://github.com/vic/demo/pull/101") {
 				t.Errorf("comments = %q", c)
 			}
-			if got := gh.labels(1); !reflect.DeepEqual(got, []string{labelDone}) {
+			if got := gh.labels(1); !reflect.DeepEqual(got, []string{labelPROpen}) {
 				t.Errorf("labels = %v", got)
 			}
 		})
@@ -3053,7 +3296,7 @@ func TestMergeRefusedLeavesPROpen(t *testing.T) {
 	if pr := gh.prs[0]; pr["state"] != "open" || pr["merge_attempts"] != "x" {
 		t.Fatalf("PR = %v, want it open after one attempt (a required check isn't retried)", pr)
 	}
-	if got, want := gh.labels(1), []string{"amf:done"}; !reflect.DeepEqual(got, want) {
+	if got, want := gh.labels(1), []string{"amf:pr-open"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("labels = %v, want %v", got, want)
 	}
 	if c := gh.comments[1]; len(c) != 1 || !strings.Contains(c[0], "but could not merge it") || !strings.Contains(c[0], `Required status check "ci" is expected.`) {
@@ -3110,7 +3353,7 @@ func TestMergeRefusesAgentsMD(t *testing.T) {
 	if pr := gh.prs[0]; pr["state"] != "open" || pr["merge_attempts"] != "" {
 		t.Fatalf("PR = %v, want it open with no merge attempted", pr)
 	}
-	if got, want := gh.labels(1), []string{"amf:done"}; !reflect.DeepEqual(got, want) {
+	if got, want := gh.labels(1), []string{"amf:pr-open"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("labels = %v, want %v", got, want)
 	}
 
@@ -3281,7 +3524,7 @@ func TestHelpTopicPrintsGroupUsage(t *testing.T) {
 		if err := run(context.Background(), tc.args, strings.NewReader(""), &out, &errb); err != nil {
 			t.Fatalf("%v: %v", tc.args, err)
 		}
-		if out.String() != tc.want || errb.Len() != 0 {
+		if !strings.HasPrefix(out.String(), tc.want) || errb.Len() != 0 {
 			t.Errorf("%v: wrong output %q / stderr %q", tc.args, out.String(), errb.String())
 		}
 	}
@@ -3312,15 +3555,13 @@ func TestHelpUnknownTopic(t *testing.T) {
 
 // Every flag amf list takes appears in its help, --json included.
 func TestUsageListMentionsJSON(t *testing.T) {
-	for _, line := range strings.Split(listHelp, "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "amf issue list ") {
-			if !strings.Contains(line, "--json") {
-				t.Errorf("amf issue list usage line omits --json: %q", line)
-			}
-			return
-		}
+	var out strings.Builder
+	if err := run(context.Background(), []string{"help", "issue", "list"}, nil, &out, io.Discard); err != nil {
+		t.Fatal(err)
 	}
-	t.Error("no amf issue list line in amf help list")
+	if !strings.Contains(out.String(), "-j, --json") {
+		t.Errorf("amf help issue list omits --json:\n%s", out.String())
+	}
 }
 
 // The overview lists each command and topic on one line, with no flags,

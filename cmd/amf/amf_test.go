@@ -220,6 +220,8 @@ type fakeGitHub struct {
 	mergeErrs []fakeError
 	// writes is every request that isn't a GET, as "METHOD path".
 	writes []string
+	// events are GET /issues/{n}/events responses.
+	events map[int][]IssueEvent
 }
 
 type fakeError struct {
@@ -300,8 +302,22 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
 		f.repoLabels[in.Name] = LabelSpec{in.Name, in.Color, in.Description}
 		writeJSON(w, 201, in)
 	})
+	mux.HandleFunc("GET "+repo+"/issues/{n}/events", func(w http.ResponseWriter, r *http.Request) {
+		n, _ := strconv.Atoi(r.PathValue("n"))
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		writeJSON(w, 200, append([]IssueEvent{}, f.events[n]...))
+	})
 	mux.HandleFunc("GET "+repo+"/issues/{n}", func(w http.ResponseWriter, r *http.Request) {
 		f.withIssue(w, r, func(is *Issue) { writeJSON(w, 200, is) })
+	})
+	mux.HandleFunc("PATCH "+repo+"/issues/{n}", func(w http.ResponseWriter, r *http.Request) {
+		var in struct{ State string }
+		decode(t, r, &in)
+		f.withIssue(w, r, func(is *Issue) {
+			is.State = in.State
+			writeJSON(w, 200, is)
+		})
 	})
 	mux.HandleFunc("POST "+repo+"/issues/{n}/labels", func(w http.ResponseWriter, r *http.Request) {
 		var in struct{ Labels []string }
@@ -712,7 +728,7 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"A
 	if got := mustGit(t, root, "--git-dir", origin, "show", "amf/issue-1:feature.txt"); got != "hello" {
 		t.Fatalf("pushed branch has feature.txt = %q", got)
 	}
-	if got, want := gh.labels(1), []string{"amf:done"}; !reflect.DeepEqual(got, want) {
+	if got, want := gh.labels(1), []string{"amf:pr-open"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("labels = %v, want %v", got, want)
 	}
 	if c := gh.comments[1]; len(c) != 1 || !strings.Contains(c[0], "/pull/101") {
@@ -755,7 +771,7 @@ func TestRunFailsWithoutChanges(t *testing.T) {
 	if err := r.Run(context.Background(), 1); err != nil {
 		t.Fatalf("re-run: %v", err)
 	}
-	if got, want := gh.labels(1), []string{"amf:done"}; !reflect.DeepEqual(got, want) {
+	if got, want := gh.labels(1), []string{"amf:pr-open"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("labels after re-run = %v, want %v", got, want)
 	}
 }
@@ -787,7 +803,7 @@ func TestWatchProcessesLabeledIssues(t *testing.T) {
 	done := make(chan error)
 	go func() { done <- r.Watch(ctx, "amf:ready", 50*time.Millisecond) }()
 	deadline := time.Now().Add(10 * time.Second)
-	for !slices.Contains(gh.labels(1), "amf:done") || !slices.Contains(gh.labels(4), "amf:done") {
+	for !slices.Contains(gh.labels(1), "amf:pr-open") || !slices.Contains(gh.labels(4), "amf:pr-open") {
 		if time.Now().After(deadline) {
 			t.Fatalf("issue 1 never processed; log:\n%s", log)
 		}
@@ -800,7 +816,7 @@ func TestWatchProcessesLabeledIssues(t *testing.T) {
 	if len(gh.prs) != 2 || gh.prs[0]["head"] != "amf/issue-1" || gh.prs[1]["head"] != "amf/issue-4" {
 		t.Fatalf("expected PRs for #1 and #4, got %v", gh.prs)
 	}
-	if got := gh.labels(4); !reflect.DeepEqual(got, []string{"amf:done"}) {
+	if got := gh.labels(4); !reflect.DeepEqual(got, []string{"amf:pr-open"}) {
 		t.Fatalf("retried issue labels = %v", got)
 	}
 }

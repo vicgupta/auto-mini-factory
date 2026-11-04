@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 )
 
 // usage is the short overview amf, amf help, -h and --help print: one line
@@ -20,7 +21,8 @@ Commands:
   pr         manage pull requests: list, merge, view, diff, close, reopen, ready, draft
   run        process one issue into a PR (alias of issue run)
   watch      process amf:ready issues as they arrive (alias of issue watch)
-  auto       plan one sentence into issues and merge their PRs, pausing after the first
+  auto       plan one sentence into up to 5 issues and merge their PRs, pausing after the first by default
+  memory     the repo's memory of issues, PRs and runs: sync, similar, show
   pipeline   check the plan/code/eval pipeline in this checkout's AGENTS.md
   doctor     check the setup here, changing nothing
   update     replace this amf binary with the latest (or given) release
@@ -30,56 +32,90 @@ Commands:
 Topics:
   agents     which coding agent amf runs, and when it falls back to another
   env        configuration: every .env setting, with its default
+  flags      flag conventions: long and short forms, shared letters
+
+Paths default to the current directory; amf help run lists the path flags
+every command takes.
 
 Run amf help <command> or amf <command> -h for details.
+Every flag has a long form and common ones a short one: see amf help flags.
 `
 
 const runHelp = `Usage:
-  amf run <issue-number> [--agent A] [--agent-timeout 60m] [--eval-rounds 2] [--dry-run] [--draft] [--merge[=squash|rebase]] [--log-level L] [--log-file P]
+  amf run <issue-number> [flags]
 
-Processes one issue into a pull request (alias of amf issue run; also takes
---draft, --dry-run, --merge, --eval-rounds, --log-level, --log-file).
+Processes one issue into a pull request (alias of amf issue run).
 
 --merge makes run and watch merge each PR they open or update, without
-review: a merge commit, or --merge=squash or --merge=rebase. A merge GitHub
+review: a merge commit, or --merge=squash or --merge=rebase (also written
+--merge squash, -m squash or -m=squash). A merge GitHub
 refuses (a conflict, required checks or reviews) leaves the PR open.
+See diagrams and tradeoffs for --merge at:
+https://github.com/vicgupta/auto-mini-factory/blob/main/docs/COMMANDS.md#merge-methods
 
 amf run --dry-run makes the change on the local amf/issue-N branch and prints
 the pull request it would open, without labeling, commenting, pushing,
 opening a PR or merging.
 
+An issue that already has an open amf pull request is labeled amf:pr-open
+and skipped, and one whose amf/issue-N branch is on origin without an open
+PR is skipped: --force runs it anyway, updating the open PR. An issue is
+amf:pr-open while its PR is open and amf:done once amf merged it.
+
+run, watch and auto hold .amf/watch.lock while they work, so two of them
+never share a checkout; a lock left by a dead amf is taken over.
+
 run and watch work in the enclosing git checkout. Started anywhere else, they
 clone GITHUB_REPO into ./<name> (or reuse that clone) and work there.
+
+run, watch and auto record each attempt in the repo's memory and note
+similar past work: --memory-backend picks sqlite (default), markdown or
+logfiles, and --memory-dir where the amf-memory folder goes (default: the
+current directory). See amf help memory.
+
+Paths default to the current directory; flags override them, and relative
+values resolve against it:
+  --dir DIR         work as if started in DIR
+  --env-file FILE   read only FILE instead of ./.env
+  --clone-dir DIR   use (or clone into) DIR instead of the checkout or ./<name>
+  --log-file FILE   event log (default .amf/runs/<run_id>/events.jsonl, or off)
+amf keeps its state under <checkout>/.amf/, excluded from git.
 
 amf help agents says which agent runs; amf help env lists the settings.
 `
 
 const watchHelp = `Usage:
-  amf watch [--agent A] [--interval 60s] [--label amf:ready] [--exclude-label L]... [--agent-timeout 60m] [--eval-rounds 2] [--draft] [--merge[=squash|rebase]] [--log-level L] [--log-file P]
+  amf watch [flags]
 
 Processes amf:ready issues as they arrive, one at a time, until interrupted
-(alias of amf issue watch; also takes --exclude-label, --draft, --merge,
---agent-timeout, --eval-rounds, --log-level, --log-file). --merge, the
-checkout and the agent work as for amf run: see amf help run.
+(alias of amf issue watch). --merge, the checkout and the agent work as for
+amf run: see amf help run.
+
+Each poll, watch also puts amf:in-progress issues that no amf is working on
+back to amf:ready once they have been in progress longer than
+--stale-timeout (AMF_STALE_TIMEOUT; default twice the agent timeout, at
+least 2h; off disables it), or labels them amf:pr-open if their PR is open.
+See merge methods at:
+https://github.com/vicgupta/auto-mini-factory/blob/main/docs/COMMANDS.md#merge-methods
 
 amf help agents says which agent runs; amf help env lists the settings.
 `
 
 const listHelp = `Usage:
-  amf issue list [--state open|closed|all] [--label L] [--search TEXT] [--limit N] [--json]
+  amf issue list [flags]
 
 Lists issues, newest first, with their amf labels.
 `
 
 const initHelp = `Usage:
-  amf init
+  amf init [flags]
 
 Writes .env (backing up an existing one) and creates amf's labels.
 amf help env lists every setting .env can hold.
 `
 
 const pipelineHelp = `Usage:
-  amf pipeline [--fetch]
+  amf pipeline [flags]
 
 Checks the plan/code/eval pipeline in this checkout's AGENTS.md.
 
@@ -90,28 +126,29 @@ github.com/vicgupta/auto-mini-factory.
 `
 
 const doctorHelp = `Usage:
-  amf doctor
+  amf doctor [flags]
 
 Checks the setup here, one line per check, changing nothing.
 `
 
 const updateHelp = `Usage:
-  amf update [--version vX.Y.Z] [--check]
+  amf update [flags]
 
 Replaces this amf binary with the latest (or given) release.
 `
 
 const versionHelp = `Usage:
-  amf version
+  amf version [flags]
 
 Prints amf's version (also amf --version).
 `
 
 const helpHelp = `Usage:
-  amf help [command | topic]
+  amf help [command [subcommand] | topic]
 
 Without an argument, prints the overview of commands and topics. With one,
-prints that command's or topic's details.
+prints that command's or topic's details: amf help run prints the same as
+amf run --help, and amf help pr merge the same as amf pr merge --help.
 `
 
 const agentsHelp = `Choosing the agent
@@ -129,36 +166,73 @@ A pipeline in AGENTS.md names each stage's agent, and wins over --agent and
 both settings: see amf help pipeline. amf help env lists the settings.
 `
 
-const envHelp = `Configuration is read from .env (or the environment):
-  GITHUB_TOKEN   token with contents, issues and pull-requests write access
-  GITHUB_REPO    owner/name
-  CLAUDE_CODE_OAUTH_TOKEN  optional subscription token for Claude Code (claude setup-token)
-  ANTHROPIC_API_KEY        optional Claude API key; with it or the token above, claude is usable
-  OPENAI_API_KEY           optional OpenAI API key; with it, codex is usable
-  OPENCODE_API_KEY         optional OpenCode Console API key, for paid opencode/ and Go opencode-go/ models
-  OPENCODE_MODEL           model for opencode (default opencode/big-pickle); see opencode models
-  AMF_PRIMARY_AGENT        agent for issues without a pipeline: claudecode, codex or opencode (default codex)
-  AMF_SECONDARY_AGENT      agent amf falls back to if the primary fails, or none (default claudecode)
-  AMF_AGENT_TIMEOUT        how long each agent run may take, a Go duration (default 60m);
-                           --agent-timeout, or its deprecated alias --timeout, overrides it
-  AMF_LOG_LEVEL            debug, info, warn or error (default info, and debug in .amf/runs/); --log-level overrides it
-  AMF_POSTGRES_URL         optional postgres:// URL; run and watch also log to its amflogs database
-  AMF_CLAUDE     path to the claude binary (default "claude")
-  AMF_CODEX      path to the codex binary (default "codex")
-  AMF_OPENCODE   path to the opencode binary (default "opencode")
-  AMF_TRUSTED    optional GitHub logins, comma-separated; amf only works on their issues
-  AMF_API_URL    GitHub API base URL (default https://api.github.com)
-  AMF_CLONE_URL  URL to clone GITHUB_REPO from (default https://github.com/GITHUB_REPO.git)
+const envHelp = `Configuration is read from .env (or the environment; environment variables win).
+Placeholders ending in ..., and owner/name, count as unset.
 
-amf init writes .env with these; amf doctor checks them.
+  GITHUB_TOKEN (default: required)
+    API access: Contents, Issues, Pull requests (read & write)
+  GITHUB_REPO (default: required)
+    owner/name; github.com URLs are accepted
+  CLAUDE_CODE_OAUTH_TOKEN (default: unset)
+    Claude subscription token, passed to Claude. Makes claude usable without --agent
+  ANTHROPIC_API_KEY (default: unset)
+    Claude API key, passed to Claude when there's no CLAUDE_CODE_OAUTH_TOKEN. Makes claude
+    usable without --agent
+  OPENAI_API_KEY (default: unset)
+    OpenAI API key, passed to Codex. Makes codex usable without --agent
+  OPENCODE_API_KEY (default: unset)
+    OpenCode Console API key (oc_sk_...), passed to opencode only. One key covers
+    pay-as-you-go opencode/<id> models (with credits) and, for a workspace subscribed to
+    OpenCode Go, opencode-go/<id> models. Makes opencode usable without --agent with a
+    paid OPENCODE_MODEL. Passed through the environment, never written to an agent
+    configuration file; amf init preserves it in .env
+  OPENCODE_MODEL (default: opencode/big-pickle)
+    The model opencode runs with: always without a pipeline, and for pipeline stages that
+    name no model. opencode/<id> is a free or pay-as-you-go model, opencode-go/<id> an
+    OpenCode Go one. opencode models lists the choices
+  AMF_TRUSTED (default: unset)
+    GitHub logins, separated by commas or spaces (a leading @ is allowed, case is
+    ignored). When set, amf only works on issues they opened, except issues labeled
+    amf:auto, which are always trusted. Unset means anyone's
+  AMF_POSTGRES_URL (default: unset)
+    A PostgreSQL server that run and watch also write their logs to, in the amflogs database
+  AMF_CLAUDE (default: claude)
+    Path to the Claude CLI
+  AMF_PRIMARY_AGENT (default: codex)
+    The agent for issues without a pipeline: claudecode (or claude), codex or opencode,
+    ignoring case. --agent and a pipeline override it
+  AMF_SECONDARY_AGENT (default: claudecode)
+    The agent amf falls back to when the primary fails, in a fresh worktree; the same
+    values, or none for no fallback
+  AMF_AGENT_TIMEOUT (default: 60m)
+    How long each agent run may take, as a Go duration; --agent-timeout (or its deprecated
+    alias --timeout) overrides it. Must be at least 1m and at most 24h
+  AMF_STALE_TIMEOUT (default: max(2x agent timeout, 2h))
+    How long watch lets an issue stay amf:in-progress with no amf working on it
+    before putting it back to amf:ready; off disables it. --stale-timeout overrides it
+  AMF_LOG_LEVEL (default: info (terminal), debug (event log))
+    debug, info, warn or error, for both the terminal and the event log of run and watch;
+    --log-level overrides it
+  AMF_CODEX (default: codex)
+    Path to the Codex CLI
+  AMF_OPENCODE (default: opencode)
+    Path to the opencode CLI
+  AMF_API_URL (default: https://api.github.com)
+    GitHub API base URL. amf pr ready and amf pr draft derive their GraphQL endpoint from
+    it: …/graphql appended, or a GitHub Enterprise Server …/api/v3 becomes …/api/graphql
+  AMF_CLONE_URL (default: https://github.com/<repo>.git)
+    Where to clone GITHUB_REPO from
+
+amf init writes the common settings to .env and preserves existing values;
+amf doctor checks the configuration.
 `
 
 // helpTopics maps each amf help <topic> to its text: every command, plus
 // the agents and env topics.
 var helpTopics = map[string]string{
-	"issue": issueUsage, "pr": prUsage, "list": listHelp, "run": runHelp, "watch": watchHelp, "auto": autoHelp,
+	"issue": issueUsage, "pr": prUsage, "list": listHelp, "run": runHelp, "watch": watchHelp, "auto": autoHelp, "memory": memoryUsage,
 	"init": initHelp, "pipeline": pipelineHelp, "doctor": doctorHelp, "update": updateHelp,
-	"version": versionHelp, "help": helpHelp, "agents": agentsHelp, "env": envHelp,
+	"version": versionHelp, "help": helpHelp, "agents": agentsHelp, "env": envHelp, "flags": flagsHelp,
 }
 
 // topicNames is every help topic, for typo suggestions.
@@ -173,13 +247,60 @@ func topicNames() []string {
 	return names
 }
 
-// withHelp makes -h and --help on fs print the command's help topic before
-// the flag list.
-func withHelp(fs *flag.FlagSet, w io.Writer, topic string) {
-	fs.Usage = func() {
-		fmt.Fprintf(w, "%s\nUsage of %s:\n", topic, fs.Name())
-		fs.PrintDefaults()
+// withHelp makes -h and --help on fs print the help for key: its topic
+// text, its flags in one aligned column, and examples. amf help <key> prints
+// the same, by running the command with --help.
+func withHelp(fs *flag.FlagSet, w io.Writer, key string) {
+	// run strips the path flags before the command parses its own, so these
+	// are only listed here; see paths.go.
+	if fs.Lookup("dir") == nil {
+		fs.String("dir", "", "work as if amf were started in this `folder` (default: the current directory)")
+		fs.String("env-file", "", "read only this .env `file` (default: ./.env, then the checkout's top-level .env)")
+		fs.String("clone-dir", "", "use, or clone GITHUB_REPO into, this `folder` (default: the enclosing checkout, else ./<repo name>)")
 	}
+	fs.Usage = func() { fmt.Fprint(w, commandHelp(fs, key)) }
+}
+
+// commandHelp is the full help for key, with fs's flags.
+func commandHelp(fs *flag.FlagSet, key string) string {
+	var b strings.Builder
+	b.WriteString(strings.TrimRight(helpText(key), "\n"))
+	b.WriteString("\n\nFlags:\n")
+	printFlags(&b, fs)
+	b.WriteString("\nGlobal flags (any command, before --):\n")
+	printGlobalFlags(&b)
+	if ex := helpExamples[key]; ex != "" {
+		b.WriteString("\nExamples:\n" + ex)
+	}
+	return b.String()
+}
+
+// helpText is the topic text for a command or a two-word subcommand.
+func helpText(key string) string {
+	if t, ok := subHelp[key]; ok {
+		return t
+	}
+	return helpTopics[key]
+}
+
+// newCommandFlags starts the FlagSet for the command key, wired to print its
+// help to w.
+func newCommandFlags(key string, w io.Writer) *flag.FlagSet {
+	fs := flag.NewFlagSet(key, flag.ContinueOnError)
+	fs.SetOutput(w)
+	withHelp(fs, w, key)
+	return fs
+}
+
+// helpArgs maps each amf help <topic> that is a command with flags to the
+// arguments that run it, so amf help run prints what amf run --help does.
+var helpArgs = map[string][]string{
+	"init": {"init"}, "run": {"run"}, "watch": {"watch"}, "auto": {"auto"}, "list": {"issue", "list"},
+	"pipeline": {"pipeline"}, "doctor": {"doctor"}, "update": {"update"}, "version": {"version"},
+	"issue create": {"issue", "create"}, "issue list": {"issue", "list"}, "issue run": {"run"}, "issue watch": {"watch"},
+	"pr list": {"pr", "list"}, "pr merge": {"pr", "merge"}, "pr view": {"pr", "view"}, "pr diff": {"pr", "diff"},
+	"memory sync": {"memory", "sync"}, "memory similar": {"memory", "similar"}, "memory show": {"memory", "show"},
+	"pr close": {"pr", "close"}, "pr reopen": {"pr", "reopen"}, "pr ready": {"pr", "ready"}, "pr draft": {"pr", "draft"},
 }
 
 // isHelpArgs reports whether args ask for help: exactly -h or --help.
