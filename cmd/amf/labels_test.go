@@ -47,6 +47,46 @@ func TestIssueLabel(t *testing.T) {
 	}
 }
 
+func TestIssuePositionalLabels(t *testing.T) {
+	for _, tc := range []struct {
+		name, command string
+		args          []string
+		want          []string
+		output        string
+		writes        int
+	}{
+		{"add", "label", []string{"#7", "amf:ready", "needs review"}, []string{"amf:failed", "bug", "amf:ready", "needs review"}, "#7: added amf:ready, needs review\n", 1},
+		{"remove", "unlabel", []string{"7", "amf:failed", "bug"}, nil, "#7: removed amf:failed, bug\n", 2},
+		{"comma separated", "label", []string{"7", " docs, needs review "}, []string{"amf:failed", "bug", "docs", "needs review"}, "#7: added docs, needs review\n", 1},
+		{"duplicates", "label", []string{"7", "docs", "docs"}, []string{"amf:failed", "bug", "docs"}, "#7: added docs\n", 1},
+		{"remove duplicates", "unlabel", []string{"7", "bug,bug"}, []string{"amf:failed"}, "#7: removed bug\n", 1},
+		{"already present", "label", []string{"7", "bug"}, []string{"amf:failed", "bug"}, "#7 unchanged\n", 0},
+		{"already absent", "unlabel", []string{"7", "docs"}, []string{"amf:failed", "bug"}, "#7 unchanged\n", 0},
+		{"status", "label", []string{"7", "amf:done"}, []string{"bug", "amf:done"}, "#7: added amf:done; removed amf:failed\n", 2},
+		{"mixed flags", "label", []string{"7", "docs", "--remove", "bug", "--add", "needs review"}, []string{"amf:failed", "needs review", "docs"}, "#7: added needs review, docs; removed bug\n", 2},
+		{"literal flags", "label", []string{"7", "--", "docs", "--help"}, []string{"amf:failed", "bug", "docs", "--help"}, "#7: added docs, --help\n", 1},
+		{"remove literal flags", "unlabel", []string{"7", "--", "bug", "--help"}, []string{"amf:failed"}, "#7: removed bug\n", 1},
+		{"separator as flag value", "label", []string{"7", "--add", "--", "docs"}, []string{"amf:failed", "bug", "--", "docs"}, "#7: added --, docs\n", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gh, srv := newFakeGitHub(t)
+			listJSONEnv(t, srv)
+			gh.issues[7] = &Issue{Number: 7, State: "closed", Labels: []Label{{Name: labelFailed}, {Name: "bug"}}}
+			var out bytes.Buffer
+			err := run(context.Background(), append([]string{"issue", tc.command}, tc.args...), nil, &out, io.Discard)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := labelNames(*gh.issues[7]); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("labels = %v, want %v", got, tc.want)
+			}
+			if out.String() != tc.output || len(gh.writes) != tc.writes {
+				t.Fatalf("output = %q, writes = %v; want %q, %d writes", &out, gh.writes, tc.output, tc.writes)
+			}
+		})
+	}
+}
+
 func TestDoctorLabelState(t *testing.T) {
 	gh, srv := newFakeGitHub(t)
 	listJSONEnv(t, srv)

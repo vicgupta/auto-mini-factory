@@ -33,13 +33,22 @@ a blank label is rejected. Surrounding whitespace in the title and label is
 trimmed. Prints #N <url>.
 `,
 	"issue label": `Usage:
-  amf issue label <issue-number> [flags]
+  amf issue label <issue-number> [label...] [flags]
 
-Adds and removes labels on an issue: --add and --remove may repeat or take
-comma-separated names. Labels already present (or absent) are skipped.
+Adds the given labels to an issue. --add and --remove also add and remove
+labels and may repeat. Names may be comma-separated; at least one label
+is required. Labels already present (or absent) are skipped.
 Adding an amf status label (amf:in-progress, amf:pr-open, amf:done,
 amf:failed) removes the issue's other status label, so an issue keeps one.
 Prints #N: added ...; removed ..., or #N unchanged.
+`,
+	"issue unlabel": `Usage:
+  amf issue unlabel <issue-number> [label...]
+
+Removes the given labels from an issue. Names may be comma-separated;
+at least one label is required. Labels already absent are skipped.
+Accepts open or closed issues, but not pull requests.
+Prints #N: removed ..., or #N unchanged.
 `,
 	"pr list": `Usage:
   amf pr list [flags]
@@ -171,7 +180,8 @@ var helpSeeAlso = map[string][]string{
 	"version":        {"update"},
 	"man":            {"help", "flags"},
 	"issue create":   {"issue label", "issue list", "run"},
-	"issue label":    {"issue list", "run", "watch"},
+	"issue label":    {"issue unlabel", "issue list", "run", "watch"},
+	"issue unlabel":  {"issue label", "issue list", "watch"},
 	"pr list":        {"pr view", "pr diff", "pr merge"},
 	"pr merge":       {"pr view", "pr sweep", "run"},
 	"pr sweep":       {"pr merge", "watch"},
@@ -198,7 +208,8 @@ var helpExamples = map[string]string{
 	"init":           "  amf init\n",
 	"doctor":         "  amf doctor\n  amf doctor --fix-labels\n",
 	"version":        "  amf version\n",
-	"issue label":    "  amf issue label 42 --add amf:done\n  amf issue label 42 --remove amf:failed --add amf:ready\n",
+	"issue label":    "  amf issue label 42 amf:ready bug\n  amf issue label 42 --remove amf:failed --add amf:ready\n",
+	"issue unlabel":  "  amf issue unlabel 42 amf:ready bug\n",
 	"issue create": `  amf issue create "Fix the login redirect" --body "Users land on /404 after login"
   amf issue create "Add a dark mode" --file spec.md --no-label
 `,

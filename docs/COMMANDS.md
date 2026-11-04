@@ -15,7 +15,7 @@ For common failures and fixes, see the [troubleshooting guide](TROUBLESHOOTING.m
 |---|---|
 | `amf init` | write `.env` and create amf's labels |
 | `amf auth` | get a GitHub token: login, status, logout, token |
-| `amf issue` | manage issues: `create`, `list`, `label`, `run`, `watch` |
+| `amf issue` | manage issues: `create`, `list`, `label`, `unlabel`, `run`, `watch` |
 | `amf pr` | manage pull requests: `list`, `merge`, `sweep`, `view`, `diff`, `close`, `reopen`, `ready`, `draft` |
 | `amf run` | process one issue into a PR (alias of `issue run`) |
 | `amf watch` | process `amf:ready` issues as they arrive (alias of `issue watch`) |
@@ -73,7 +73,8 @@ such as `amf run 0`.
 |---|---|
 | `amf issue create "Title" [--body text \| --file path] [--label name] [--no-label]` | create an issue (the body may also come from stdin) |
 | `amf issue list [--state open\|closed\|all] [--label name] [--search text] [--limit n] [--json]` | list issues, newest first, with their amf labels |
-| `amf issue label <N> [--add name]... [--remove name]...` | add or remove an issue's labels |
+| `amf issue label <N> [label...] [--add name]... [--remove name]...` | add or remove an issue's labels |
+| `amf issue unlabel <N> [label...]` | remove an issue's labels |
 | `amf issue run <N> [flags]` | process one issue into a PR: see amf help run |
 | `amf issue watch [flags]` | process amf:ready issues as they arrive: see amf help watch |
 
@@ -154,13 +155,14 @@ With `--json`:
 ### amf issue label
 
 ```text
-amf issue label <N> [--add L]... [--remove L]...
+amf issue label <N> [label...] [--add L]... [--remove L]...
 ```
 
-Adds and removes labels on one issue (not a pull request). --add and
---remove repeat, or take comma-separated names; at least one is required,
-and a label can't be in both. Labels already present, or already absent,
-cost no API call. Adding an amf status label (amf:in-progress, amf:pr-open,
+Adds the positional labels to one open or closed issue (not a pull request).
+--add and --remove also add and remove labels and may repeat. Names may be
+comma-separated; at least one nonblank label is required, with no default,
+and a label can't be in both add and remove. Labels already present, or
+already absent, cost no API call. Adding an amf status label (amf:in-progress, amf:pr-open,
 amf:done or amf:failed) also removes the issue's other status label;
 adding two fails. Prints #N: added ...; removed ..., or #N unchanged.
 There is no --json flag.
@@ -169,6 +171,25 @@ Example output:
 
 ```text
 #42: added amf:done; removed amf:failed
+```
+
+### amf issue unlabel
+
+```text
+amf issue unlabel <N> [label...]
+```
+
+Removes the given labels from an open or closed issue (not a pull request),
+leaving other labels unchanged. Names may be comma-separated; at least one
+nonblank label is required, with no default. Duplicate names are removed
+once, and absent labels cost no write. Prints #N: removed A, B, or #N unchanged.
+Both label commands accept `42` or `#42`, need no git checkout, and support
+`amf help issue <command>`, `-h` and `--help`. Use `--` before label names
+beginning with `-` to stop flag parsing.
+
+```sh
+amf issue label 42 amf:ready "needs review"
+amf issue unlabel 42 amf:ready bug
 ```
 
 ### amf pr list

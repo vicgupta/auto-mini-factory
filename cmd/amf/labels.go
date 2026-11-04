@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"io"
 	"slices"
@@ -23,17 +24,47 @@ func (s *stringList) Set(v string) error {
 
 // cmdIssueLabel adds and removes labels on one issue, for fixing amf's
 // status labels (or any other) by hand.
-func cmdIssueLabel(ctx context.Context, args []string, stdout, stderr io.Writer) error {
-	fs := newCommandFlags("issue label", stderr)
+func cmdIssueLabel(ctx context.Context, command string, args []string, stdout, stderr io.Writer) error {
+	fs := newCommandFlags("issue "+command, stderr)
 	var add, remove stringList
-	fs.Var(&add, "add", "add this label (repeatable, or comma-separated)")
-	fs.Var(&remove, "remove", "remove this label (repeatable, or comma-separated)")
+	if command == "label" {
+		fs.Var(&add, "add", "add this label (repeatable, or comma-separated)")
+		fs.Var(&remove, "remove", "remove this label (repeatable, or comma-separated)")
+	}
+	// Keep every label after -- positional; parseArgs otherwise reparses
+	// later names as flags. Skip flag values when looking for the separator.
+	args = expandShortFlags(fs, args)
+	var tail []string
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--" {
+			tail, args = args[i+1:], args[:i]
+			break
+		}
+		if args[i] == "--add" || args[i] == "--remove" {
+			i++
+		}
+	}
 	pos, err := parseArgs(fs, args)
 	if err != nil {
+		if err == flag.ErrHelp {
+			return nil
+		}
 		return errUsage
 	}
-	if len(pos) != 1 || len(add)+len(remove) == 0 {
-		fmt.Fprintln(stderr, "usage: amf issue label <N> [--add name]... [--remove name]...")
+	pos = append(pos, tail...)
+	if len(pos) == 0 {
+		fs.Usage()
+		return errUsage
+	}
+	for _, l := range pos[1:] {
+		if command == "unlabel" {
+			_ = remove.Set(l)
+		} else {
+			_ = add.Set(l)
+		}
+	}
+	if len(add)+len(remove) == 0 {
+		fs.Usage()
 		return errUsage
 	}
 	n, err := parsePRNumber(pos[0])
@@ -79,7 +110,7 @@ func cmdIssueLabel(ctx context.Context, args []string, stdout, stderr io.Writer)
 	}
 	var added, removed []string
 	for _, l := range remove {
-		if !is.HasLabel(l) {
+		if !is.HasLabel(l) || slices.Contains(removed, l) {
 			continue
 		}
 		if err := gh.RemoveLabel(ctx, n, l); err != nil {
