@@ -30,8 +30,8 @@ const autoChecksPoll = 10 * time.Second
 const autoStateVersion = 1
 
 const autoHelp = `Usage:
-  amf auto "<one simple sentence>" [--no-checkpoint | --checkpoint-after N] [--approve] [--wait-for-checks] [--agent A] [--max-issues 5] [--merge[=squash|rebase]] [--agent-timeout 60m] [--eval-rounds 2] [--dry-run] [--log-level L] [--log-file P]
-  amf auto --continue [--no-checkpoint | --checkpoint-after N] [--approve] [--wait-for-checks] [--agent A] [--agent-timeout 60m] [--eval-rounds 2] [--log-level L] [--log-file P]
+  amf auto "<one simple sentence>" [flags]
+  amf auto --continue [flags]
   amf auto status
   amf auto --abort [--close-issues]
 
@@ -364,6 +364,7 @@ func (r *Runner) autoCreateIssues(ctx context.Context, st *autoState, path strin
 			ensuredLabel = true
 		}
 		p := plannedIssue{Title: is.Title, Scope: is.Scope, Acceptance: is.Acceptance}
+		r.memTriage(0, is.Title, is.Scope)
 		body := r.Redact.Redact(autoIssueBody(p, st.Sentence, i+1, len(st.Issues)))
 		created, err := r.GH.CreateIssue(ctx, is.Title, body, []string{labelAuto})
 		if err != nil {
@@ -580,13 +581,13 @@ func cmdAuto(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	}
 	fs := flag.NewFlagSet("auto", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	withHelp(fs, stderr, autoHelp)
+	withHelp(fs, stderr, "auto")
 	at, alias := addTimeoutFlags(fs)
 	evalRounds := fs.Int("eval-rounds", 2, "how many times a pipeline's eval stage may send the change back to code")
 	agent := fs.String("agent", "", agentFlagHelp)
 	maxIssues := fs.Int("max-issues", defaultAutoMaxIssues, "plan at most this many issues (1 to 10)")
 	merge := &mergeFlag{value: "merge"}
-	fs.Var(merge, "merge", "how to merge each PR: a merge commit (the default), or --merge=squash or --merge=rebase")
+	fs.Var(merge, "merge", "how to merge each PR: a merge commit, or a method after = or as the next word: --merge=squash, -m squash, -m rebase")
 	cont := fs.Bool("continue", false, "approve the checkpoint and resume the saved amf auto run")
 	noCheckpoint := fs.Bool("no-checkpoint", false, "merge all issues without a checkpoint or approval")
 	checkpointAfter := fs.Int("checkpoint-after", 1, "checkpoint after this many merges (must be positive)")
@@ -596,6 +597,7 @@ func cmdAuto(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	closeIssues := fs.Bool("close-issues", false, "with --abort, close the created, unmerged issues first")
 	dryRun := fs.Bool("dry-run", false, "plan only: print the issues amf would create, and create nothing")
 	lo := addLogFlags(fs)
+	mo := addMemoryFlags(fs)
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return errUsage
@@ -635,7 +637,7 @@ func cmdAuto(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	case *cont && *dryRun:
 		return errors.New("--continue and --dry-run can't be used together")
 	case !*cont && sentence == "":
-		fmt.Fprintln(stderr, `usage: amf auto "<one simple sentence>" [--agent A] [--max-issues 5] [--merge[=squash|rebase]] [--dry-run] | amf auto --continue | amf auto status | amf auto --abort [--close-issues]`)
+		fmt.Fprintln(stderr, `usage: amf auto "<one simple sentence>" [flags] | amf auto --continue | amf auto status | amf auto --abort [--close-issues] (amf auto --help lists the flags)`)
 		return errUsage
 	}
 	if *maxIssues < 1 || *maxIssues > 10 {
@@ -661,11 +663,23 @@ func cmdAuto(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	if err := lo.check(); err != nil {
 		return err
 	}
+	if err := mo.check(); err != nil {
+		return err
+	}
 	r, err := newRunner(ctx, timeout, *evalRounds, *agent, *lo, stderr)
 	if err != nil {
 		return err
 	}
 	defer r.Close()
+	// auto retries its own issues and updates their open PRs itself.
+	r.Force = true
+	if err := r.lockRepo("auto"); err != nil {
+		return err
+	}
+	r.Command = "auto"
+	if !*dryRun {
+		r.openMemory(*mo)
+	}
 	err = redactErr(r.Redact, r.Auto(ctx, sentence, autoOptions{
 		Continue: *cont, DryRun: *dryRun, MaxIssues: *maxIssues, Merge: merge.value,
 		NoCheckpoint: *noCheckpoint, CheckpointAfter: *checkpointAfter, Approve: *approve, WaitForChecks: *waitForChecks,
@@ -678,14 +692,17 @@ func cmdAuto(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 // GitHub nor agents, and must not clone a repo or create logs.
 func cmdAutoState(ctx context.Context, status, closeIssues bool, stdout io.Writer) error {
 	root, err := git(ctx, ".", "rev-parse", "--show-toplevel")
-	if err != nil {
-		// Outside a checkout, auto uses ./<repo name>. Locate that state
-		// without invoking checkoutRoot, which could create a new clone.
+	if err != nil || paths.CloneDir != "" {
+		// Outside a checkout (or with --clone-dir), auto uses the clone
+		// dir. Locate that state without invoking checkoutRoot, which
+		// could create a new clone.
 		cfg, err := loadConfig(envPaths(ctx)...)
 		if err != nil {
 			return err
 		}
-		_, root, _ = strings.Cut(cfg.Repo, "/")
+		if root, err = cloneDirFor(cfg.Repo); err != nil {
+			return err
+		}
 	}
 	path := autoStatePath(root)
 	if !status && !closeIssues {

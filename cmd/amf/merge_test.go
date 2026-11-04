@@ -72,7 +72,16 @@ func TestMergeFlag(t *testing.T) {
 		{args: []string{"42", "--merge=true"}, want: "merge"},
 		{args: []string{"42", "--merge=false"}, want: ""},
 		{args: []string{"42", "--merge=fast-forward"}, wantErr: `--merge: want merge, squash or rebase, got "fast-forward"`},
-		{args: []string{"42", "--merge", "squash"}, wantErr: "--merge takes its method after =: --merge=squash, not --merge squash"},
+		{args: []string{"42", "--merge", "squash"}, want: "squash"},
+		{args: []string{"42", "-m"}, want: "merge"},
+		{args: []string{"-m", "42"}, want: "merge"},
+		{args: []string{"42", "-m", "squash"}, want: "squash"},
+		{args: []string{"-m", "rebase", "42"}, want: "rebase"},
+		{args: []string{"42", "-m=squash"}, want: "squash"},
+		{args: []string{"42", "--m=rebase"}, want: "rebase"},
+		{args: []string{"42", "-merge=squash"}, want: "squash"},
+		{args: []string{"42", "-m=ff"}, wantErr: `--merge: want merge, squash or rebase, got "ff"`},
+		{args: []string{"42", "--", "-m", "squash"}, want: ""},
 	} {
 		fs := flag.NewFlagSet("run", flag.ContinueOnError)
 		m := addMergeFlag(fs)
@@ -96,7 +105,7 @@ func TestMergeFlag(t *testing.T) {
 // .env.
 func TestMergeFlagRejectedAtStartup(t *testing.T) {
 	t.Chdir(t.TempDir())
-	for _, args := range [][]string{{"run", "1", "--merge=ff"}, {"watch", "--merge=ff"}, {"run", "1", "--merge", "rebase"}, {"run", "1", "--merge", "--draft"}, {"watch", "--draft", "--merge=squash"}} {
+	for _, args := range [][]string{{"run", "1", "--merge=ff"}, {"watch", "--merge=ff"}, {"run", "1", "-m=ff"}, {"run", "1", "--merge", "--draft"}, {"watch", "--draft", "--merge=squash"}} {
 		var stderr bytes.Buffer
 		err := run(context.Background(), args, strings.NewReader(""), &bytes.Buffer{}, &stderr)
 		if err == nil || !strings.Contains(err.Error(), "--merge") {

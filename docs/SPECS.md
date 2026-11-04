@@ -6,7 +6,7 @@ a single agent: the one `--agent` names, or else the primary agent
 (`AMF_PRIMARY_AGENT`, default Codex), falling back to the secondary
 (`AMF_SECONDARY_AGENT`, default Claude Code) if the primary fails. A repo can instead declare a plan → code → eval pipeline in its
 `AGENTS.md`, with a skill, agent and model for each stage. amf is a single Go
-binary that uses only the standard library, for one developer or a small team
+binary (pure Go, no cgo; its one dependency is the SQLite driver for repo memory), for one developer or a small team
 that doesn't want to run a platform.
 
 **Needs:** `git`, a GitHub token for one repository, and an agent amf can
@@ -18,17 +18,29 @@ pipeline needs whichever agents it names.
 ## Issue lifecycle
 
 ```
-amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened, and merged with --merge)
+amf:ready ──▶ amf:in-progress ──▶ amf:pr-open (PR opened, not merged)
+                       ├────────▶ amf:done    (PR merged with --merge)
                        └────────▶ amf:failed  (reason commented)
 ```
 
 - `amf:ready` marks an issue for amf. Adding it again retries an issue that is
   done or failed.
-- `amf:done` means amf produced a PR for the issue, a draft one (`--draft`)
-  included.
+- `amf:pr-open` means amf produced a PR for the issue, a draft one
+  (`--draft`) included, that is open and not merged: no `--merge`, or the
+  merge failed.
+- `amf:done` means amf merged the issue's PR.
+- Before Claim, amf skips an issue with an open PR from `amf/issue-N`
+  (relabeling it `amf:pr-open`) or with an `amf/issue-N` branch on origin
+  (unless it is `amf:failed`); `amf run N --force`, and `amf auto`, skip
+  that guard. A failure never moves an issue from `amf:pr-open` or
+  `amf:done` to `amf:failed`.
+- `watch` puts an `amf:in-progress` issue no amf works on back to
+  `amf:ready` once the label is older than `AMF_STALE_TIMEOUT`.
+- `run`, `watch` and `auto` hold `.amf/watch.lock`; see
+  [the repo lock](COMMANDS.md#the-repo-lock).
 - amf removes `amf:ready` when it starts, and an issue has at most one status
   label at a time.
-- amf owns these four labels and every `amf/issue-<N>` branch.
+- amf owns these five labels and every `amf/issue-<N>` branch.
 
 ## Commands
 
@@ -36,8 +48,8 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened, and merged
 |---|---|
 | `amf init` | Writes `./.env` and creates the labels (see below). |
 | `amf issue <command>` | Groups issue operations: `create`, `list`, `run`, `watch`. Bare `amf issue`, `amf issue help`, `amf issue -h` and `amf issue --help` print the same group usage to stdout and exit 0, leaving stderr empty, without reading configuration, contacting GitHub or reading stdin. A stdout write failure follows the normal error path (exit 1). `amf issue create` without a title remains a usage error (exit 2). A single-word title within two edits of a subcommand, such as `amf issue lst`, creates nothing: it prints `amf: unknown issue command "lst"`, `Did you mean "list"?` and the way to create it anyway (`amf issue create "lst"`), then the group usage, to stderr and exits 2. The top-level `amf issue "Title"`, `amf run` and `amf watch` forms are aliases for `amf issue create`, `amf issue run` and `amf issue watch`. Top-level `amf list` still runs `amf issue list` as an undocumented alias, kept for existing scripts, and is not listed in the help overview; a mistyped top-level `lst` suggests `issue list`. |
-| `amf issue "Title" [-b body \| -f file \| -f -] [--label L] [--no-label]` | Creates an issue labeled `amf:ready` (or `--label`'s label; none with `--no-label`). `amf issue create -h` and `--help`, including either flag after a title in the explicit creation or title shortcut form, print the existing flag help to stderr, leave stdout empty, and exit 0 before validating the title, reading stdin, a body file or configuration, or contacting GitHub. Missing titles, unknown flags and missing flag values remain usage errors (exit 2); help follows normal argument parsing. The title's and the label's surrounding whitespace are trimmed before posting. The body can also come from stdin when it's piped; an explicitly supplied `-b`, including an empty value, selects that body and `-b` and nonempty `-f` together are an error. An explicit `-f -` reads stdin. An explicit `--label` with `--no-label` is an error. An empty or whitespace-only `--label` (without `--no-label`) fails with `--label can't be empty`, before anything is read or fetched. Prints `#N <url>`. |
-| `amf issue list [--state open\|closed\|all] [--label L] [--search TEXT] [--limit N] [--json]` | Lists issues, newest first (highest number first), with every page fetched and PRs left out. `-h` and `--help` print the flag help to stderr, leave stdout empty, and exit 0 before reading configuration or contacting GitHub. Surrounding whitespace on `--state` and `--label` is trimmed, and `--state` ignores letter case; whitespace inside a label name is preserved. An omitted, empty or whitespace-only label applies no label filter. `--search TEXT` (default empty) keeps only issues whose title contains the trimmed text, ignoring case; an empty or whitespace-only value applies no filter, and the filter runs before `--limit`. Columns: `ISSUE`, `STATE` (with `--state all` only), `AMF` (the issue's `amf` and `amf:*` labels, or `-`) and `TITLE`. `--limit N` (default `0`, no limit) prints only the first N issues after filtering, and when that hides some, the table output is followed on stderr by `Showing N of M issues; use --limit 0 to list them all.` (stdout is unchanged, and `--json` prints no hint); a negative value errors with `--limit must be 0 or more, got N`. Tabs in a title print as spaces. `--state` takes only `open`, `closed` or `all`, in any letter case, after trimming surrounding whitespace. Prints `No … in owner/name.` when nothing matches, using the trimmed label when one is set, and `with "TEXT" in the title` after it when `--search` is set. `--json` (default `false`) prints instead one JSON array and a newline, with no header: one object per issue, in the same order and after the same filters and limit, with exactly `number` (integer), `title`, `state`, `url` (the issue's GitHub page) and `labels` (every label name, in GitHub's order, `[]` when none); titles are kept as GitHub sent them, tabs included. Nothing matching prints `[]`. Argument, configuration and API errors leave stdout empty. A failure to write stdout, including the no-matching-issues message, is returned as an error and exits 1. Needs no git checkout. |
+| `amf issue "Title" [--body text \| --file path \| --file -] [--label name] [--no-label]` | Creates an issue labeled `amf:ready` (or `--label`'s label; none with `--no-label`). `amf issue create -h` and `--help`, including either flag after a title in the explicit creation or title shortcut form, print the existing flag help to stderr, leave stdout empty, and exit 0 before validating the title, reading stdin, a body file or configuration, or contacting GitHub. Missing titles, unknown flags and missing flag values remain usage errors (exit 2); help follows normal argument parsing. The title's and the label's surrounding whitespace are trimmed before posting. The body can also come from stdin when it's piped; an explicitly supplied `--body` (`-b`), including an empty value, selects that body and `--body` and a nonempty `--file` (`-f`) together are an error (`use --body or --file, not both`). An explicit `--file -` reads stdin. An explicit `--label` with `--no-label` is an error. An empty or whitespace-only `--label` (without `--no-label`) fails with `--label can't be empty`, before anything is read or fetched. Prints `#N <url>`. |
+| `amf issue list [--state open\|closed\|all] [--label name] [--search text] [--limit n] [--json]` | Lists issues, newest first (highest number first), with every page fetched and PRs left out. `-h` and `--help` print the flag help to stderr, leave stdout empty, and exit 0 before reading configuration or contacting GitHub. Surrounding whitespace on `--state` and `--label` is trimmed, and `--state` ignores letter case; whitespace inside a label name is preserved. An omitted, empty or whitespace-only label applies no label filter. `--search TEXT` (default empty) keeps only issues whose title contains the trimmed text, ignoring case; an empty or whitespace-only value applies no filter, and the filter runs before `--limit`. Columns: `ISSUE`, `STATE` (with `--state all` only), `AMF` (the issue's `amf` and `amf:*` labels, or `-`) and `TITLE`. `--limit N` (default `0`, no limit) prints only the first N issues after filtering, and when that hides some, the table output is followed on stderr by `Showing N of M issues; use --limit 0 to list them all.` (stdout is unchanged, and `--json` prints no hint); a negative value errors with `--limit must be 0 or more, got N`. Tabs in a title print as spaces. `--state` takes only `open`, `closed` or `all`, in any letter case, after trimming surrounding whitespace. Prints `No … in owner/name.` when nothing matches, using the trimmed label when one is set, and `with "TEXT" in the title` after it when `--search` is set. `--json` (default `false`) prints instead one JSON array and a newline, with no header: one object per issue, in the same order and after the same filters and limit, with exactly `number` (integer), `title`, `state`, `url` (the issue's GitHub page) and `labels` (every label name, in GitHub's order, `[]` when none); titles are kept as GitHub sent them, tabs included. Nothing matching prints `[]`. Argument, configuration and API errors leave stdout empty. A failure to write stdout, including the no-matching-issues message, is returned as an error and exits 1. Needs no git checkout. |
 | `amf pr` | Prints the pull request command group's usage to stdout, as `amf pr help`, `amf pr -h` and `amf pr --help` do. An unknown subcommand prints `amf: unknown pr command "<word>"` and then that usage to stderr and exits 2; one close to a real subcommand, such as `lst`, also prints `Did you mean "list"?` before the usage. |
 | `amf pr list [--state open\|closed\|merged\|all] [--limit N] [--issue N] [--json]` | Lists pull requests, including drafts, newest first. See [Pull requests](#pull-requests). |
 | `amf pr merge <N> [--squash \| --rebase] [--delete-branch]` | Merges a chosen PR (`42` or `#42`); no git checkout needed. See below. |
@@ -55,8 +67,19 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened, and merged
 | `amf version` | Prints `amf <version>`: the release tag, or the module version for `go install`. `amf --version` is the same. |
 | `amf help` | Prints the usage, as `-h` and `--help` do. `amf help <command>` prints that command's help; every `pr` and `issue` subcommand has a topic reachable with `amf help <group> <subcommand>` (including `help`, which prints group usage), without reading configuration or contacting GitHub. Unknown multiword topics follow the same error path as unknown single-word topics. For `issue` and `pr` alone it prints the group usage, as `amf issue help` and `amf pr help` do. `amf help agents` describes agent selection, and `amf help env` lists every configuration setting with its default and purpose, matching the README configuration table. The overview command names and descriptions match the README and command reference. An unknown topic is an error: `amf: unknown help topic "x"`, a `Did you mean` suggestion when one is close, then the usage on stderr, exit code 2. |
 
+- Flags follow one convention on every command (see
+  [Flag conventions](COMMANDS.md#flag-conventions)). Each has a long
+  `--kebab-case` name; common ones also have a one-letter short form that
+  means the same on every command and is unique within each command. Short
+  forms are rewritten to their long names before parsing, so `-a codex`,
+  `-a=codex`, `--agent codex` and `-agent codex` are equivalent; they can't
+  be bundled (`-nf`). A command's help (`amf <command> --help`, `-h`, or
+  `amf help <command>`, which prints the same text to stdout) shows a usage
+  line, a description, every visible flag in one aligned column as
+  `-x, --long <value>  description (default ...)`, with `-h, --help` last,
+  and examples. `amf help flags` lists the shared letters.
 - `--agent-timeout` limits each agent run, not the whole issue; the old
-  `--timeout` is accepted as a deprecated alias of it. Both must be at least
+  `--timeout` is accepted as a deprecated alias of it, hidden from help. Both must be at least
   1m and at most 24h, and 0 and negatives are errors; every out-of-range or
   unparsable value fails `run` and `watch` at startup, naming where it came
   from, such as `AMF_AGENT_TIMEOUT="5x": not a duration`. Other commands
@@ -104,10 +127,12 @@ amf:ready ──▶ amf:in-progress ──▶ amf:done    (PR opened, and merged
   11 below), without review. Off by default. Bare `--merge` (or
   `--merge=true`, or `--merge=merge`) makes a merge commit; `--merge=squash`
   squashes and `--merge=rebase` rebases, as GitHub's merge button does, and
-  `--merge=false` turns it off. The method needs the `=`: `--merge squash`
-  fails with `--merge takes its method after =: --merge=squash, not --merge
-  squash`, and any other method with `--merge: want merge, squash or
-  rebase, got "<value>"`, both at startup. `--merge` with `--draft` fails
+  `--merge=false` turns it off. The short form is `-m`. The method may follow
+  after `=` or as the next word: `--merge=squash`, `--merge squash`,
+  `-m squash` and `-m=squash` are the same. Only the words `merge`, `squash`
+  and `rebase` are taken as a method, so `amf run -m 42` merges issue 42's PR
+  with a merge commit. Any other method after `=` fails at startup with
+  `--merge: want merge, squash or rebase, got "<value>"`. `--merge` with `--draft` fails
   at startup with `--draft and --merge can't be used together: GitHub doesn't
   merge draft pull requests`.
   The `run`, `watch` and `auto` help texts link to
@@ -607,6 +632,45 @@ Checks that need GitHub, the repo or a checkout are `skip` without them.
 Claude's and Codex's own logins aren't checked: their CLIs can't report them
 reliably.
 
+## Repo memory
+
+`amf memory sync|similar|show` and the memory hooks in `run`, `watch` and
+`auto`. See [COMMANDS.md](COMMANDS.md#repo-memory) for usage.
+
+- **Store.** A `MemoryStore` interface with three peer backends, chosen per
+  invocation by `--memory-backend sqlite|markdown|logfiles` (default
+  `sqlite`; any other value is an error naming the three). No environment
+  variable selects or locates memory.
+- **Location and isolation.** `--memory-dir` (default `os.Getwd()`, made
+  absolute) holds `amf-memory/<host>/<owner>/<repo>/`. The key is the
+  lowercased host (`api.github.com` → `github.com`) and `GITHUB_REPO`; with no
+  repo, `local/<hash of the repo root>`. A key with unusual characters is
+  stored under `amf-memory/_hash/<hash>/`. The store records its key (SQLite
+  `meta` table, a header line in each log file, front matter in `index.md`
+  and a field in `index.json`); every record carries `repo`; opening a store
+  recorded for another key fails; every read filters by key.
+- **Records.** Issues (number, title, body, state, labels, timestamps); pull
+  requests (number, title, body, state, merged, head branch, linked issue);
+  runs (id, issue, command, start, finish, outcome, agent(s), exit code, PR,
+  error, log tail); explicit issue↔PR and run↔issue/PR links. Label history
+  is not kept.
+- **SQLite schema.** Versioned by `schema_migrations`; tables `meta`,
+  `issues`, `pull_requests`, `issue_prs`, `runs` and the FTS5 table
+  `memory_fts` (bm25, title weighted ×2). Pure Go (`modernc.org/sqlite`), no
+  cgo.
+- **Markdown and logfiles** search with a pure-Go TF-IDF scorer (title tokens
+  count twice) over the same records.
+- **Sync** pages through issues (`since` the last sync, by `updated_at`) and
+  pull requests (newest updated first, stopping at the cursor). Pull requests
+  link to issues by `amf/issue-N` head branch or a closing keyword.
+- **Similarity** ranks issues, PRs and runs, best first, excluding the issue
+  itself. A hit is a duplicate signal when it is merged work and its title
+  shares at least 60% of its words with the new title (Jaccard); amf only
+  warns (`memory.duplicate`) and never closes anything.
+- **Failure tolerance.** For `run`, `watch` and `auto`, any memory error
+  (including a repo mismatch) is a `memory.error` warning; memory is then off
+  for that process. `amf memory` commands fail on errors.
+
 ## Configuration (`.env`)
 
 `amf help env` prints these settings. amf reads one `.env`: `./.env`, or else `.env` at the top of the git
@@ -630,6 +694,7 @@ space, a trailing comment. A leading byte order mark is ignored.
 | `AMF_PRIMARY_AGENT` | `codex` | The agent for issues without a pipeline: `claudecode` (or `claude`), `codex` or `opencode`, ignoring case. `--agent` and a pipeline override it |
 | `AMF_SECONDARY_AGENT` | `claudecode` | The agent amf falls back to when the primary fails, in a fresh worktree; the same values, or `none` for no fallback |
 | `AMF_AGENT_TIMEOUT` | `60m` | How long each agent run may take, as a Go duration; `--agent-timeout` (or its deprecated alias `--timeout`) overrides it. Must be at least 1m and at most 24h |
+| `AMF_STALE_TIMEOUT` | `max(2x agent timeout, 2h)` | How long `watch` lets an issue stay `amf:in-progress` with no amf working on it before putting it back to `amf:ready`; `off` disables it. `--stale-timeout` overrides it |
 | `AMF_LOG_LEVEL` | `info` (terminal), `debug` (event log) | `debug`, `info`, `warn` or `error`, for both the terminal and the event log of `run` and `watch`; `--log-level` overrides it |
 | `AMF_CODEX` | `codex` | Path to the Codex CLI |
 | `AMF_OPENCODE` | `opencode` | Path to the opencode CLI |
@@ -805,7 +870,8 @@ and exit code are preserved.
       run) is final at once.
     - amf doesn't wait for checks to finish. With branch protection that
       requires them, the merge fails and the PR stays open.
-12. **Finish.** Set `amf:done` and comment on the issue:
+12. **Finish.** Set `amf:done` if amf merged the PR, else `amf:pr-open`, and
+    comment on the issue:
     - without `--merge`: `amf opened <PR URL> for this issue.` (`updated`
       for a retry's PR);
     - merged: `amf opened <PR URL> for this issue and merged it.` (`squashed
@@ -813,7 +879,7 @@ and exit code are preserved.
       the issue;
     - not merged: `amf opened <PR URL> for this issue, but could not merge
       it:`, the reason in a code block, and that the PR is still open for
-      review. The issue is still `amf:done`, but `run` exits 1 with `opened
+      review. The issue is `amf:pr-open`, and `run` exits 1 with `opened
       <PR URL> but could not merge it: <reason>`, and `watch` logs that as
       a failure and goes on.
 
@@ -905,12 +971,16 @@ was: no label and no comment. Its worktree is kept for inspection, except
 after `--agent-timeout`, which removes it as usual.
 
 **On failure** in any step after Claim, up to opening the PR (a failed
-merge doesn't count; see step 11): set `amf:failed`, comment the error on
-the issue, and keep the worktree and logs for inspection. This also happens if
+merge doesn't count; see step 11): set `amf:failed` (or keep `amf:pr-open`
+when the branch still has an open PR, and `amf:done` when it was done),
+comment the error on the issue (each agent tried with its exit code and
+duration, whether the fallback ran and why not, and the redacted last 40
+lines of the log), and keep the worktree and logs for inspection. This also happens if
 the run is interrupted — except that a run that hit `--agent-timeout` leaves
 the worktree (removed, with its branch unpushed) and keeps only the logs and
 partial output. If Claim itself fails, the issue can be left on
-`amf:in-progress`, which `watch` skips; `amf run N` recovers it.
+`amf:in-progress`, which `watch` skips until the stale sweep puts it back
+to `amf:ready`; `amf run N` recovers it too.
 
 ## Updating (`amf update`)
 
@@ -971,6 +1041,7 @@ redirect to a URL ending in the tag, and serve the archive and
 | `.amf/runs/<run_id>/events.jsonl` | The event log of one `run` or `watch` process, unless `--log-file` says otherwise |
 | `.amf/runs/<run_id>/summary.json` | That process's summary, rewritten after each issue and at exit |
 | `.amf/opencode.json` | The config amf runs opencode with |
+| `<memory-dir>/amf-memory/<host>/<owner>/<repo>/` | The repo's memory (see [Repo memory](#repo-memory)) |
 
 amf only ever adds to `.git/info/exclude`. It never edits a tracked `.gitignore`.
 
@@ -991,7 +1062,7 @@ event log opens, are not. The fields of each event, besides those:
 | `agent.fallback` | warn | Without a pipeline, the primary agent failed or wasn't usable: `from`, `to`, `reason` (`unusable`, `error` or `agent_timeout`) and `error` |
 | `log.file` | info | `path`: the event log |
 | `run.summary` | debug, info | The fields of `summary.json` (see Commands) as `done`, `failed`, `skipped`, `github_calls`, `ratelimit_lowest`, `git_calls`, `agent_ms`, `errors`, `log`, and `final`: false (debug) after an issue, true (info, the terminal's last line) at exit |
-| `config.load` | debug | `paths` (the `.env` files looked for), `file` (the one read, or `""`), and `keys`: for each variable read, its `source` (`env`, `.env` or `default`) and `value`. Only `GITHUB_REPO`, `AMF_API_URL`, `OPENCODE_MODEL`, `AMF_AGENT_TIMEOUT`, `AMF_LOG_LEVEL`, `AMF_CLAUDE`, `AMF_CODEX` and `AMF_OPENCODE` show their value; every other one shows `set` or `unset` |
+| `config.load` | debug | `paths` (the `.env` files looked for), `file` (the one read, or `""`), and `keys`: for each variable read, its `source` (`env`, `.env` or `default`) and `value`. Only `GITHUB_REPO`, `AMF_API_URL`, `OPENCODE_MODEL`, `AMF_AGENT_TIMEOUT`, `AMF_STALE_TIMEOUT`, `AMF_LOG_LEVEL`, `AMF_CLAUDE`, `AMF_CODEX` and `AMF_OPENCODE` show their value; every other one shows `set` or `unset` |
 | `pg.connect` | debug | With `AMF_POSTGRES_URL`: `host`, `port`, `database`, and `tls` and `auth` (`trust`, `password`, `md5` or `scram-sha-256`), or `error`; `created` when amf created the database. The first connection's event follows `log.file` and `config.load` |
 | `pg.retry` | debug | `attempt` (since the last success), `backoff`, `error` |
 | `pg.drop` | debug | `rows` that never reached the database, and `error` when amf gave up at exit |
@@ -1146,3 +1217,21 @@ get without it. Other commands don't log there.
   `--merge` or an explicit `amf pr merge`, and only what GitHub allows.
 - Sandboxing agents.
 - Skills that need authentication to download.
+
+## Paths
+
+Every path default resolves at run time to the current directory
+(`os.Getwd`, made absolute) or a subpath of it, unless a command-line flag
+names one. `$PWD`, `$HOME` and the OS temp folder never decide a default.
+All commands take `--dir <folder>` (change into DIR first), `--env-file <file>` (read
+and, for `amf init`, write only FILE) and `--clone-dir <folder>` (the checkout run,
+watch, auto and doctor use; it wins over the enclosing checkout, and is cloned
+when missing), before or after the command name. Relative values resolve
+against the directory amf was started in; `~` is not expanded. run, watch and
+auto also take `--log-file` and `--memory-dir`, made absolute the same way. No environment
+variable sets a path; `AMF_CLAUDE`, `AMF_CODEX` and `AMF_OPENCODE` name
+binaries, looked up on `PATH` when bare.
+
+Left as they are: `amf update` writes to the running executable's path (and its
+temporary file next to it); `amf init` and `amf doctor` create temporary files
+next to the file they write or in the folder they test, and remove them at once.

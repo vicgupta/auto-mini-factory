@@ -38,10 +38,11 @@ func (d *doctor) line(status, check, format string, a ...any) {
 // cmdDoctor checks everything amf needs to run here, without changing
 // anything: no clone, no labels, no push.
 func cmdDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) error {
-	if len(args) != 0 {
-		if isHelpArgs(args) {
-			fmt.Fprint(stderr, doctorHelp)
-		}
+	pos, err := parseArgs(newCommandFlags("doctor", stderr), args)
+	if err != nil {
+		return errUsage
+	}
+	if len(pos) != 0 {
 		fmt.Fprintln(stderr, "usage: amf doctor")
 		return errUsage
 	}
@@ -599,7 +600,7 @@ func (d *doctor) checkCheckout(ctx context.Context, cfg Config, repoOK bool) str
 	matches := func(origin string) bool {
 		return strings.EqualFold(repoFromRemote(origin), cfg.Repo) || origin == cfg.CloneURL
 	}
-	if root, err := git(ctx, ".", "rev-parse", "--show-toplevel"); err == nil {
+	if root, err := git(ctx, ".", "rev-parse", "--show-toplevel"); err == nil && paths.CloneDir == "" {
 		origin, err := git(ctx, root, "remote", "get-url", "origin")
 		switch {
 		case err != nil:
@@ -616,8 +617,7 @@ func (d *doctor) checkCheckout(ctx context.Context, cfg Config, repoOK bool) str
 		d.line("skip", "checkout", "not in a git checkout, and GITHUB_REPO isn't usable")
 		return ""
 	}
-	_, name, _ := strings.Cut(cfg.Repo, "/")
-	dir, _ := filepath.Abs(name)
+	dir, _ := cloneDirFor(cfg.Repo)
 	if _, err := os.Stat(dir); err != nil {
 		d.line("warn", "checkout", "not in a git checkout; run and watch will clone %s into %s", cfg.Repo, dir)
 		return ""

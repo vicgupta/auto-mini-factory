@@ -50,10 +50,16 @@ each, one at a time.
 
 ## Claim
 
-8. **The issue is labeled `amf:in-progress`,** and its other status labels
+8. **The issue is labeled `amf:in-progress`,** unless it already has an
+   open PR from `amf/issue-N` (then it is labeled `amf:pr-open` and
+   skipped) or an `amf/issue-N` branch on origin (skipped, unless it is
+   `amf:failed`); `--force` skips that check. Otherwise and its other status labels
    and `amf:ready` are removed.
 9. **A failure handler is set up.** From here until the PR exists, any error
-   makes amf label the issue `amf:failed` and comment the reason. This also
+   makes amf label the issue `amf:failed` (or `amf:pr-open` if the branch
+   still has an open PR) and comment the reason, each agent tried with its
+   exit code and duration, whether the fallback ran, and the redacted end of
+   the log. This also
    happens on Ctrl-C, with up to 30 seconds allowed for those two GitHub
    calls.
 10. **The author is checked (trust).** If `AMF_TRUSTED` is set and doesn't
@@ -136,7 +142,8 @@ each, one at a time.
 
 ## Finish
 
-22. **The issue is labeled `amf:done`, and amf comments "amf opened <PR URL>
+22. **The issue is labeled `amf:pr-open` (`amf:done` once `--merge` merged
+    the PR), and amf comments "amf opened <PR URL>
     for this issue."** For a retry the comment says "updated". The PR exists
     by now, so if either GitHub call fails, amf only logs a warning and the
     run still counts as a success.

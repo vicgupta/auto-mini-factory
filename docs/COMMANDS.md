@@ -1,8 +1,9 @@
 # amf command reference
 
 The details behind the [README](../README.md)'s overview: what each command
-does, its flags, logs and labels. `amf help <command>` (or `amf <command> -h`)
-prints the same in the terminal. Every setting is in
+does, its flags, logs and labels. `amf help <command>` (or `amf <command> --help`,
+`-h` for short) prints the same in the terminal; [Flag conventions](#flag-conventions)
+explains the long and short forms. Every setting is in
 [Configuration (.env)](../README.md#configuration-env) and `amf help env`.
 
 For complete command sequences, see the [examples cookbook](EXAMPLES.md).
@@ -18,6 +19,7 @@ For common failures and fixes, see the [troubleshooting guide](TROUBLESHOOTING.m
 | `amf run` | process one issue into a PR (alias of `issue run`) |
 | `amf watch` | process `amf:ready` issues as they arrive (alias of `issue watch`) |
 | `amf auto` | plan one sentence into up to 5 issues and merge their PRs, pausing after the first by default |
+| `amf memory` | the repo's memory of issues, PRs and runs: sync, similar, show |
 | `amf pipeline` | check the plan/code/eval pipeline in this checkout's `AGENTS.md` |
 | `amf doctor` | check the setup here, changing nothing |
 | `amf update` | replace this amf binary with the latest (or given) release |
@@ -28,16 +30,16 @@ For common failures and fixes, see the [troubleshooting guide](TROUBLESHOOTING.m
 
 | Command | What it does |
 |---|---|
-| `amf issue create "Title" [-b body \| -f file.md] [--label L] [--no-label]` | create an issue (body may also come from stdin) |
-| `amf issue list [--state open\|closed\|all] [--label L] [--search TEXT] [--limit N]` | list issues, newest first, with their amf labels (also takes --json) |
-| `amf issue run <N> [--agent A] [--agent-timeout 60m]` | process one issue into a PR (also takes --draft, --dry-run, --merge, --eval-rounds, --log-level, --log-file) |
-| `amf issue watch [--agent A] [--interval 60s] [--label amf:ready]` | process amf:ready issues as they arrive (also takes --exclude-label, --draft, --merge, --agent-timeout, --eval-rounds, --log-level, --log-file) |
+| `amf issue create "Title" [--body text \| --file path] [--label name] [--no-label]` | create an issue (the body may also come from stdin) |
+| `amf issue list [--state open\|closed\|all] [--label name] [--search text] [--limit n] [--json]` | list issues, newest first, with their amf labels |
+| `amf issue run <N> [flags]` | process one issue into a PR: see amf help run |
+| `amf issue watch [flags]` | process amf:ready issues as they arrive: see amf help watch |
 
 ## pr commands
 
 | Command | What it does |
 |---|---|
-| `amf pr list [--state open\|closed\|merged\|all] [--limit N] [--issue N] [--json]` | list pull requests, newest first |
+| `amf pr list [--state open\|closed\|merged\|all] [--limit n] [--issue n] [--json]` | list pull requests, newest first |
 | `amf pr merge <N> [--squash \| --rebase] [--delete-branch]` | merge a pull request |
 | `amf pr view <N> [--json]` | show a pull request |
 | `amf pr diff <N> [--name-only]` | show a pull request's diff, or one changed path per line |
@@ -48,8 +50,9 @@ For common failures and fixes, see the [troubleshooting guide](TROUBLESHOOTING.m
 
 ## Subcommand reference
 
-Use `amf help pr merge`, `amf help issue list`, or the corresponding
-group and subcommand to read these topics without loading configuration.
+`amf help pr merge`, `amf help issue list` and so on print the same help as
+`amf pr merge --help`: the summary below, then every flag (see
+[Flag reference](#flag-reference) and [Flag conventions](#flag-conventions)).
 PR numbers accept positive integers such as `42` or `"#42"`.
 The commands below read configuration from the environment and `.env`;
 they need GitHub access but no git checkout.
@@ -57,12 +60,12 @@ they need GitHub access but no git checkout.
 ### amf issue create
 
 ```text
-amf issue create "Title" [-b body | -f file.md | -f -] [--label L] [--no-label]
+amf issue create "Title" [--body text | --file file.md | --file -] [--label L] [--no-label]
 ```
 
 Creates an issue; amf issue "Title" is a shortcut.
--b selects the body, even when empty; -f reads a file, or stdin for -f -.
-Without either, piped stdin supplies the body. -b and nonempty -f conflict.
+--body selects the body, even when empty; --file reads a file, or stdin for --file -.
+Without either, piped stdin supplies the body. --body and a nonempty --file conflict.
 --label defaults to amf:ready; --no-label creates an unlabeled issue.
 An explicit --label conflicts with --no-label; a blank label is rejected.
 Title and label surrounding whitespace is trimmed. Prints #N <url>.
@@ -307,6 +310,234 @@ counts and log path depend on the run.
 `amf help issue help` and `amf help pr help` print their group's command
 list, just like `amf issue help` and `amf pr help`; they take no flags.
 
+## Flag conventions
+
+Every flag has a long form, `--full-word` in kebab-case, and that is what the
+examples in these docs use. Common flags also have a one-letter short form,
+shown first in each command's help (`-a, --agent <name>`). A letter keeps its
+meaning on every command that has the flag, and no command has two flags with
+the same letter. `amf help flags` prints this table; `amf <command> --help`
+(or `-h`, or `amf help <command>`) lists each command's flags in one column as
+`-x, --long <value>  description (default ...)`.
+
+| Short | Long | Commands |
+|---|---|---|
+| `-a` | `--agent` | run, watch, auto |
+| `-b` | `--body` | issue create |
+| `-c` | `--check` | update |
+| `-c` | `--comment` | pr close |
+| `-c` | `--continue` | auto |
+| `-d` | `--delete-branch` | pr merge, pr close |
+| `-e` | `--eval-rounds` | run, watch, auto |
+| `-f` | `--file` | issue create |
+| `-f` | `--force` | run |
+| `-h` | `--help` | every command |
+| `-i` | `--interval` | watch |
+| `-i` | `--issue` | pr list |
+| `-j` | `--json` | issue list, pr list, pr view, memory |
+| `-l` | `--label` | issue create, issue list, watch |
+| `-L` | `--limit` | issue list, pr list, memory |
+| `-m` | `--merge` | run, watch, auto |
+| `-n` | `--dry-run` | run, auto |
+| `-r` | `--rebase` | pr merge |
+| `-s` | `--squash` | pr merge |
+| `-s` | `--state` | issue list, pr list |
+| `-S` | `--search` | issue list |
+| `-t` | `--agent-timeout` | run, watch, auto |
+| `-w` | `--wait-for-checks` | auto |
+| `-x` | `--exclude-label` | watch |
+| `-y` | `--approve` | auto |
+
+How values are written:
+
+- A value follows the flag as the next word or after `=`: `--agent codex`,
+  `--agent=codex`, `-a codex` and `-a=codex` are the same.
+- A boolean flag takes no value (`--dry-run`, `-n`), or `=true` / `=false`.
+- `--merge` takes an optional method. `--merge` (or `-m`) alone is a merge
+  commit; `--merge=squash`, `--merge squash`, `-m squash` and `-m=squash` all
+  squash. Only the words `merge`, `squash` and `rebase` are taken as the
+  method, so `amf run -m 42` is a merge commit for issue 42.
+- Short forms can't be bundled: write `-n -f`, not `-nf`.
+
+Flags with no short form are the rarer ones, spelled out to stay clear:
+`--draft`, `--log-level`, `--log-file`, `--stale-timeout`, `--max-issues`,
+`--checkpoint-after`, `--no-checkpoint`, `--abort`, `--close-issues`,
+`--no-label`, `--name-only`, `--fetch`, `--full`, `--memory-backend`,
+`--memory-dir` and `amf update --version` (whose letter would read as
+`amf --version`).
+
+The global path flags `--dir <folder>`, `--env-file <file>` and
+`--clone-dir <folder>` work on any command, anywhere before `--`, and have no
+short form so they never collide with a command's letters (`-d` is
+`--delete-branch`, `-f` is `--file` or `--force`). Each command's help lists
+them under "Global flags".
+
+Older spellings keep working, though help shows only the forms above. Go's
+flag parser accepts one or two dashes for any flag, so `-agent` and `--a`
+work; `amf issue create`'s old `-b` and `-f` are now the short forms of
+`--body` and `--file`; and `--timeout` is a hidden, deprecated alias of
+`--agent-timeout`.
+
+## Flag reference
+
+Generated from each command's `--help`; `amf init`, `amf doctor`,
+`amf version`, `amf pr reopen`, `amf pr ready` and `amf pr draft` take only
+`-h, --help`.
+
+### amf issue create
+
+| Flag | What it does |
+|---|---|
+| `-b, --body <text>` | text of the issue body |
+| `-f, --file <path>` | read the issue body from the file at path (- for stdin) |
+| `-l, --label <name>` | label that marks the issue for amf (default amf:ready) |
+| `--no-label` | don't label the issue for amf |
+
+### amf issue list
+
+| Flag | What it does |
+|---|---|
+| `-j, --json` | print a JSON array of number, title, state, url and labels |
+| `-l, --label <name>` | only issues with this label, e.g. amf:ready |
+| `-L, --limit <n>` | print at most N issues, 0 means no limit |
+| `-S, --search <text>` | only issues whose title contains this text, ignoring case |
+| `-s, --state <state>` | open, closed or all (default open) |
+
+### amf run
+
+| Flag | What it does |
+|---|---|
+| `-a, --agent <name>` | agent for issues without a pipeline: claudecode, codex or opencode with no fallback (default: AMF_PRIMARY_AGENT, codex, then AMF_SECONDARY_AGENT, claudecode, if it fails) |
+| `-t, --agent-timeout <duration>` | maximum time each agent run may take (default 1h) |
+| `--draft` | open new pull requests as drafts (a retry leaves an open PR a draft or ready for review as it was) |
+| `-n, --dry-run` | make the change on the local branch only: no label, comment, push, PR or merge |
+| `-e, --eval-rounds <n>` | how many times a pipeline's eval stage may send the change back to code (default 2) |
+| `-f, --force` | run even if the issue already has an open PR or an amf/issue-N branch, updating that PR |
+| `--log-file <path>` | where the event log goes (default .amf/runs/<run_id>/events.jsonl; "off" for none) |
+| `--log-level <level>` | debug, info, warn or error, for the terminal and the event log (default info, and debug in the event log) |
+| `--memory-backend <backend>` | where amf keeps the repo's memory: sqlite, markdown or logfiles (default sqlite) |
+| `--memory-dir <dir>` | directory the amf-memory folder goes in (default: the current directory) |
+| `-m, --merge[=<method>]` | merge each PR amf opens or updates: --merge (or -m) alone for a merge commit, or a method after = or as the next word: --merge=squash, -m squash, -m rebase |
+
+### amf watch
+
+| Flag | What it does |
+|---|---|
+| `-a, --agent <name>` | agent for issues without a pipeline: claudecode, codex or opencode with no fallback (default: AMF_PRIMARY_AGENT, codex, then AMF_SECONDARY_AGENT, claudecode, if it fails) |
+| `-t, --agent-timeout <duration>` | maximum time each agent run may take (default 1h) |
+| `--draft` | open new pull requests as drafts (a retry leaves an open PR a draft or ready for review as it was) |
+| `-e, --eval-rounds <n>` | how many times a pipeline's eval stage may send the change back to code (default 2) |
+| `-x, --exclude-label <name>` | skip issues with this label, leaving them as they are (repeatable: any of them skips) |
+| `-i, --interval <duration>` | how often to poll GitHub (default 1m) |
+| `-l, --label <name>` | process open issues with this label (default amf:ready) |
+| `--log-file <path>` | where the event log goes (default .amf/runs/<run_id>/events.jsonl; "off" for none) |
+| `--log-level <level>` | debug, info, warn or error, for the terminal and the event log (default info, and debug in the event log) |
+| `--memory-backend <backend>` | where amf keeps the repo's memory: sqlite, markdown or logfiles (default sqlite) |
+| `--memory-dir <dir>` | directory the amf-memory folder goes in (default: the current directory) |
+| `-m, --merge[=<method>]` | merge each PR amf opens or updates: --merge (or -m) alone for a merge commit, or a method after = or as the next word: --merge=squash, -m squash, -m rebase |
+| `--stale-timeout <duration>` | put amf:in-progress issues no amf works on back to amf:ready after this long (default AMF_STALE_TIMEOUT, else max(2x agent timeout, 2h); off disables) |
+
+### amf auto
+
+| Flag | What it does |
+|---|---|
+| `--abort` | abandon the saved run by removing its state |
+| `-a, --agent <name>` | agent for issues without a pipeline: claudecode, codex or opencode with no fallback (default: AMF_PRIMARY_AGENT, codex, then AMF_SECONDARY_AGENT, claudecode, if it fails) |
+| `-t, --agent-timeout <duration>` | maximum time each agent run may take (default 1h) |
+| `-y, --approve` | approve the checkpoint without prompting |
+| `--checkpoint-after <n>` | checkpoint after this many merges (must be positive) (default 1) |
+| `--close-issues` | with --abort, close the created, unmerged issues first |
+| `-c, --continue` | approve the checkpoint and resume the saved amf auto run |
+| `-n, --dry-run` | plan only: print the issues amf would create, and create nothing |
+| `-e, --eval-rounds <n>` | how many times a pipeline's eval stage may send the change back to code (default 2) |
+| `--log-file <path>` | where the event log goes (default .amf/runs/<run_id>/events.jsonl; "off" for none) |
+| `--log-level <level>` | debug, info, warn or error, for the terminal and the event log (default info, and debug in the event log) |
+| `--max-issues <n>` | plan at most this many issues (1 to 10) (default 5) |
+| `--memory-backend <backend>` | where amf keeps the repo's memory: sqlite, markdown or logfiles (default sqlite) |
+| `--memory-dir <dir>` | directory the amf-memory folder goes in (default: the current directory) |
+| `-m, --merge[=<method>]` | how to merge each PR: a merge commit, or a method after = or as the next word: --merge=squash, -m squash, -m rebase (default merge) |
+| `--no-checkpoint` | merge all issues without a checkpoint or approval |
+| `-w, --wait-for-checks` | wait up to 5 minutes for completed checks before the checkpoint |
+
+### amf memory sync
+
+| Flag | What it does |
+|---|---|
+| `--full` | with sync, reread every issue and PR instead of only what changed |
+| `-j, --json` | print JSON |
+| `-L, --limit <n>` | how many results similar prints (default 5) |
+| `--memory-backend <backend>` | where amf keeps the repo's memory: sqlite, markdown or logfiles (default sqlite) |
+| `--memory-dir <dir>` | directory the amf-memory folder goes in (default: the current directory) |
+
+### amf memory similar
+
+| Flag | What it does |
+|---|---|
+| `--full` | with sync, reread every issue and PR instead of only what changed |
+| `-j, --json` | print JSON |
+| `-L, --limit <n>` | how many results similar prints (default 5) |
+| `--memory-backend <backend>` | where amf keeps the repo's memory: sqlite, markdown or logfiles (default sqlite) |
+| `--memory-dir <dir>` | directory the amf-memory folder goes in (default: the current directory) |
+
+### amf memory show
+
+| Flag | What it does |
+|---|---|
+| `--full` | with sync, reread every issue and PR instead of only what changed |
+| `-j, --json` | print JSON |
+| `-L, --limit <n>` | how many results similar prints (default 5) |
+| `--memory-backend <backend>` | where amf keeps the repo's memory: sqlite, markdown or logfiles (default sqlite) |
+| `--memory-dir <dir>` | directory the amf-memory folder goes in (default: the current directory) |
+
+### amf pr list
+
+| Flag | What it does |
+|---|---|
+| `-i, --issue <n>` | only pull requests opened for issue N, 0 means no filter |
+| `-j, --json` | print a JSON array of number, title, state, draft, url, head, base and issue |
+| `-L, --limit <n>` | print at most N pull requests, 0 means no limit |
+| `-s, --state <state>` | open, closed, merged or all (default open) |
+
+### amf pr merge
+
+| Flag | What it does |
+|---|---|
+| `-d, --delete-branch` | delete the head branch after merging, if it is in this repository |
+| `-r, --rebase` | rebase and merge |
+| `-s, --squash` | squash and merge |
+
+### amf pr view
+
+| Flag | What it does |
+|---|---|
+| `-j, --json` | print one JSON object |
+
+### amf pr diff
+
+| Flag | What it does |
+|---|---|
+| `--name-only` | print one changed path per line instead of the diff |
+
+### amf pr close
+
+| Flag | What it does |
+|---|---|
+| `-c, --comment <text>` | post a comment on the issue before closing |
+| `-d, --delete-branch` | delete the head branch after closing, if it is in this repository |
+
+### amf pipeline
+
+| Flag | What it does |
+|---|---|
+| `--fetch` | also download and check each stage's skill |
+
+### amf update
+
+| Flag | What it does |
+|---|---|
+| `-c, --check` | only report whether an update is available |
+| `--version <tag>` | release to install, e.g. v0.0.7 (default: latest) |
+
 ## Run and watch
 
 Run `run` and `watch` inside a clone of `GITHUB_REPO`, or from any folder that
@@ -314,9 +545,29 @@ holds your `.env`. There, amf clones the repo into `./<name>` the first time
 (using your git credentials) and reuses that clone afterwards. amf checks
 `GITHUB_REPO` against GitHub first, so a typo fails with a clear message.
 
+### Paths default to the current directory
+
+Every file or folder amf reads or writes defaults to the directory you run it
+in (`os.Getwd`, never `$HOME` or `/tmp`), unless a command-line flag says
+otherwise. Every command accepts these path flags, before or after the
+command name (`amf --dir ~/work run 42` or `amf run 42 --dir ~/work`):
+
+| Flag | Default | What it sets |
+|---|---|---|
+| `--dir <folder>` | the current directory | where amf works, as if started there: the checkout, `./.env`, `./<name>` and `.amf/` all follow it |
+| `--env-file <file>` | `./.env`, then `.env` at the top of the enclosing checkout | the only `.env` amf reads, and the one `amf init` writes |
+| `--clone-dir <folder>` | the enclosing checkout, else `./<name>` | the checkout run, watch and auto use (cloning `GITHUB_REPO` there if it is missing); it wins over the enclosing checkout |
+| `--log-file <path>` (run, watch, auto) | `<checkout>/.amf/runs/<run_id>/events.jsonl` | the event log; `off` for none |
+
+Relative flag values resolve against the directory amf was started in, before
+`--dir` changes into its folder. amf's own state stays under `<checkout>/.amf/`
+(worktrees, `logs/`, `runs/`, `auto/state.json`, `watch.lock`); `--memory-dir` (default: the current directory) holds `amf-memory/`, also excluded from git, which amf adds to
+`.git/info/exclude`, so it is never committed. `amf update` still replaces the
+running binary where it is, and its temporary download sits next to it.
+
 ```sh
-amf issue "Add dark mode" -b "Use CSS variables for the palette"
-amf issue "Fix login bug" -f bug.md
+amf issue "Add dark mode" --body "Use CSS variables for the palette"
+amf issue "Fix login bug" --file bug.md
 echo "details" | amf issue "Title"     # body from stdin
 amf issue "Just a note" --no-label     # won't be picked up by watch
 
@@ -328,7 +579,7 @@ amf issue list --json --label amf:failed | jq -r '.[].url'  # as JSON: number, t
 
 amf run 42                  # process one issue now
 amf watch --interval 60s    # process issues labeled `amf:ready`, one at a time
-amf watch --agent codex     # ...with Codex only, no fallback
+amf watch --agent codex     # without a pipeline, use Codex only, no fallback
 amf watch --exclude-label blocked --exclude-label needs-human  # ...leaving issues with either label alone until it's removed
 amf run 42 --draft          # open the PR as a draft
 amf watch --draft           # ...opening each new PR as a draft
@@ -459,7 +710,11 @@ subscribed to Go. A repo with a pipeline ignores
 
 Without a pipeline (see below), amf runs one agent once. With Claude Code:
 
-1. Labels the issue `amf:in-progress` and removes `amf:ready`.
+1. Checks the issue isn't already turned into a PR: with an open PR from
+   `amf/issue-N` it labels the issue `amf:pr-open` and stops; with an
+   `amf/issue-N` branch on origin and no open PR it stops too (unless the
+   issue is `amf:failed`, which is a retry). `--force` skips this check.
+   Then labels the issue `amf:in-progress` and removes `amf:ready`.
 2. Fetches the default branch and creates a worktree at
    `.amf/worktrees/issue-N` on branch `amf/issue-N` from `origin/<default>`.
 3. Runs `claude -p --dangerously-skip-permissions --output-format stream-json --verbose` in the
@@ -478,10 +733,10 @@ Without a pipeline (see below), amf runs one agent once. With Claude Code:
    Actions secrets before anyone reviews it.
 5. Opens a PR with the agent's final message as the body plus `Closes #N`, as
    a draft with `--draft` (default off; `amf run` and `amf watch` take it). On
-   a retry whose PR is still open, it updates that PR's title and body
+   a `--force` retry whose PR is still open, it updates that PR's title and body
    instead, and leaves it a draft or ready for review as it was.
-6. Comments the PR link on the issue, labels it `amf:done` (a draft PR
-   counts), removes the worktree.
+6. Comments the PR link on the issue, labels it `amf:pr-open` (a draft PR
+   counts; `amf:done` once `--merge` merged it), removes the worktree.
 
 With [`--merge`](#merge-methods), amf also merges the PR before commenting,
 with a merge commit (or `--merge=squash`, `--merge=rebase`), pinned to the
@@ -499,8 +754,13 @@ Nothing is labeled, commented, pushed, opened or merged. See the change with
 `git diff origin/main amf/issue-N`. The agent still runs with every
 permission, so the trust rules below still apply.
 
-On any failure the issue gets `amf:failed` plus a comment with the reason,
-and the worktree is kept for inspection. A run that hit the agent timeout
+On any failure the issue gets `amf:failed` plus a comment with the reason:
+each agent amf tried, in order, with its exit code and duration, whether
+the fallback agent ran and if not why, and the last 40 lines of the agent's
+log, redacted, with the log's path. An issue that already had an open PR
+keeps `amf:pr-open` instead (and a merged one `amf:done`): a failed retry
+never marks it `amf:failed`.
+The worktree is kept for inspection. A run that hit the agent timeout
 loses only the worktree: amf comments with how to retry with more time and
 keeps the logs and partial output. Re-running `amf run N` starts again from a
 fresh worktree.
@@ -511,7 +771,8 @@ fresh worktree.
 `amf auto "sentence" --merge=METHOD` select the same three methods.
 Bare `--merge` means `--merge=merge`. `run` and `watch` leave PRs open by
 default; `auto` always merges, using a merge commit unless you select another
-method. Use `=` for the method, for example `--merge=squash`.
+method. Give the method after `=` or as the next word: `--merge=squash`,
+`--merge squash` and `-m squash` are the same.
 
 These diagrams start from the same history: `main` is the default branch,
 and `C` and `D` are the PR's commits, branched from `A`:
@@ -615,10 +876,61 @@ SELECT logged_at, message FROM amf_log WHERE issue = 12 ORDER BY id;
 ```
 
 Logging never holds up an issue. If the server is down, amf warns, keeps
-the lines in memory and retries. amf has no dependencies, so it speaks the
+the lines in memory and retries. amf has no PostgreSQL driver, so it speaks the
 PostgreSQL protocol itself: TLS (`sslmode`), and password, MD5 or
 SCRAM-SHA-256 logins. `amf doctor` checks the connection. Agents' output can
 include your code, so restrict who can read `amflogs`.
+
+## Repo memory
+
+amf keeps a memory of each repo's issues, pull requests and runs, so a new
+issue can be pointed at similar past work.
+
+```sh
+amf memory sync                  # backfill from GitHub; later syncs fetch only what changed (--full rereads all)
+amf memory similar 42            # past work like issue 42, best first
+amf memory similar "text" --json # ...or like any text, as JSON
+amf memory show 42 --json        # issue 42, its PRs and every run
+```
+
+`amf run`, `watch` and `auto` record every attempt (command, start and
+finish, outcome, agent, exit code, PR, error and a redacted log tail), on a
+best-effort basis: a memory failure is a warning and never fails a run.
+`--dry-run` records nothing. When `run` or `watch` picks up an issue, and
+when `auto` plans one, amf logs similar past work (event `memory.similar`)
+and adds a short "Similar past work" note to the agent's prompt. A close
+match to merged work also logs `memory.duplicate`, a warning only: amf never
+closes an issue as a duplicate.
+
+PRs are linked to their issue by an `amf/issue-N` branch or a
+`Closes/Fixes/Resolves #N` line in the body.
+
+### Backends
+
+`--memory-backend` on `run`, `watch`, `auto` and `amf memory` picks the store;
+there is no environment variable. With no flag amf uses SQLite.
+
+| Backend | Files in the repo's folder |
+|---|---|
+| `sqlite` (default) | `memory.db`: versioned schema, FTS5 search |
+| `markdown` | `issues/N.md`, `prs/N.md`, `runs/<id>.md` with front matter, plus `index.md` and `index.json` |
+| `logfiles` | append-only `issues.jsonl`, `prs.jsonl`, `runs.jsonl`, `sync.jsonl`; the latest line per record wins |
+
+All three keep the same records and links. Markdown and log files are only
+ever written when that backend is chosen on the command line. Each backend
+is a separate store: memory synced into one isn't seen by another.
+
+### Where memory lives
+
+`--memory-dir <dir>` (default: the current directory; a relative path is taken
+from it, and a missing one is created) holds
+`D/amf-memory/<host>/<owner>/<repo>/`. The repo key is the lowercased
+host/owner/name from `GITHUB_REPO` (for example
+`github.com/vicgupta/auto-mini-factory`). Every store records its key and
+refuses to open for another repo, and every query is filtered by it, so
+repos sharing a memory dir never see each other's work. amf adds the
+`amf-memory` folder to `.git/info/exclude` when it lies inside the checkout,
+and leaves it out of its own commits.
 
 ## Pipelines: plan → code → eval
 
@@ -660,18 +972,34 @@ branch, so a change takes effect once merged. To check a change before
 merging, run `amf pipeline --fetch` in your checkout: it shows the stages,
 checks the agents are installed, and downloads each skill.
 
-Starter skills are in [`skills/`](skills): [plan](skills/plan/SKILL.md),
-[code](skills/code/SKILL.md) and [eval](skills/eval/SKILL.md). Write your own
+Starter skills are in [`skills/`](../skills): [plan](../skills/plan/SKILL.md),
+[code](../skills/code/SKILL.md) and [eval](../skills/eval/SKILL.md). Write your own
 by copying one; amf's prompt already fixes each stage's inputs and output
 format, so a skill only needs to say how to do the work.
 
 ## Labels
 
-An issue moves `amf:ready` → `amf:in-progress` → `amf:done` or `amf:failed`.
+An issue moves `amf:ready` → `amf:in-progress` → `amf:pr-open` (PR open,
+not merged), `amf:done` (PR merged by `--merge`) or `amf:failed`. `amf watch`
+creates `amf:pr-open` if the repo lacks it; `amf init` creates all five.
 `amf issue` adds `amf:ready`, and `amf watch` picks up open `amf:ready` issues
 oldest first. To retry an issue, add `amf:ready` again or run `amf run N`.
 If amf is killed mid-run and an issue is stuck on `amf:in-progress`, run
-`amf run N`.
+`amf run N`, or let `amf watch` recover it: each poll it puts
+`amf:in-progress` issues no amf is working on back to `amf:ready` once the
+label is older than `--stale-timeout` (`AMF_STALE_TIMEOUT`; default twice
+the agent timeout and at least 2h; `off` disables it), using the time the
+label was added from the issue's events, else the issue's `updated_at`. An
+issue whose PR is open becomes `amf:pr-open` instead.
+
+## The repo lock
+
+`amf run`, `amf watch` and `amf auto` take `.amf/watch.lock` in the checkout
+before they work, written atomically with the PID, host, command and start
+time, and refreshed every minute. If another live amf holds it, the command
+exits with an error naming it. A lock is stale, and taken over, when its PID
+is dead on the same host or it hasn't been refreshed for 10 minutes. It is
+removed on exit, including Ctrl-C and SIGTERM.
 
 Issues labeled `amf` by amf v0.0.4 and earlier aren't picked up any more.
 Relabel them `amf:ready`, or run `amf watch --label amf`.
