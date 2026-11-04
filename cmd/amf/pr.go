@@ -17,6 +17,7 @@ const prUsage = `usage: amf pr <command>
 Commands:
   list [--state open|closed|merged|all] [--limit n] [--issue n] [--json]  list pull requests, newest first
   merge <N> [--squash | --rebase] [--delete-branch] [--update-branch] [--wait-for-checks]  merge a pull request
+  sweep [--merge[=method]] [--wait-for-checks] [--dry-run] [--json]  update, merge and label the open amf pull requests
   view <N> [--json]  show a pull request
   diff <N> [--name-only]  show a pull request's diff, or one changed path per line
   close <N> [--comment text] [--delete-branch]  close a pull request
@@ -40,6 +41,8 @@ func cmdPR(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return cmdPRList(ctx, args[1:], stdout, stderr)
 	case "merge":
 		return cmdPRMerge(ctx, args[1:], stdout, stderr)
+	case "sweep":
+		return cmdPRSweep(ctx, args[1:], stdout, stderr)
 	case "view":
 		return cmdPRView(ctx, args[1:], stdout, stderr)
 	case "diff":
@@ -63,7 +66,7 @@ func cmdPR(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 }
 
-var prSubcommands = []string{"list", "merge", "view", "diff", "close", "reopen", "ready", "draft", "help"}
+var prSubcommands = []string{"list", "merge", "sweep", "view", "diff", "close", "reopen", "ready", "draft", "help"}
 
 // parsePRNumber accepts a pull request number as "42" or "#42", trimming
 // surrounding whitespace.

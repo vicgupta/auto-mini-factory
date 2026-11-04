@@ -15,7 +15,7 @@ For common failures and fixes, see the [troubleshooting guide](TROUBLESHOOTING.m
 |---|---|
 | `amf init` | write `.env` and create amf's labels |
 | `amf issue` | manage issues: `create`, `list`, `label`, `run`, `watch` |
-| `amf pr` | manage pull requests: `list`, `merge`, `view`, `diff`, `close`, `reopen`, `ready`, `draft` |
+| `amf pr` | manage pull requests: `list`, `merge`, `sweep`, `view`, `diff`, `close`, `reopen`, `ready`, `draft` |
 | `amf run` | process one issue into a PR (alias of `issue run`) |
 | `amf watch` | process `amf:ready` issues as they arrive (alias of `issue watch`) |
 | `amf auto` | plan one sentence into up to 5 issues and merge their PRs, pausing after the first by default |
@@ -42,6 +42,7 @@ For common failures and fixes, see the [troubleshooting guide](TROUBLESHOOTING.m
 |---|---|
 | `amf pr list [--state open\|closed\|merged\|all] [--limit n] [--issue n] [--json]` | list pull requests, newest first |
 | `amf pr merge <N> [--squash \| --rebase] [--delete-branch] [--update-branch] [--wait-for-checks]` | merge a pull request |
+| `amf pr sweep [--merge[=method]] [--wait-for-checks] [--dry-run] [--json]` | update, merge and label the open amf pull requests |
 | `amf pr view <N> [--json]` | show a pull request |
 | `amf pr diff <N> [--name-only]` | show a pull request's diff, or one changed path per line |
 | `amf pr close <N> [--comment text] [--delete-branch]` | close a pull request |
@@ -194,6 +195,62 @@ Example output:
 ```text
 Merged #57 https://github.com/owner/repo/pull/57
 ```
+
+### amf pr sweep
+
+```text
+amf pr sweep [--merge[=method]] [--wait-for-checks] [--dry-run] [--json]
+```
+
+Sweeps the open pull requests amf opened: an `amf/issue-N` head in this
+repository whose issue is labeled `amf:pr-open`. Drafts are skipped. For
+each, oldest first:
+
+1. A branch behind its base is updated with GitHub's Update branch (as
+   `amf pr merge --update-branch` does). Its checks then run on the new
+   head, so the PR is reported `updated` and merged by the next sweep;
+   `--wait-for-checks` waits for them (up to 30 minutes) instead.
+2. Pending checks leave the PR `waiting` for the next sweep; failed checks
+   block it.
+3. With `--merge` (`-m` alone for a merge commit, `--merge=squash`,
+   `-m rebase`), a PR whose checks passed, or that has none, is merged
+   pinned to its head, and its issue is labeled `amf:done`, losing
+   `amf:failed`, `amf:pr-open` and `amf:in-progress`. A change to
+   `AGENTS.md` is never merged. Without `--merge` the PR is reported
+   `ready` and left open.
+
+A PR that can't merge (an update that conflicts, failed checks, `AGENTS.md`,
+or GitHub refusing the merge) is reported `blocked` and gets a status
+comment, once per head commit and reason. For a conflict, the comment
+suggests `amf run N --force`, which has an agent resolve it.
+
+In a git checkout the sweep holds the [repo lock](#the-repo-lock), so it
+fails while `amf watch`, `amf run` or `amf auto` works there. `--dry-run`
+only reads from GitHub and reports `would-update` or `would-merge`. It costs
+two list calls, then a few reads per PR; writes only when there is something
+to do. `amf watch --merge` runs the same sweep each poll, without waiting
+for checks.
+
+Prints one line per PR, `#N (issue #M) <action>[: reason] <url>`, or
+`No open amf pull requests to sweep.` `--json` prints an array of `number`,
+`issue`, `url`, `action`, `reason` (may be empty) and `commit` (set once
+merged).
+
+Example output:
+
+```text
+#57 (issue #42) merged 1a2b3c4 https://github.com/owner/repo/pull/57
+#58 (issue #43) waiting: checks pending (5 checks: 3 success, 2 in_progress) https://github.com/owner/repo/pull/58
+```
+
+### amf pr sweep
+
+| Flag | What it does |
+|---|---|
+| `-n, --dry-run` | only read from GitHub and print what the sweep would do |
+| `-j, --json` | print a JSON array of number, issue, url, action, reason and commit |
+| `-m, --merge[=<method>]` | merge each ready PR: --merge (or -m) alone for a merge commit, or --merge=squash, -m squash, -m rebase (default: don't merge) |
+| `-w, --wait-for-checks` | wait for pending checks on each PR (up to 30 minutes) instead of leaving it for the next sweep |
 
 ### amf pr view
 
@@ -374,18 +431,18 @@ the same letter. `amf help flags` prints this table; `amf <command> --help`
 | `-h` | `--help` | every command |
 | `-i` | `--interval` | watch |
 | `-i` | `--issue` | pr list |
-| `-j` | `--json` | issue list, pr list, pr view, memory |
+| `-j` | `--json` | issue list, pr list, pr sweep, pr view, memory |
 | `-l` | `--label` | issue create, issue list, watch |
 | `-L` | `--limit` | issue list, pr list, memory |
-| `-m` | `--merge` | run, watch, auto |
-| `-n` | `--dry-run` | run, auto |
+| `-m` | `--merge` | run, watch, auto, pr sweep |
+| `-n` | `--dry-run` | run, auto, pr sweep |
 | `-r` | `--rebase` | pr merge |
 | `-s` | `--squash` | pr merge |
 | `-s` | `--state` | issue list, pr list |
 | `-S` | `--search` | issue list |
 | `-t` | `--agent-timeout` | run, watch, auto |
 | `-u` | `--update-branch` | pr merge |
-| `-w` | `--wait-for-checks` | auto, pr merge |
+| `-w` | `--wait-for-checks` | auto, pr merge, pr sweep |
 | `-x` | `--exclude-label` | watch |
 | `-y` | `--approve` | auto |
 
