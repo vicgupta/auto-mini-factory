@@ -84,7 +84,12 @@ amf:ready ──▶ amf:in-progress ──▶ amf:pr-open (PR opened, not merged
   `amf help <command>`, which prints the same text to stdout) shows a usage
   line, a description, every visible flag in one aligned column as
   `-x, --long <value>  description (default ...)`, with `-h, --help` last,
-  and examples. `amf help flags` lists the shared letters.
+  and examples. Command, group and topic help end with a blank line and a
+  single `See also: amf help <topic>, amf help <topic>` line linking related
+  topics, after any flags and examples. Aliases show the same footer as
+  their canonical command; `run` links to `agents`, `env` and `memory`.
+  The overview also ends with a See also line.
+  `amf help flags` lists the shared letters.
 - `--agent-timeout` limits each agent run, not the whole issue; the old
   `--timeout` is accepted as a deprecated alias of it, hidden from help. Both must be at least
   1m and at most 24h, and 0 and negatives are errors; every out-of-range or

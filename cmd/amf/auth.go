@@ -447,6 +447,8 @@ client ID with --client-id or AMF_GITHUB_CLIENT_ID. To register one: GitHub
 Settings > Developer settings > OAuth Apps > New OAuth App, any homepage
 and callback URL, check Enable Device Flow, then copy the Client ID (no
 client secret is needed).
+
+See also: amf help env, amf help init, amf help doctor
 `
 
 const authLoginHelp = `Usage:

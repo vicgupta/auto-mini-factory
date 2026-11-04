@@ -8,19 +8,16 @@ var subHelp = map[string]string{
 
 Backfills or refreshes the repo's memory from GitHub's issues and pull
 requests: only what changed since the last sync, or everything with --full.
-amf help memory describes the backends.
 `,
 	"memory similar": `Usage:
   amf memory similar <issue-number | "text"> [flags]
 
 Ranks past issues, pull requests and runs like an issue or a piece of text.
-amf help memory describes the backends.
 `,
 	"memory show": `Usage:
   amf memory show <issue-number> [flags]
 
 Shows an issue's full history from memory: its pull requests and every run.
-amf help memory describes the backends.
 `,
 	"issue create": `Usage:
   amf issue create "Title" [flags]
@@ -160,7 +157,40 @@ Closed or merged PRs fail. Issue labels are left as they are. Prints
 `,
 }
 
-// helpExamples are the short examples at the end of a command's help.
+// helpSeeAlso lists related topics for commands with flags. Group and topic
+// help include their footers directly, since they don't use commandHelp.
+var helpSeeAlso = map[string][]string{
+	"init":           {"env", "auth", "doctor"},
+	"run":            {"agents", "env", "memory"},
+	"watch":          {"run", "agents", "env", "memory"},
+	"auto":           {"run", "agents", "pipeline", "memory"},
+	"list":           {"issue", "issue label", "run"},
+	"pipeline":       {"agents", "run", "env"},
+	"doctor":         {"init", "env", "auth"},
+	"update":         {"version"},
+	"version":        {"update"},
+	"man":            {"help", "flags"},
+	"issue create":   {"issue label", "issue list", "run"},
+	"issue label":    {"issue list", "run", "watch"},
+	"pr list":        {"pr view", "pr diff", "pr merge"},
+	"pr merge":       {"pr view", "pr sweep", "run"},
+	"pr sweep":       {"pr merge", "watch"},
+	"pr view":        {"pr diff", "pr merge"},
+	"pr diff":        {"pr view"},
+	"pr close":       {"pr reopen", "issue label"},
+	"pr reopen":      {"pr close", "pr view"},
+	"pr ready":       {"pr draft", "pr merge"},
+	"pr draft":       {"pr ready", "pr view"},
+	"auth login":     {"auth", "auth status", "env"},
+	"auth status":    {"auth", "auth login", "doctor"},
+	"auth logout":    {"auth", "auth login"},
+	"auth token":     {"auth", "auth login", "env"},
+	"memory sync":    {"memory", "memory similar", "memory show"},
+	"memory similar": {"memory", "memory sync", "memory show"},
+	"memory show":    {"memory", "memory sync", "memory similar"},
+}
+
+// helpExamples are the short examples before a command's See also footer.
 var helpExamples = map[string]string{
 	"memory sync":    "  amf memory sync\n  amf memory sync --full --memory-backend markdown\n",
 	"memory similar": "  amf memory similar 42\n  amf memory similar \"login redirect loops\" --limit 10 --json\n",
@@ -261,4 +291,6 @@ keep working; --timeout is a hidden, deprecated alias of --agent-timeout.
 Flags without a short form are rarer ones, spelled out to stay clear.
 The global path flags --dir, --env-file and --clone-dir work on any command,
 before --, and have no short form.
+
+See also: amf help run, amf help env
 `
