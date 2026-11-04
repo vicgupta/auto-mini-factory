@@ -881,6 +881,7 @@ func (r *Runner) Watch(ctx context.Context, label string, interval time.Duration
 	for cycle := 1; ; cycle++ {
 		r.sweepStale(ctx)
 		r.sweepFailed(ctx)
+		r.sweepPRs(ctx)
 		issues, err := r.GH.ListIssues(ctx, "open", label, true)
 		switch {
 		case err != nil && ctx.Err() == nil:

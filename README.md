@@ -25,7 +25,7 @@ running a platform.
 |---|---|
 | `amf init` | write `.env` and create amf's labels |
 | `amf issue` | manage issues: `create`, `list`, `label`, `run`, `watch` |
-| `amf pr` | manage pull requests: `list`, `merge`, `view`, `diff`, `close`, `reopen`, `ready`, `draft` |
+| `amf pr` | manage pull requests: `list`, `merge`, `sweep`, `view`, `diff`, `close`, `reopen`, `ready`, `draft` |
 | `amf run` | process one issue into a PR (alias of `issue run`) |
 | `amf watch` | process `amf:ready` issues as they arrive (alias of `issue watch`) |
 | `amf auto` | plan one sentence into up to 5 issues and merge their PRs, pausing after the first by default |

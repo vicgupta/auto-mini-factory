@@ -18,7 +18,7 @@ Usage:
 Commands:
   init       write .env and create amf's labels
   issue      manage issues: create, list, label, run, watch
-  pr         manage pull requests: list, merge, view, diff, close, reopen, ready, draft
+  pr         manage pull requests: list, merge, sweep, view, diff, close, reopen, ready, draft
   run        process one issue into a PR (alias of issue run)
   watch      process amf:ready issues as they arrive (alias of issue watch)
   auto       plan one sentence into up to 5 issues and merge their PRs, pausing after the first by default
@@ -97,6 +97,10 @@ Each poll, watch also puts amf:in-progress issues that no amf is working on
 back to amf:ready once they have been in progress longer than
 --stale-timeout (AMF_STALE_TIMEOUT; default twice the agent timeout, at
 least 2h; off disables it), or labels them amf:pr-open if their PR is open.
+With --merge, each poll also sweeps the open amf pull requests as amf pr
+sweep --merge does: it updates a branch that is behind, merges a PR whose
+checks passed and labels its issue amf:done, and comments once on a PR
+that can't merge. It doesn't wait for pending checks.
 See merge methods at:
 https://github.com/vicgupta/auto-mini-factory/blob/main/docs/COMMANDS.md#merge-methods
 
@@ -313,7 +317,7 @@ var helpArgs = map[string][]string{
 	"init": {"init"}, "run": {"run"}, "watch": {"watch"}, "auto": {"auto"}, "list": {"issue", "list"},
 	"pipeline": {"pipeline"}, "doctor": {"doctor"}, "update": {"update"}, "version": {"version"},
 	"issue create": {"issue", "create"}, "issue list": {"issue", "list"}, "issue label": {"issue", "label"}, "issue run": {"run"}, "issue watch": {"watch"},
-	"pr list": {"pr", "list"}, "pr merge": {"pr", "merge"}, "pr view": {"pr", "view"}, "pr diff": {"pr", "diff"},
+	"pr list": {"pr", "list"}, "pr merge": {"pr", "merge"}, "pr sweep": {"pr", "sweep"}, "pr view": {"pr", "view"}, "pr diff": {"pr", "diff"},
 	"memory sync": {"memory", "sync"}, "memory similar": {"memory", "similar"}, "memory show": {"memory", "show"},
 	"pr close": {"pr", "close"}, "pr reopen": {"pr", "reopen"}, "pr ready": {"pr", "ready"}, "pr draft": {"pr", "draft"},
 }

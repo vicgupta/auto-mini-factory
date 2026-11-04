@@ -76,6 +76,29 @@ no checks after 2 minutes is merged).
 When the head is amf/issue-N in this repository, issue N is labeled
 amf:done and loses amf:failed, amf:pr-open and amf:in-progress.
 `,
+	"pr sweep": `Usage:
+  amf pr sweep [flags]
+
+Sweeps the open pull requests amf opened: those with an amf/issue-N head in
+this repository whose issue is labeled amf:pr-open. Drafts are skipped.
+
+For each, oldest first: a branch behind its base is updated (GitHub's Update
+branch, as amf pr merge --update-branch does), and its checks then run on
+the new head, so the next sweep merges it (--wait-for-checks waits instead).
+With --merge, a PR whose checks passed (or that has none) is merged with
+that method, pinned to its head, and its issue labeled amf:done; without
+--merge nothing is merged. A PR that can't merge (a conflict, failed checks,
+a change to AGENTS.md, or GitHub refusing) gets a status comment, once per
+head and reason. Pending checks are left for the next sweep.
+
+In a checkout, the sweep holds the repo lock (.amf/watch.lock), so it
+fails while watch, run or auto works there. --dry-run only reads from
+GitHub. amf watch --merge runs the same sweep each poll.
+Prints one line per PR: #N (issue #M) <action>[: reason] <url>, where the
+action is merged, updated, waiting, ready, blocked, or would-update or
+would-merge with --dry-run. --json prints an array of {number, issue, url,
+action, reason, commit}.
+`,
 	"pr view": `Usage:
   amf pr view <number> [flags]
 
@@ -170,6 +193,7 @@ var helpExamples = map[string]string{
 	"update":    "  amf update --check\n  amf update --version v0.0.7\n",
 	"pr list":   "  amf pr list --state merged --limit 5\n  amf pr list --issue 42 --json\n",
 	"pr merge":  "  amf pr merge 57 --squash --delete-branch\n  amf pr merge 57 -u -w --squash\n",
+	"pr sweep":  "  amf pr sweep --dry-run\n  amf pr sweep --merge=squash --wait-for-checks\n",
 	"pr view":   "  amf pr view 57 --json\n",
 	"pr diff":   "  amf pr diff 57 --name-only\n",
 	"pr close":  "  amf pr close 57 --comment \"Superseded by #58\" --delete-branch\n",
@@ -204,17 +228,18 @@ A letter keeps its meaning on every command that has the flag.
   -h  --help             every command
   -i  --interval         watch
   -i  --issue            pr list
-  -j  --json             issue list, pr list, pr view, memory
+  -j  --json             issue list, pr list, pr sweep, pr view, memory
   -l  --label            issue create, issue list, watch
   -L  --limit            issue list, pr list, memory
-  -m  --merge            run, watch, auto
-  -n  --dry-run          run, auto
+  -m  --merge            run, watch, auto, pr sweep
+  -n  --dry-run          run, auto, pr sweep
   -r  --rebase           pr merge
   -s  --state            issue list, pr list
   -s  --squash           pr merge
   -S  --search           issue list
   -t  --agent-timeout    run, watch, auto
-  -w  --wait-for-checks  auto
+  -u  --update-branch    pr merge
+  -w  --wait-for-checks  auto, pr merge, pr sweep
   -x  --exclude-label    watch
   -y  --approve          auto
 
