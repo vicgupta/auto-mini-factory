@@ -34,12 +34,24 @@ Topics:
   agents     which coding agent amf runs, and when it falls back to another
   env        configuration: every .env setting, with its default
   flags      flag conventions: long and short forms, shared letters
+  output     stdout data, stderr diagnostics and workflow status messages
 
 Paths default to the current directory; amf help run lists the path flags
 every command takes.
 
 Run amf help <command> or amf <command> -h for details.
 Every flag has a long form and common ones a short one: see amf help flags.
+`
+
+const outputHelp = `Output
+
+Command data (issue/PR numbers and URLs, tables, JSON and diffs) goes to
+stdout; progress logs, warnings and errors go to stderr. Redirect or pipe
+stdout to capture results while keeping diagnostics visible. Use --json
+where available for machine-readable results. Workflow commands such as
+init, auto, pr merge, pr sweep --wait-for-checks and update also
+print status messages or prompts to stdout, so their output is not always
+a data-only stream.
 `
 
 const runHelp = `Usage:
@@ -251,11 +263,12 @@ amf doctor checks the configuration.
 `
 
 // helpTopics maps each amf help <topic> to its text: every command, plus
-// the agents and env topics.
+// the agents, env, flags and output topics.
 var helpTopics = map[string]string{
 	"issue": issueUsage, "auth": authUsage, "pr": prUsage, "list": listHelp, "run": runHelp, "watch": watchHelp, "auto": autoHelp, "memory": memoryUsage,
 	"init": initHelp, "pipeline": pipelineHelp, "doctor": doctorHelp, "update": updateHelp,
 	"version": versionHelp, "help": helpHelp, "agents": agentsHelp, "env": envHelp, "flags": flagsHelp,
+	"output": outputHelp,
 }
 
 // topicNames is every help topic, for typo suggestions.

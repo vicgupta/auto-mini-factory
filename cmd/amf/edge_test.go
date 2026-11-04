@@ -3518,6 +3518,7 @@ func TestHelpTopicPrintsGroupUsage(t *testing.T) {
 		{[]string{"help", "watch"}, watchHelp},
 		{[]string{"help", "env"}, envHelp},
 		{[]string{"help", "agents"}, agentsHelp},
+		{[]string{"help", "output"}, outputHelp},
 		{[]string{"help"}, usage},
 	} {
 		var out, errb strings.Builder
