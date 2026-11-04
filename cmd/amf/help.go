@@ -27,6 +27,7 @@ Commands:
   pipeline   check the plan/code/eval pipeline in this checkout's AGENTS.md
   doctor     check the setup here, changing nothing
   update     replace this amf binary with the latest (or given) release
+  man        generate a man page from amf's help text
   version    print amf's version
   help       show help for a command or topic
 
@@ -267,7 +268,7 @@ amf doctor checks the configuration.
 var helpTopics = map[string]string{
 	"issue": issueUsage, "auth": authUsage, "pr": prUsage, "list": listHelp, "run": runHelp, "watch": watchHelp, "auto": autoHelp, "memory": memoryUsage,
 	"init": initHelp, "pipeline": pipelineHelp, "doctor": doctorHelp, "update": updateHelp,
-	"version": versionHelp, "help": helpHelp, "agents": agentsHelp, "env": envHelp, "flags": flagsHelp,
+	"version": versionHelp, "man": manHelp, "help": helpHelp, "agents": agentsHelp, "env": envHelp, "flags": flagsHelp,
 }
 
 // topicNames is every help topic, for typo suggestions.
@@ -339,7 +340,7 @@ var helpSubcommands = map[string][]string{
 // arguments that run it, so amf help run prints what amf run --help does.
 var helpArgs = map[string][]string{
 	"init": {"init"}, "run": {"run"}, "watch": {"watch"}, "auto": {"auto"}, "list": {"issue", "list"},
-	"pipeline": {"pipeline"}, "doctor": {"doctor"}, "update": {"update"}, "version": {"version"},
+	"pipeline": {"pipeline"}, "doctor": {"doctor"}, "update": {"update"}, "man": {"man"}, "version": {"version"},
 	"issue create": {"issue", "create"}, "issue list": {"issue", "list"}, "issue label": {"issue", "label"}, "issue run": {"run"}, "issue watch": {"watch"},
 	"pr list": {"pr", "list"}, "pr merge": {"pr", "merge"}, "pr sweep": {"pr", "sweep"}, "pr view": {"pr", "view"}, "pr diff": {"pr", "diff"},
 	"auth login": {"auth", "login"}, "auth status": {"auth", "status"}, "auth logout": {"auth", "logout"}, "auth token": {"auth", "token"},

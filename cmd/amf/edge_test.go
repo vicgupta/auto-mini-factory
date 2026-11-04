@@ -1108,6 +1108,12 @@ func TestIssueGroupHelpWriteError(t *testing.T) {
 	}
 }
 
+func TestManWriteError(t *testing.T) {
+	if err := run(context.Background(), []string{"man"}, nil, failWriter{}, io.Discard); err == nil || !strings.Contains(err.Error(), "disk full") {
+		t.Fatalf("error = %v, want stdout write error", err)
+	}
+}
+
 type trackedReader struct {
 	reads int
 	text  string

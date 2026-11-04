@@ -73,6 +73,7 @@ For all settings and defaults, run `amf help env` or see the
 `amf help <command>` prints a command's details. See:
 
 - [Command reference](docs/COMMANDS.md): commands, flags, exit status, paths and logs
+- [Man page](docs/COMMANDS.md#man-page): generate and install with `amf man`
 - [Configuration](docs/CONFIGURATION.md): `.env`, authentication and `amf doctor`
 - [Examples cookbook](docs/EXAMPLES.md): complete workflows
 - [Troubleshooting](docs/TROUBLESHOOTING.md): common failures and fixes
