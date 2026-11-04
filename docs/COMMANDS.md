@@ -73,8 +73,8 @@ such as `amf run 0`.
 |---|---|
 | `amf issue create "Title" [--body text \| --file path] [--label name] [--no-label]` | create an issue (the body may also come from stdin) |
 | `amf issue list [--state open\|closed\|all] [--label name] [--search text] [--limit n] [--json]` | list issues, newest first, with their amf labels |
-| `amf issue label <N> [label...] [--add name]... [--remove name]...` | add or remove an issue's labels |
-| `amf issue unlabel <N> [label...]` | remove an issue's labels |
+| `amf issue label [<N>] [label...] [--add name]... [--remove name]... [selectors]` | add or remove labels on an issue or filtered set |
+| `amf issue unlabel [<N>] [label...] [selectors]` | remove labels from an issue or filtered set |
 | `amf issue close <N> [--comment text] [--delete-branch]` | close an issue |
 | `amf issue reopen <N>` | reopen an issue |
 | `amf issue view <N> [--json]` | show an issue |
@@ -159,6 +159,7 @@ With `--json`:
 
 ```text
 amf issue label <N> [label...] [--add L]... [--remove L]...
+amf issue label <selectors> [label...] [--add L]... [--remove L]...
 ```
 
 Adds the positional labels to one open or closed issue (not a pull request).
@@ -170,6 +171,23 @@ amf:done or amf:failed) also removes the issue's other status label;
 adding two fails. Prints #N: added ...; removed ..., or #N unchanged.
 There is no --json flag.
 
+For a set of issues, replace the issue number with one or more selectors:
+`--state open|closed|all`, `--label NAME`, or `--unlabeled`. State defaults to
+open. `--label` selects issues already carrying that label; `--unlabeled`
+selects issues with no labels at all. Selectors combine, but `--label` and
+`--unlabeled` conflict, and a blank `--label` is rejected. State ignores case
+and surrounding whitespace; label names have surrounding whitespace trimmed.
+Supply an issue number or selectors, not both. A first positional label that
+parses as an issue number is rejected with selectors; use `--add` for such
+label names with `issue label`.
+
+Bulk operations fetch every page and exclude pull requests before changing
+anything, then apply the same label rules to each match, newest first.
+They print one result per issue and stop at the first API or output error
+(exit 1), leaving earlier changes in place. An API error during an issue's
+updates can leave some of its labels changed. An update error names that
+issue. No matches prints `No matching issues in owner/name.` and exits 0.
+
 Example output:
 
 ```text
@@ -180,12 +198,15 @@ Example output:
 
 ```text
 amf issue unlabel <N> [label...]
+amf issue unlabel <selectors> [label...]
 ```
 
 Removes the given labels from an open or closed issue (not a pull request),
 leaving other labels unchanged. Names may be comma-separated; at least one
 nonblank label is required, with no default. Duplicate names are removed
 once, and absent labels cost no write. Prints #N: removed A, B, or #N unchanged.
+Accepts the same bulk selectors and follows the same ordering and error
+handling as `issue label`.
 Both label commands accept `42` or `#42`, need no git checkout, and support
 `amf help issue <command>`, `-h` and `--help`. Use `--` before label names
 beginning with `-` to stop flag parsing.
@@ -193,6 +214,8 @@ beginning with `-` to stop flag parsing.
 ```sh
 amf issue label 42 amf:ready "needs review"
 amf issue unlabel 42 amf:ready bug
+amf issue label --state open --unlabeled amf:ready
+amf issue unlabel --state closed --label amf:ready amf:ready
 ```
 
 ### amf issue close
@@ -570,14 +593,14 @@ the same letter. `amf help flags` prints this table; `amf <command> --help`
 | `-i` | `--interval` | watch |
 | `-i` | `--issue` | pr list |
 | `-j` | `--json` | issue list, issue view, pr list, pr sweep, pr view, memory |
-| `-l` | `--label` | issue create, issue list, watch |
+| `-l` | `--label` | issue create, issue list, issue label, issue unlabel, watch |
 | `-L` | `--limit` | issue list, pr list, memory |
 | `-m` | `--merge` | run, watch, auto, pr sweep |
 | `-n` | `--dry-run` | run, auto, pr sweep |
 | `-o` | `--scopes` | auth login |
 | `-r` | `--rebase` | pr merge |
 | `-s` | `--squash` | pr merge |
-| `-s` | `--state` | issue list, pr list |
+| `-s` | `--state` | issue list, issue label, issue unlabel, pr list |
 | `-S` | `--search` | issue list |
 | `-t` | `--agent-timeout` | run, watch, auto |
 | `-u` | `--update-branch` | pr merge |
@@ -739,7 +762,18 @@ Generated from each command's `--help`; `amf init`,
 | Flag | What it does |
 |---|---|
 | `--add <value>` | add this label (repeatable, or comma-separated) |
+| `-l, --label <name>` | select issues with this label (bulk mode) |
 | `--remove <value>` | remove this label (repeatable, or comma-separated) |
+| `-s, --state <state>` | select issues by state: open, closed or all (bulk mode) (default open) |
+| `--unlabeled` | select only issues with no labels (bulk mode) |
+
+### amf issue unlabel
+
+| Flag | What it does |
+|---|---|
+| `-l, --label <name>` | select issues with this label (bulk mode) |
+| `-s, --state <state>` | select issues by state: open, closed or all (bulk mode) (default open) |
+| `--unlabeled` | select only issues with no labels (bulk mode) |
 
 ### amf doctor
 

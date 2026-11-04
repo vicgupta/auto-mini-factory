@@ -14,13 +14,16 @@ const issueUsage = `usage: amf issue <command>
 Commands:
   create "Title" [--body text | --file path] [--label name] [--no-label]  create an issue (the body may also come from stdin)
   list [--state open|closed|all] [--label name] [--search text] [--limit n] [--json]  list issues, newest first, with their amf labels
-  label <N> [label...] [--add name]... [--remove name]...  add or remove an issue's labels
-  unlabel <N> [label...]  remove an issue's labels
+  label [<N>] [label...] [--add name]... [--remove name]... [selectors]  add or remove labels on an issue or filtered set
+  unlabel [<N>] [label...] [selectors]  remove labels from an issue or filtered set
   close <N> [--comment text] [--delete-branch]  close an issue
   reopen <N>  reopen an issue
   view <N> [--json]  show an issue
   run <N> [flags]  process one issue into a PR: see amf help run
   watch [flags]  process amf:ready issues as they arrive: see amf help watch
+
+For label/unlabel, selectors are --state open|closed|all, --label name,
+and --unlabeled. Supply an issue number or selectors, not both.
 
 amf issue "Title" … is a shortcut for amf issue create "Title" …
 Run amf help issue <command> or amf issue <command> --help for its flags.

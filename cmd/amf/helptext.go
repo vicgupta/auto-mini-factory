@@ -34,6 +34,7 @@ trimmed. Prints #N <url>.
 `,
 	"issue label": `Usage:
   amf issue label <issue-number> [label...] [flags]
+  amf issue label <selectors> [label...] [flags]
 
 Adds the given labels to an issue. --add and --remove also add and remove
 labels and may repeat. Names may be comma-separated; at least one label
@@ -41,14 +42,28 @@ is required. Labels already present (or absent) are skipped.
 Adding an amf status label (amf:in-progress, amf:pr-open, amf:done,
 amf:failed) removes the issue's other status label, so an issue keeps one.
 Prints #N: added ...; removed ..., or #N unchanged.
+
+To act on a set, replace the issue number with --state, --label or
+--unlabeled. Selectors combine; state defaults to open. --label selects an
+existing label; --unlabeled selects issues with no labels and conflicts
+with --label. Pull requests are excluded. All pages are fetched before
+changes, newest first. Stops on the first error; earlier changes remain.
+No matches prints No matching issues in owner/name.
 `,
 	"issue unlabel": `Usage:
   amf issue unlabel <issue-number> [label...]
+  amf issue unlabel <selectors> [label...]
 
 Removes the given labels from an issue. Names may be comma-separated;
 at least one label is required. Labels already absent are skipped.
 Accepts open or closed issues, but not pull requests.
 Prints #N: removed ..., or #N unchanged.
+
+To act on a set, replace the issue number with --state, --label or
+--unlabeled, as for issue label. State defaults to open; selectors combine,
+but --label and --unlabeled conflict. All pages are fetched before changes,
+newest first. Stops on the first error; earlier changes remain.
+No matches prints No matching issues in owner/name.
 `,
 	"issue close": `Usage:
   amf issue close <issue-number> [flags]
@@ -240,8 +255,8 @@ var helpExamples = map[string]string{
 	"init":           "  amf init\n",
 	"doctor":         "  amf doctor\n  amf doctor --fix-labels\n",
 	"version":        "  amf version\n",
-	"issue label":    "  amf issue label 42 amf:ready bug\n  amf issue label 42 --remove amf:failed --add amf:ready\n",
-	"issue unlabel":  "  amf issue unlabel 42 amf:ready bug\n",
+	"issue label":    "  amf issue label 42 amf:ready bug\n  amf issue label 42 --remove amf:failed --add amf:ready\n  amf issue label --state open --unlabeled amf:ready\n",
+	"issue unlabel":  "  amf issue unlabel 42 amf:ready bug\n  amf issue unlabel --state closed --label amf:ready amf:ready\n",
 	"issue close":    "  amf issue close 42 --comment \"Superseded by #43\"\n  amf issue close 42 --delete-branch\n",
 	"issue reopen":   "  amf issue reopen 42\n",
 	"issue view":     "  amf issue view 42\n  amf issue view 42 --json\n",
@@ -308,13 +323,13 @@ A letter keeps its meaning on every command that has the flag.
   -i  --interval         watch
   -i  --issue            pr list
   -j  --json             issue list, issue view, pr list, pr sweep, pr view, memory
-  -l  --label            issue create, issue list, watch
+  -l  --label            issue create, issue list, issue label, issue unlabel, watch
   -L  --limit            issue list, pr list, memory
   -m  --merge            run, watch, auto, pr sweep
   -n  --dry-run          run, auto, pr sweep
   -o  --scopes           auth login
   -r  --rebase           pr merge
-  -s  --state            issue list, pr list
+  -s  --state            issue list, issue label, issue unlabel, pr list
   -s  --squash           pr merge
   -S  --search           issue list
   -t  --agent-timeout    run, watch, auto
