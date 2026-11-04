@@ -35,6 +35,7 @@ running a platform.
 | `amf pipeline` | check the plan/code/eval pipeline in this checkout's `AGENTS.md` |
 | `amf doctor` | check the setup here, changing nothing |
 | `amf update` | replace this amf binary with the latest (or given) release |
+| `amf completion` | print a shell completion script for bash, zsh or fish |
 | `amf version` | print amf's version |
 | `amf help` | show help for a command or topic |
 
@@ -106,6 +107,36 @@ amf update --version v0.0.7   # install a specific release (also downgrades)
 `amf update` downloads the same release archives as `install.sh`, checks them
 against `checksums.txt`, makes sure the new binary runs, then swaps it in place
 of the running one. It needs write access to the folder `amf` is in.
+
+### Shell completion
+
+`amf completion bash|zsh|fish` prints a script that completes commands,
+subcommands and their long and short flags, including global path flags.
+It needs no `.env` or GitHub access.
+
+For Bash, add this to `~/.bashrc`:
+
+```bash
+source <(amf completion bash)
+```
+
+For Zsh, add this to `~/.zshrc` after initializing completion (omit the first
+line if your shell configuration already runs `compinit`):
+
+```zsh
+autoload -Uz compinit; compinit
+source <(amf completion zsh)
+```
+
+For Fish, add this to `~/.config/fish/config.fish`:
+
+```fish
+amf completion fish | source
+```
+
+Start a new shell, or run the appropriate snippet to enable completion now.
+You can also save the output to a file and source it; regenerate that file
+after upgrading amf to pick up new commands and flags.
 
 ## Configure
 
