@@ -33,7 +33,12 @@ amf:ready ──▶ amf:in-progress ──▶ amf:pr-open (PR opened, not merged
   (relabeling it `amf:pr-open`) or with an `amf/issue-N` branch on origin
   (unless it is `amf:failed`); `amf run N --force`, and `amf auto`, skip
   that guard. A failure never moves an issue from `amf:pr-open` or
-  `amf:done` to `amf:failed`.
+  `amf:done` to `amf:failed`, but `amf:done` is kept only when GitHub lists
+  a merged PR from `amf/issue-N`. After `--merge`, amf reads the PR back and
+  sets `amf:done` only if it is merged (`amf:pr-open` otherwise).
+- Each poll, `watch` relabels `amf:pr-open` up to five open `amf:failed`
+  issues (without `amf:ready`) whose `amf/issue-N` PR is open, not a draft,
+  and has passing checks: the failure is stale.
 - `watch` puts an `amf:in-progress` issue no amf works on back to
   `amf:ready` once the label is older than `AMF_STALE_TIMEOUT`.
 - `run`, `watch` and `auto` hold `.amf/watch.lock`; see

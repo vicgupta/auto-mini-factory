@@ -769,7 +769,7 @@ On any failure the issue gets `amf:failed` plus a comment with the reason:
 each agent amf tried, in order, with its exit code and duration, whether
 the fallback agent ran and if not why, and the last 40 lines of the agent's
 log, redacted, with the log's path. An issue that already had an open PR
-keeps `amf:pr-open` instead (and a merged one `amf:done`): a failed retry
+keeps `amf:pr-open` instead (and one whose PR GitHub shows merged, `amf:done`): a failed retry
 never marks it `amf:failed`.
 The worktree is kept for inspection. A run that hit the agent timeout
 loses only the worktree: amf comments with how to retry with more time and
@@ -993,6 +993,9 @@ format, so a skill only needs to say how to do the work.
 An issue moves `amf:ready` → `amf:in-progress` → `amf:pr-open` (PR open,
 not merged), `amf:done` (PR merged by `--merge`) or `amf:failed`. `amf watch`
 creates `amf:pr-open` if the repo lacks it; `amf init` creates all five.
+`amf:done` is set only after amf confirms the PR is merged. Each poll,
+`watch` also moves up to five open `amf:failed` issues whose `amf/issue-N`
+PR is open with passing checks to `amf:pr-open`.
 `amf issue` adds `amf:ready`, and `amf watch` picks up open `amf:ready` issues
 oldest first. To retry an issue, add `amf:ready` again or run `amf run N`.
 If amf is killed mid-run and an issue is stuck on `amf:in-progress`, run

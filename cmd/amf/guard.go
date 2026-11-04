@@ -252,3 +252,54 @@ func cmpOr(a, b string) string {
 	}
 	return b
 }
+
+// maxFailedSweep caps how many amf:failed issues one watch poll checks, to
+// keep the API calls each poll makes modest.
+const maxFailedSweep = 5
+
+// sweepFailed relabels amf:pr-open each open amf:failed issue whose
+// amf/issue-N branch has an open pull request with passing checks: a later
+// attempt (or a person) fixed what the failed run left, so amf:failed is
+// stale. Issues also labeled amf:ready are left to the retry.
+func (r *Runner) sweepFailed(ctx context.Context) {
+	if ctx.Err() != nil {
+		return
+	}
+	issues, err := r.GH.ListIssues(ctx, "open", labelFailed, true)
+	if err != nil {
+		if ctx.Err() == nil {
+			r.event(slog.LevelDebug, "watch.failed", 0, fmt.Sprintf("listing %s issues: %v", labelFailed, err), "error", err)
+		}
+		return
+	}
+	checked := 0
+	for _, is := range issues {
+		if ctx.Err() != nil || checked >= maxFailedSweep {
+			return
+		}
+		n := is.Number
+		if n == r.working || is.PullRequest != nil || is.HasLabel(labelReady) || is.HasLabel(labelInProgress) {
+			continue
+		}
+		checked++
+		pr, open, err := r.GH.OpenPR(ctx, issueBranch(n))
+		if err != nil || !open {
+			continue
+		}
+		d, err := r.GH.GetPR(ctx, pr.Number)
+		if err != nil || d.Head.SHA == "" || d.Draft {
+			continue
+		}
+		runs, err := r.GH.CheckRuns(ctx, d.Head.SHA)
+		if err != nil || checksState(runs) != "passed" {
+			continue
+		}
+		if err := r.setStatus(ctx, n, labelPROpen); err != nil {
+			r.event(slog.LevelWarn, "watch.failed", n, fmt.Sprintf("#%d: could not set %s: %v", n, labelPROpen, err), "error", err)
+			continue
+		}
+		r.statusEvent(n, labelFailed, labelPROpen)
+		r.event(slog.LevelInfo, "watch.failed", n, fmt.Sprintf("#%d: %s, but %s is open with passing checks; now %s", n, labelFailed, pr.HTMLURL, labelPROpen),
+			"to", labelPROpen, "pr", pr.Number)
+	}
+}

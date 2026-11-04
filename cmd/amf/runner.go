@@ -257,7 +257,10 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 		if _, open, ferr := r.GH.OpenPR(cctx, issueBranch(n)); ferr == nil && open {
 			final = labelPROpen
 		} else if wasDone {
-			final = labelDone
+			// Keep amf:done only for a PR GitHub confirms is merged.
+			if _, merged, merr := r.GH.MergedPR(cctx, issueBranch(n)); merr == nil && merged {
+				final = labelDone
+			}
 		}
 		if serr := r.setStatus(cctx, n, final); serr != nil {
 			r.event(slog.LevelWarn, "issue.status", n, fmt.Sprintf("#%d: could not set %s: %v", n, final, serr), "to", final, "error", serr)
@@ -330,7 +333,7 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 	}
 	// amf:done only once the PR is merged; an open one is amf:pr-open.
 	status := labelPROpen
-	if r.Merge != "" && merr == nil {
+	if r.Merge != "" && merr == nil && r.confirmMerged(ctx, pr.Number) {
 		status = labelDone
 	}
 	if err := r.setStatus(ctx, n, status); err != nil {
@@ -877,6 +880,7 @@ func (r *Runner) Watch(ctx context.Context, label string, interval time.Duration
 	}
 	for cycle := 1; ; cycle++ {
 		r.sweepStale(ctx)
+		r.sweepFailed(ctx)
 		issues, err := r.GH.ListIssues(ctx, "open", label, true)
 		switch {
 		case err != nil && ctx.Err() == nil:
@@ -947,4 +951,15 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
+}
+
+// confirmMerged reads pull request n back after a merge that GitHub
+// accepted, so amf:done is set only on a PR that is merged. A failed read
+// trusts the merge response.
+func (r *Runner) confirmMerged(ctx context.Context, n int) bool {
+	pr, err := r.GH.GetPR(ctx, n)
+	if err != nil {
+		return true
+	}
+	return pr.Merged
 }
