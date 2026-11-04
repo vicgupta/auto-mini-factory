@@ -121,6 +121,30 @@ func TestDocumentationEnvironment(t *testing.T) {
 	}
 }
 
+func TestHelpExamplesKnownCommands(t *testing.T) {
+	// Include commands embedded in shell substitutions, such as auth token.
+	command := regexp.MustCompile(`(?:^|\$\()amf\s+([^\s)]+)(?:\s+([^\s)]+))?`)
+	for key, examples := range helpExamples {
+		t.Run(key, func(t *testing.T) {
+			for _, line := range strings.Split(strings.TrimSpace(examples), "\n") {
+				matches := command.FindAllStringSubmatch(strings.TrimSpace(line), -1)
+				if len(matches) == 0 {
+					t.Errorf("example has no amf command: %q", line)
+					continue
+				}
+				for _, m := range matches {
+					if !slices.Contains(topCommands, m[1]) {
+						t.Errorf("example uses unknown command %q: %q", m[1], line)
+					}
+					if subs, ok := helpSubcommands[m[1]]; ok && !slices.Contains(subs, m[2]) {
+						t.Errorf("example uses unknown %s subcommand %q: %q", m[1], m[2], line)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestDocumentedFlagsExist(t *testing.T) {
 	flagName := regexp.MustCompile(`(?:^|[\s\[|(])--?([a-zA-Z][a-z-]*)`)
 	for _, cmd := range [][]string{
