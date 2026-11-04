@@ -241,9 +241,8 @@ amf:ready ──▶ amf:in-progress ──▶ amf:pr-open (PR opened, not merged
 an unknown one, a bad flag or the wrong arguments; no command or an unknown
 one also prints the usage to stderr; an unknown command close to a real
 one, such as `lst`, first prints `Did you mean "list"?`). Errors print as `amf: <error>` on
-stderr. SIGINT and
-SIGTERM cancel the current step, with the run's process group killed as on
-expiry; the issue is still marked failed.
+stderr. For SIGINT/SIGTERM handling in `run`, `watch` and `auto`, including
+lock release and saved auto progress, see [Signals](../README.md#signals).
 
 ### `amf auto`
 

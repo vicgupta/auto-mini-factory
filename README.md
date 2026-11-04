@@ -136,7 +136,7 @@ Keep `.env` out of git: add it to the target repo's `.gitignore`.
   `.amf/watch.lock` (PID, host, start time) while they work. A second one
   refuses to start and names the holder. A lock whose process is dead on the
   same host, or that hasn't been refreshed for 10 minutes, is taken over.
-  The lock is released on exit, Ctrl-C and SIGTERM included.
+  The lock is released on exit; see [Signals](#signals) for stopping amf.
 - **No duplicate PRs.** Before starting an issue, amf checks for an open PR
   from `amf/issue-N` (the issue becomes `amf:pr-open` and is skipped) and for
   an `amf/issue-N` branch on origin (skipped; delete the branch or use
@@ -349,6 +349,24 @@ See [docs/COMMANDS.md](docs/COMMANDS.md) for the details:
 - [What `amf run N` does](docs/COMMANDS.md#what-amf-run-n-does), [logs](docs/COMMANDS.md#logs) and [logs in PostgreSQL](docs/COMMANDS.md#logs-in-postgresql)
 - [Pipelines](docs/COMMANDS.md#pipelines-plan--code--eval) and [labels](docs/COMMANDS.md#labels)
 - [Repo memory](docs/COMMANDS.md#repo-memory): similar past work, backends and where memory lives
+
+### Signals
+
+Ctrl-C (`SIGINT`) and `SIGTERM` request a graceful stop for `amf run`,
+`amf watch` and `amf auto`: amf cancels the current step, cleans up and
+releases `.amf/watch.lock` before exiting. `watch` stops polling and starts
+no further issues. An interrupted issue normally becomes `amf:failed`;
+an existing open or merged PR keeps its corresponding status.
+
+On Unix, a running agent's whole process group receives `SIGTERM`, then
+`SIGKILL` if it is still there after 15 seconds. On Windows, amf ends the
+whole agent process tree with `taskkill /T /F`, without a grace period.
+
+Once `auto` has saved a plan, partial progress is kept in
+`.amf/auto/state.json`. Inspect it with `amf auto status`, then resume with
+`amf auto --continue` (which also approves any pending checkpoint), or
+discard the saved run with `amf auto --abort`. Interrupting the initial
+planning step leaves no saved plan to resume.
 
 ## Security
 
