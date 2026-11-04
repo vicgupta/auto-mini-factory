@@ -292,3 +292,65 @@ func TestPRMergeLabelsIssueDone(t *testing.T) {
 		t.Fatalf("output %q, writes %v", &out, gh.writes)
 	}
 }
+
+func shortPRWaits(t *testing.T) {
+	t.Helper()
+	old := []time.Duration{prUpdatePoll, prUpdateTimeout, prChecksTimeout, prChecksPoll, prNoChecksGrace}
+	prUpdatePoll, prUpdateTimeout, prChecksTimeout, prChecksPoll, prNoChecksGrace = time.Millisecond, 50*time.Millisecond, 200*time.Millisecond, time.Millisecond, 20*time.Millisecond
+	t.Cleanup(func() {
+		prUpdatePoll, prUpdateTimeout, prChecksTimeout, prChecksPoll, prNoChecksGrace = old[0], old[1], old[2], old[3], old[4]
+	})
+}
+
+func TestPRMergeUpdateBranchAndWait(t *testing.T) {
+	shortPRWaits(t)
+	pass := []checkRun{{Name: "build", Status: "completed", Conclusion: "success"}}
+	for _, tc := range []struct {
+		name               string
+		flags              []string
+		behind             int
+		conflict           bool
+		runs               map[string][]checkRun
+		want, wantErr, sha string
+	}{
+		{name: "behind", flags: []string{"-u"}, behind: 3, sha: "def456", want: "Updated #101 with main (was 3 commits behind)\n"},
+		{name: "up to date", flags: []string{"--update-branch"}, sha: "abc123", want: "#101 is up to date with main\n"},
+		{name: "conflict", flags: []string{"-u"}, behind: 1, conflict: true, wantErr: "could not update #101 with main (1 commit behind)"},
+		{name: "update then checks", flags: []string{"-u", "-w"}, behind: 2, runs: map[string][]checkRun{"def456": pass}, sha: "def456", want: "Checks passed on #101 (1 check: 1 success)"},
+		{name: "checks fail", flags: []string{"--wait-for-checks"}, runs: map[string][]checkRun{"abc123": {{Name: "test", Status: "completed", Conclusion: "failure"}}}, wantErr: "checks failed on #101"},
+		{name: "checks pending", flags: []string{"-w"}, runs: map[string][]checkRun{"abc123": {{Name: "test", Status: "in_progress"}}}, wantErr: "timed out after"},
+		{name: "no checks", flags: []string{"-w"}, sha: "abc123", want: "No checks reported on #101"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gh, srv := newFakeGitHub(t)
+			listJSONEnv(t, srv)
+			pr := map[string]string{"head": "feature/x", "base": "main", "state": "open"}
+			if tc.conflict {
+				pr["update_conflict"] = "yes"
+			}
+			gh.prs = []map[string]string{pr}
+			gh.drafts = []bool{false}
+			gh.compares["main...abc123"] = [2]int{1, tc.behind}
+			for k, v := range tc.runs {
+				gh.checkRuns[k] = v
+			}
+			var out bytes.Buffer
+			err := run(context.Background(), append([]string{"pr", "merge", "101"}, tc.flags...), nil, &out, io.Discard)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("err = %v, want %q", err, tc.wantErr)
+				}
+				if pr["state"] != "open" {
+					t.Fatalf("PR state %s after a refusal", pr["state"])
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(out.String(), tc.want) || pr["state"] != "merged" || pr["merge_sha"] != tc.sha {
+				t.Fatalf("output %q, state %s, merged sha %q (want %s)", &out, pr["state"], pr["merge_sha"], tc.sha)
+			}
+		})
+	}
+}

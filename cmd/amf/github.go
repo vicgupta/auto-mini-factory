@@ -648,7 +648,10 @@ type prDetails struct {
 	State   string `json:"state"`
 	Draft   bool   `json:"draft"`
 	Merged  bool   `json:"merged"`
-	Head    struct {
+	Base    struct {
+		Ref string `json:"ref"`
+	} `json:"base"`
+	Head struct {
 		SHA  string `json:"sha"`
 		Ref  string `json:"ref"`
 		Repo *struct {
@@ -661,6 +664,13 @@ func (g *GitHub) GetPR(ctx context.Context, n int) (prDetails, error) {
 	var pr prDetails
 	err := g.do(ctx, "GET", g.repoPath("/pulls/%d", n), nil, &pr)
 	return pr, err
+}
+
+// UpdateBranch merges the base branch into pull request n's head, as
+// GitHub's "Update branch" button does. GitHub refuses (422) unless the head
+// is still sha, and when the merge conflicts.
+func (g *GitHub) UpdateBranch(ctx context.Context, n int, sha string) error {
+	return g.do(ctx, "PUT", g.repoPath("/pulls/%d/update-branch", n), map[string]any{"expected_head_sha": sha}, nil)
 }
 
 // SetPRState opens or closes pull request n. The caller already has the PR's

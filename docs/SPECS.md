@@ -57,7 +57,7 @@ amf:ready ──▶ amf:in-progress ──▶ amf:pr-open (PR opened, not merged
 | `amf issue list [--state open\|closed\|all] [--label name] [--search text] [--limit n] [--json]` | Lists issues, newest first (highest number first), with every page fetched and PRs left out. `-h` and `--help` print the flag help to stderr, leave stdout empty, and exit 0 before reading configuration or contacting GitHub. Surrounding whitespace on `--state` and `--label` is trimmed, and `--state` ignores letter case; whitespace inside a label name is preserved. An omitted, empty or whitespace-only label applies no label filter. `--search TEXT` (default empty) keeps only issues whose title contains the trimmed text, ignoring case; an empty or whitespace-only value applies no filter, and the filter runs before `--limit`. Columns: `ISSUE`, `STATE` (with `--state all` only), `AMF` (the issue's `amf` and `amf:*` labels, or `-`) and `TITLE`. `--limit N` (default `0`, no limit) prints only the first N issues after filtering, and when that hides some, the table output is followed on stderr by `Showing N of M issues; use --limit 0 to list them all.` (stdout is unchanged, and `--json` prints no hint); a negative value errors with `--limit must be 0 or more, got N`. Tabs in a title print as spaces. `--state` takes only `open`, `closed` or `all`, in any letter case, after trimming surrounding whitespace. Prints `No … in owner/name.` when nothing matches, using the trimmed label when one is set, and `with "TEXT" in the title` after it when `--search` is set. `--json` (default `false`) prints instead one JSON array and a newline, with no header: one object per issue, in the same order and after the same filters and limit, with exactly `number` (integer), `title`, `state`, `url` (the issue's GitHub page) and `labels` (every label name, in GitHub's order, `[]` when none); titles are kept as GitHub sent them, tabs included. Nothing matching prints `[]`. Argument, configuration and API errors leave stdout empty. A failure to write stdout, including the no-matching-issues message, is returned as an error and exits 1. Needs no git checkout. |
 | `amf pr` | Prints the pull request command group's usage to stdout, as `amf pr help`, `amf pr -h` and `amf pr --help` do. An unknown subcommand prints `amf: unknown pr command "<word>"` and then that usage to stderr and exits 2; one close to a real subcommand, such as `lst`, also prints `Did you mean "list"?` before the usage. |
 | `amf pr list [--state open\|closed\|merged\|all] [--limit N] [--issue N] [--json]` | Lists pull requests, including drafts, newest first. See [Pull requests](#pull-requests). |
-| `amf pr merge <N> [--squash \| --rebase] [--delete-branch]` | Merges a chosen PR (`42` or `#42`); no git checkout needed. See below. |
+| `amf pr merge <N> [--squash \| --rebase] [--delete-branch] [--update-branch] [--wait-for-checks]` | Merges a chosen PR (`42` or `#42`); no git checkout needed. See below. |
 | `amf pr view <N> [--json]` | Shows one pull request without a git checkout. See below. |
 | `amf pr diff <N> [--name-only]` | Prints a pull request's unified diff, or one changed path per line with `--name-only`; no git checkout needed. See below. |
 | `amf pr close <N> [--comment text] [--delete-branch]` | Closes a chosen PR (`42` or `#42`); no git checkout needed. See below. |
@@ -412,6 +412,21 @@ GitHub's 409 refusal is reported. Only a 405 whose message contains
 apart, stopping on Ctrl-C. Other errors, including conflicts, required
 checks or reviews, and disallowed merge methods, fail immediately with
 GitHub's message. These failures exit 1 and leave the PR open.
+
+`--update-branch` (`-u`) runs before the merge: `GET
+/repos/{repo}/compare/{base}...{head.sha}`, and when `behind_by` is above
+zero `PUT /repos/{repo}/pulls/N/update-branch` with `expected_head_sha`,
+printing `Updated #N with <base> (was K commits behind)` (or `#N is up to
+date with <base>`). It then polls the PR every 2 seconds, up to a minute,
+until GitHub reports a new head SHA, and the merge is pinned to that SHA.
+GitHub's refusal (a conflict, or a moved head) fails with its message, and
+nothing is merged. `--wait-for-checks` (`-w`) then polls the head's check
+runs every 10 seconds, using the same wait logic as `amf auto
+--wait-for-checks`: it merges when every run passed (success, neutral or
+skipped), fails with `checks failed on #N (...); not merging` when one
+failed, and fails after 30 minutes with `timed out ...; not merging`. A
+head with no check runs after 2 minutes is merged, as the repo may have no
+CI.
 
 After a successful merge, a head branch `amf/issue-N` in this repository
 marks issue N merged: it reads the issue and, touching only labels that

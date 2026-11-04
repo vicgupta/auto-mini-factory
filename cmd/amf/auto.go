@@ -517,28 +517,44 @@ func (r *Runner) checkSummary(ctx context.Context, commit string, wait, poll tim
 		ctx, cancel = context.WithTimeout(ctx, wait)
 		defer cancel()
 	}
+	state, last, err := r.GH.waitChecks(ctx, commit, wait > 0, poll, 0)
+	switch {
+	case state == "timeout":
+		return fmt.Sprintf("timed out waiting for checks (%s)", last)
+	case err != nil:
+		return fmt.Sprintf("unavailable (%v)", err)
+	case wait == 0:
+		return last
+	}
+	return state + ": " + last
+}
+
+// waitChecks reads the check runs on commit and, with wait, polls every
+// poll until they all pass or one fails, or ctx ends. It returns
+// checksState's state ("timeout" when ctx ended first) and the runs'
+// summary. With noneGrace above zero, a commit that still has no check
+// runs after that long counts as "none" rather than waiting on: the repo
+// may have no CI.
+func (g *GitHub) waitChecks(ctx context.Context, commit string, wait bool, poll, noneGrace time.Duration) (string, string, error) {
+	start := time.Now()
 	last := "none reported yet"
 	for {
-		runs, err := r.GH.CheckRuns(ctx, commit)
+		runs, err := g.CheckRuns(ctx, commit)
 		if ctx.Err() != nil {
-			return fmt.Sprintf("timed out waiting for checks (%s)", last)
+			return "timeout", last, ctx.Err()
 		}
 		if err != nil {
-			return fmt.Sprintf("unavailable (%v)", err)
+			return "", last, err
 		}
 		last = summarizeCheckRuns(runs)
-		if wait == 0 {
-			return last
-		}
-		switch checksState(runs) {
-		case "passed":
-			return "passed: " + last
-		case "failed":
-			return "failed: " + last
+		state := checksState(runs)
+		if !wait || state == "passed" || state == "failed" ||
+			state == "none" && noneGrace > 0 && time.Since(start) >= noneGrace {
+			return state, last, nil
 		}
 		select {
 		case <-ctx.Done():
-			return fmt.Sprintf("timed out waiting for checks (%s)", last)
+			return "timeout", last, ctx.Err()
 		case <-time.After(poll):
 		}
 	}

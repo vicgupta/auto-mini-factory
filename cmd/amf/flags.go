@@ -47,6 +47,7 @@ var shortFlags = map[string]string{
 	"search":          "S",
 	"squash":          "s",
 	"state":           "s",
+	"update-branch":   "u",
 	"wait-for-checks": "w",
 }
 

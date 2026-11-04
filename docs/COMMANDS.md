@@ -144,7 +144,7 @@ With `--json`:
 ### amf pr merge
 
 ```text
-amf pr merge <N> [--squash | --rebase] [--delete-branch]
+amf pr merge <N> [--squash | --rebase] [--delete-branch] [--update-branch] [--wait-for-checks]
 ```
 
 Merges using a merge commit by default; --squash or --rebase selects that
@@ -155,6 +155,14 @@ forks or unavailable head repositories are skipped with a stderr note.
 A deletion failure is an error after the merge has already succeeded.
 Prints Merged #N <url>, Squashed and merged #N <url>, or
 Rebased and merged #N <url>. There is no --json flag.
+--update-branch first compares the head with the base and, if it is
+behind, asks GitHub to merge the base into it (as the Update branch button
+does), then waits up to a minute for the new head and merges that. A
+conflict fails without merging. --wait-for-checks then waits up to 30
+minutes for the head's check runs: it merges once all pass, fails if one
+fails or time runs out, and merges if no check reports within 2 minutes.
+Use both for a PR that is behind a base whose rules require it be up to
+date: amf pr merge N -u -w --squash.
 When the head is amf/issue-N in this repository, issue N is then labeled
 amf:done and loses amf:failed, amf:pr-open and amf:in-progress
 (printing Labeled #N amf:done when that changed anything); a labeling
@@ -355,7 +363,8 @@ the same letter. `amf help flags` prints this table; `amf <command> --help`
 | `-s` | `--state` | issue list, pr list |
 | `-S` | `--search` | issue list |
 | `-t` | `--agent-timeout` | run, watch, auto |
-| `-w` | `--wait-for-checks` | auto |
+| `-u` | `--update-branch` | pr merge |
+| `-w` | `--wait-for-checks` | auto, pr merge |
 | `-x` | `--exclude-label` | watch |
 | `-y` | `--approve` | auto |
 
@@ -516,6 +525,8 @@ Generated from each command's `--help`; `amf init`, `amf doctor`,
 | `-d, --delete-branch` | delete the head branch after merging, if it is in this repository |
 | `-r, --rebase` | rebase and merge |
 | `-s, --squash` | squash and merge |
+| `-u, --update-branch` | first merge the base branch into the head if it is behind |
+| `-w, --wait-for-checks` | wait for the head's checks to pass before merging (up to 30 minutes) |
 
 ### amf pr view
 
