@@ -970,7 +970,16 @@ func TestMain(m *testing.M) {
 	for _, k := range []string{"GITHUB_TOKEN", "GITHUB_REPO", "CLAUDE_CODE_OAUTH_TOKEN", "AMF_API_URL", "AMF_CLONE_URL", "AMF_CLAUDE", "AMF_CODEX", "AMF_OPENCODE", "AMF_RELEASES_URL", "AMF_TRUSTED", "AMF_POSTGRES_URL", "AMF_AGENT_TIMEOUT", "AMF_LOG_LEVEL"} {
 		os.Unsetenv(k)
 	}
+	os.Unsetenv("GH_TOKEN")
+	os.Unsetenv("AMF_GITHUB_CLIENT_ID")
 	os.Setenv("AMF_API_URL", "http://127.0.0.1:1") // unreachable unless a test sets a fake
+	// No real gh, and no saved token: a test that wants one sets a fake.
+	ghCommand = "amf-test-no-such-gh"
+	cfgDir, err := os.MkdirTemp("", "amf-config-")
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv("AMF_CONFIG_DIR", cfgDir)
 	// Hide any real agents on this machine, as CI has none: a test that needs
 	// one sets a fake. The live tests run the real ones.
 	if os.Getenv("AMF_LIVE_DIR") == "" {
@@ -987,7 +996,9 @@ func TestMain(m *testing.M) {
 		fmt.Println("skipping: git not installed")
 		return
 	}
-	os.Exit(m.Run())
+	code := m.Run()
+	os.RemoveAll(cfgDir)
+	os.Exit(code)
 }
 
 func TestInitWritesTemplate(t *testing.T) {
@@ -1002,7 +1013,7 @@ func TestInitWritesTemplate(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"GITHUB_TOKEN=github_pat_...   # Contents, Issues, Pull requests: read & write\n",
+		"GITHUB_TOKEN=github_pat_...   # Contents, Issues, Pull requests: read & write; or leave it unset and use gh or `amf auth login`\n",
 		"GITHUB_REPO=owner/name\n",
 		"CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...",
 		"AMF_TRUSTED=login1,login2...   # optional: only work on issues opened by these GitHub users\n",

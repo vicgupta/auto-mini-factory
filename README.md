@@ -12,6 +12,7 @@ running a platform.
 - [Install](#install)
 - [Configure](#configure)
   - [Configuration (.env)](#configuration-env)
+  - [Authentication](#authentication)
   - [Check your setup](#check-your-setup)
 - [Use](#use)
 - [Security](#security)
@@ -24,6 +25,7 @@ running a platform.
 | Command | What it does |
 |---|---|
 | `amf init` | write `.env` and create amf's labels |
+| `amf auth` | get a GitHub token: login, status, logout, token |
 | `amf issue` | manage issues: `create`, `list`, `label`, `run`, `watch` |
 | `amf pr` | manage pull requests: `list`, `merge`, `sweep`, `view`, `diff`, `close`, `reopen`, `ready`, `draft` |
 | `amf run` | process one issue into a PR (alias of `issue run`) |
@@ -54,7 +56,7 @@ identity and credentials that can push to your repo. See
 curl -fsSL https://raw.githubusercontent.com/vicgupta/auto-mini-factory/main/install.sh | sh
 cd your-repo             # a clone of the GitHub repo you want to work on
 amf init                 # writes .env; fills GITHUB_REPO from origin
-# Edit .env: set GITHUB_TOKEN, check GITHUB_REPO and configure your agent.
+# Edit .env: set GITHUB_TOKEN (or use gh / amf auth login), check GITHUB_REPO and configure your agent.
 amf init                 # creates any missing amf labels once configured
 amf doctor               # check the setup
 amf issue "Add dark mode" --body "Use CSS variables for the palette"
@@ -157,7 +159,7 @@ placeholders ending in `...`, and `owner/name`, count as unset.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `GITHUB_TOKEN` | required | API access: Contents, Issues, Pull requests (read & write) |
+| `GITHUB_TOKEN` | gh auth token, then amf auth login | API access: Contents, Issues, Pull requests (read & write). `GH_TOKEN` is read too. Unset, amf uses gh's token, then the one `amf auth login` saved (`amf help auth`) |
 | `GITHUB_REPO` | required | `owner/name`; github.com URLs are accepted |
 | `CLAUDE_CODE_OAUTH_TOKEN` | unset | Claude subscription token, passed to Claude. Makes `claude` usable without `--agent` |
 | `ANTHROPIC_API_KEY` | unset | Claude API key, passed to Claude when there's no `CLAUDE_CODE_OAUTH_TOKEN`. Makes `claude` usable without `--agent` |
@@ -174,13 +176,15 @@ placeholders ending in `...`, and `owner/name`, count as unset.
 | `AMF_LOG_LEVEL` | `info` (terminal), `debug` (event log) | `debug`, `info`, `warn` or `error`, for both the terminal and the event log of `run` and `watch`; `--log-level` overrides it |
 | `AMF_CODEX` | `codex` | Path to the Codex CLI |
 | `AMF_OPENCODE` | `opencode` | Path to the opencode CLI |
+| `AMF_GITHUB_CLIENT_ID` | unset | The GitHub OAuth app `amf auth login` uses, when `--client-id` isn't given |
+| `AMF_CONFIG_DIR` | the user config folder's amf | Where `amf auth login` saves tokens (`hosts.json`); environment only |
 | `AMF_API_URL` | `https://api.github.com` | GitHub API base URL. `amf pr ready` and `amf pr draft` derive their GraphQL endpoint from it: `…/graphql` appended, or a GitHub Enterprise Server `…/api/v3` becomes `…/api/graphql` |
 | `AMF_CLONE_URL` | `https://github.com/<repo>.git` | Where to clone `GITHUB_REPO` from |
 
 `amf init` writes the common settings like this, the optional ones commented out:
 
 ```sh
-GITHUB_TOKEN=github_pat_...   # Contents, Issues, Pull requests: read & write
+GITHUB_TOKEN=github_pat_...   # Contents, Issues, Pull requests: read & write; or leave it unset and use gh or `amf auth login`
 GITHUB_REPO=owner/name
 CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...   # optional: Claude subscription token from `claude setup-token`
 ANTHROPIC_API_KEY=sk-ant-api03-...   # optional: Claude API key, used if there's no token above
@@ -211,6 +215,30 @@ helps on servers or in CI where you can't log in interactively. Generate one wit
 `ANTHROPIC_API_KEY` from Claude's environment so the subscription is used
 instead of API billing. When it's not set, Claude uses whatever login it
 already has.
+
+### Authentication
+
+amf takes the first GitHub token it finds:
+
+1. `GITHUB_TOKEN` (or `GH_TOKEN`) from the environment or `.env`
+2. `gh auth token`, if the [GitHub CLI](https://cli.github.com) is installed and signed in
+3. the token saved by `amf auth login`
+
+`amf auth login` signs in with GitHub's device flow: it shows a code, opens
+https://github.com/login/device, and saves the token to `hosts.json` (mode
+0600) in `AMF_CONFIG_DIR`, or else `amf` in your user config folder
+(`~/.config/amf`, `~/Library/Application Support/amf` on macOS). That is the
+one path that doesn't default to the current directory, so the credential never
+lands in a checkout an agent works in. `amf auth status` shows the source,
+account and scopes; `amf auth logout` deletes the saved token; `amf auth token`
+prints it for scripts. An OS keychain is future work.
+
+The login needs the client ID of a GitHub OAuth app with the device flow on
+(`--client-id` or `AMF_GITHUB_CLIENT_ID`, unless the release has one built in).
+To register one: GitHub **Settings > Developer settings > OAuth Apps > New
+OAuth App**, any homepage and callback URL, check **Enable Device Flow**,
+register, and copy the **Client ID** (no secret needed). See
+[amf auth](docs/COMMANDS.md#amf-auth).
 
 ### Check your setup
 
@@ -335,8 +363,9 @@ code you're executing on your machine.
   trusted. Other authors' issues without that label are marked `amf:failed`
   with a comment saying why, and no agent runs. Unset, amf works on anyone's
   issue, and `amf doctor` warns about it.
-- `GITHUB_TOKEN` is stripped from every agent's environment, but agents can
-  still read files on disk, including `.env` at the top of your checkout. For full
+- `GITHUB_TOKEN` and `GH_TOKEN` are stripped from every agent's environment, but agents can
+  still read files on disk, including `.env` at the top of your checkout and
+  amf's `hosts.json`, and can run `gh auth token`. For full
   isolation, run amf in a container or VM.
 - A pipeline's skills are instructions run the same way. Use skills you
   control or have reviewed, at a tag, ideally pinned with `#sha256=`.

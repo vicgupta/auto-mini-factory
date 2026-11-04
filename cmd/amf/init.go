@@ -24,7 +24,7 @@ type envVar struct {
 
 // envTemplate is what `amf init` writes to .env, in order.
 var envTemplate = []envVar{
-	{"GITHUB_TOKEN", "github_pat_...", "Contents, Issues, Pull requests: read & write", false},
+	{"GITHUB_TOKEN", "github_pat_...", "Contents, Issues, Pull requests: read & write; or leave it unset and use gh or `amf auth login`", false},
 	{"GITHUB_REPO", "owner/name", "", false},
 	{"CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-...", "optional: Claude subscription token from `claude setup-token`", false},
 	{"ANTHROPIC_API_KEY", "sk-ant-api03-...", "optional: Claude API key, used if there's no token above", false},

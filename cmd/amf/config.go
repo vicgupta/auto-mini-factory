@@ -20,12 +20,15 @@ const defaultOpencodeModel = "opencode/big-pickle"
 
 // Config is everything amf needs to talk to GitHub and run the agents.
 type Config struct {
-	Token    string // GITHUB_TOKEN
-	Repo     string // GITHUB_REPO, as owner/name
-	APIURL   string // AMF_API_URL, defaults to https://api.github.com
-	Claude   string // AMF_CLAUDE, path to the claude binary, defaults to "claude"
-	Codex    string // AMF_CODEX, path to the codex binary, defaults to "codex"
-	Opencode string // AMF_OPENCODE, path to the opencode binary, defaults to "opencode"
+	Token string // GITHUB_TOKEN, or another source: see resolveToken
+	// TokenSource says where Token came from, for doctor, amf auth status
+	// and the debug log; never the token itself.
+	TokenSource string
+	Repo        string // GITHUB_REPO, as owner/name
+	APIURL      string // AMF_API_URL, defaults to https://api.github.com
+	Claude      string // AMF_CLAUDE, path to the claude binary, defaults to "claude"
+	Codex       string // AMF_CODEX, path to the codex binary, defaults to "codex"
+	Opencode    string // AMF_OPENCODE, path to the opencode binary, defaults to "opencode"
 	// CloneURL is AMF_CLONE_URL, where to clone GITHUB_REPO from when amf
 	// isn't started inside a checkout. Defaults to https://github.com/<repo>.git.
 	CloneURL string
@@ -127,7 +130,6 @@ func loadConfig(paths ...string) (Config, error) {
 	}
 
 	cfg := Config{
-		Token:    get("GITHUB_TOKEN", ""),
 		Repo:     normalizeRepo(get("GITHUB_REPO", "")),
 		APIURL:   strings.TrimSuffix(get("AMF_API_URL", "https://api.github.com"), "/"),
 		Claude:   get("AMF_CLAUDE", "claude"),
@@ -150,8 +152,9 @@ func loadConfig(paths ...string) (Config, error) {
 		EnvFile:        envFile,
 		seen:           seen,
 	}
+	cfg.Token, cfg.TokenSource = resolveToken(get, seen, envFile, authHost(cfg.APIURL))
 	if cfg.Token == "" {
-		return cfg, errors.New("GITHUB_TOKEN is not set (run amf init, then edit .env)")
+		return cfg, errNoToken
 	}
 	if cfg.Repo == "" {
 		return cfg, errors.New("GITHUB_REPO is not set (run amf init, then edit .env)")

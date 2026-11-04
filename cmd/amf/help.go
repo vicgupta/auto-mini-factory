@@ -17,6 +17,7 @@ Usage:
 
 Commands:
   init       write .env and create amf's labels
+  auth       get a GitHub token: login, status, logout, token
   issue      manage issues: create, list, label, run, watch
   pr         manage pull requests: list, merge, sweep, view, diff, close, reopen, ready, draft
   run        process one issue into a PR (alias of issue run)
@@ -186,8 +187,9 @@ both settings: see amf help pipeline. amf help env lists the settings.
 const envHelp = `Configuration is read from .env (or the environment; environment variables win).
 Placeholders ending in ..., and owner/name, count as unset.
 
-  GITHUB_TOKEN (default: required)
-    API access: Contents, Issues, Pull requests (read & write)
+  GITHUB_TOKEN (default: gh auth token, then amf auth login)
+    API access: Contents, Issues, Pull requests (read & write). GH_TOKEN is read too. Unset,
+    amf uses gh's token, then the one amf auth login saved (amf help auth)
   GITHUB_REPO (default: required)
     owner/name; github.com URLs are accepted
   CLAUDE_CODE_OAUTH_TOKEN (default: unset)
@@ -234,6 +236,10 @@ Placeholders ending in ..., and owner/name, count as unset.
     Path to the Codex CLI
   AMF_OPENCODE (default: opencode)
     Path to the opencode CLI
+  AMF_GITHUB_CLIENT_ID (default: unset)
+    The GitHub OAuth app amf auth login uses, when --client-id isn't given
+  AMF_CONFIG_DIR (default: the user config folder's amf)
+    Where amf auth login saves tokens (hosts.json); environment only
   AMF_API_URL (default: https://api.github.com)
     GitHub API base URL. amf pr ready and amf pr draft derive their GraphQL endpoint from
     it: …/graphql appended, or a GitHub Enterprise Server …/api/v3 becomes …/api/graphql
@@ -247,7 +253,7 @@ amf doctor checks the configuration.
 // helpTopics maps each amf help <topic> to its text: every command, plus
 // the agents and env topics.
 var helpTopics = map[string]string{
-	"issue": issueUsage, "pr": prUsage, "list": listHelp, "run": runHelp, "watch": watchHelp, "auto": autoHelp, "memory": memoryUsage,
+	"issue": issueUsage, "auth": authUsage, "pr": prUsage, "list": listHelp, "run": runHelp, "watch": watchHelp, "auto": autoHelp, "memory": memoryUsage,
 	"init": initHelp, "pipeline": pipelineHelp, "doctor": doctorHelp, "update": updateHelp,
 	"version": versionHelp, "help": helpHelp, "agents": agentsHelp, "env": envHelp, "flags": flagsHelp,
 }
@@ -314,6 +320,7 @@ var helpSubcommands = map[string][]string{
 	"pr":     prSubcommands,
 	"issue":  issueSubcommands,
 	"memory": {"sync", "similar", "show", "help"},
+	"auth":   authSubcommands,
 }
 
 // helpArgs maps each amf help <topic> that is a command with flags to the
@@ -323,6 +330,7 @@ var helpArgs = map[string][]string{
 	"pipeline": {"pipeline"}, "doctor": {"doctor"}, "update": {"update"}, "version": {"version"},
 	"issue create": {"issue", "create"}, "issue list": {"issue", "list"}, "issue label": {"issue", "label"}, "issue run": {"run"}, "issue watch": {"watch"},
 	"pr list": {"pr", "list"}, "pr merge": {"pr", "merge"}, "pr sweep": {"pr", "sweep"}, "pr view": {"pr", "view"}, "pr diff": {"pr", "diff"},
+	"auth login": {"auth", "login"}, "auth status": {"auth", "status"}, "auth logout": {"auth", "logout"}, "auth token": {"auth", "token"},
 	"memory sync": {"memory", "sync"}, "memory similar": {"memory", "similar"}, "memory show": {"memory", "show"},
 	"pr close": {"pr", "close"}, "pr reopen": {"pr", "reopen"}, "pr ready": {"pr", "ready"}, "pr draft": {"pr", "draft"},
 }
