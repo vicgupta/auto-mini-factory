@@ -614,6 +614,7 @@ creates labels or pushes, and never prints a secret. The checks, in order:
 | `trusted` | `AMF_TRUSTED` is set; lists the logins | `warn` if unset (anyone's issues run), or if it leaves out the token's account, which `amf issue` opens issues as |
 | `agent timeout` | Shows the limit each agent run gets: `AMF_AGENT_TIMEOUT` (and from where) or the 60m default | `FAIL` if `AMF_AGENT_TIMEOUT` isn't a duration or is out of range |
 | `checkout` | The checkout `run` would use: the enclosing one, or `./<name>` | `warn` if `run` would clone first or origin isn't `GITHUB_REPO`; `FAIL` if `./<name>` isn't a clone or there's no origin |
+| `auto state` | No line when the checkout has no `.amf/auto/state.json`, or there is no checkout | `warn` for a saved run: its quoted sentence, merged and remaining counts (including failed issues), and `amf auto --continue` / `amf auto --abort`; unreadable or invalid state also warns with the error and both commands. This check never causes exit 1 |
 | `git push` | `git push --dry-run` to `origin` works with the user's git credentials, without prompting | `FAIL`, with git's message |
 | `git identity` | git has a name and email to commit with, in the checkout (or here); shows them | `FAIL`, with the `git config` commands to set them |
 | `log folder` | `.amf/runs/` in the checkout can be written: doctor writes and removes a file in it, or in the nearest folder above it while it doesn't exist yet | `FAIL`, naming the folder and the error; `skip` without a checkout |
