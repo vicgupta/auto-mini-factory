@@ -99,7 +99,7 @@ The account also needs permission to perform the operation.
 
 **Fix:** Edit `.env` to use a token authorized for the target repository.
 For a fine-grained PAT, grant Contents, Issues and Pull requests read/write
-access, as described in [configuration](../README.md#configuration-env);
+access, as described in [configuration](CONFIGURATION.md#configuration-env);
 check any required organization approval. A classic PAT needs `repo` for
 private repositories. See GitHub's
 [permission reference](https://docs.github.com/en/rest/authentication/permissions-required-for-fine-grained-personal-access-tokens).

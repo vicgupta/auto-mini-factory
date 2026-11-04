@@ -75,10 +75,8 @@ func TestDocumentationCommands(t *testing.T) {
 	if !slices.Equal(names, topCommands) {
 		t.Fatalf("overview commands = %v, want %v", names, topCommands)
 	}
-	for _, path := range []string{"README.md", "docs/COMMANDS.md"} {
-		if got := docTable(t, path, "## Commands"); !reflect.DeepEqual(got, want) {
-			t.Errorf("%s commands = %v, help lists %v", path, got, want)
-		}
+	if got := docTable(t, "docs/COMMANDS.md", "## Commands"); !reflect.DeepEqual(got, want) {
+		t.Errorf("command reference = %v, help lists %v", got, want)
 	}
 	for _, group := range []struct {
 		name, help string
@@ -114,7 +112,7 @@ func TestDocumentationEnvironment(t *testing.T) {
 		t.Fatal("env help has no settings with defaults")
 	}
 	for _, doc := range []struct{ path, heading string }{
-		{"README.md", "### Configuration (.env)"},
+		{"docs/CONFIGURATION.md", "### Configuration (.env)"},
 		{"docs/SPECS.md", "## Configuration (`.env`)"},
 	} {
 		if got := docTable(t, doc.path, doc.heading); !reflect.DeepEqual(got, want) {
@@ -164,7 +162,7 @@ func TestDocumentedFlagsExist(t *testing.T) {
 					}
 				}
 			}
-			for _, path := range []string{"README.md", "docs/COMMANDS.md"} {
+			for _, path := range []string{"README.md", "docs/COMMANDS.md", "docs/CONFIGURATION.md"} {
 				b, err := os.ReadFile(filepath.Join("..", "..", path))
 				if err != nil {
 					t.Fatal(err)

@@ -4,7 +4,7 @@ The details behind the [README](../README.md)'s overview: what each command
 does, its flags, logs and labels. `amf help <command>` (or `amf <command> --help`,
 `-h` for short) prints the same in the terminal; [Flag conventions](#flag-conventions)
 explains the long and short forms. Every setting is in
-[Configuration (.env)](../README.md#configuration-env) and `amf help env`.
+[Configuration (.env)](CONFIGURATION.md#configuration-env) and `amf help env`.
 
 For complete command sequences, see the [examples cookbook](EXAMPLES.md).
 For common failures and fixes, see the [troubleshooting guide](TROUBLESHOOTING.md).
@@ -878,7 +878,7 @@ with an error, times out, or makes no change), amf runs the secondary,
 the default branch, and the PR and issue comment say which agent made the
 change. If both fail, the error names both. Set `AMF_SECONDARY_AGENT=none`
 for no fallback. Either takes `claudecode` (or `claude`), `codex` or
-`opencode`; [Configuration (.env)](../README.md#configuration-env) lists both.
+`opencode`; [Configuration (.env)](CONFIGURATION.md#configuration-env) lists both.
 
 **Changed:** amf used to try claude first; the default order is now codex,
 then claude. Set `AMF_PRIMARY_AGENT=claudecode` and
@@ -934,7 +934,7 @@ Without a pipeline (see below), amf runs one agent once. With Claude Code:
    `.amf/logs/issue-N.log` as it works, one JSON message per line
    (`tail -f` it to follow along). Each agent run may take at most 60 minutes
    (`--agent-timeout`; amf then kills the agent and everything it spawned, or
-   `AMF_AGENT_TIMEOUT` sets it without a flag; see [Configuration (.env)](../README.md#configuration-env)).
+   `AMF_AGENT_TIMEOUT` sets it without a flag; see [Configuration (.env)](CONFIGURATION.md#configuration-env)).
    Codex and opencode run the same way, with the commands in
    [docs/SPECS.md](SPECS.md#agents).
 4. Commits the changes (`Fix #N: <title>`), fails if there are none, and runs
@@ -1067,7 +1067,7 @@ After each issue, and when amf exits (Ctrl-C included), it writes
 git calls, agent time per stage and errors. It prints the same as the last
 line, `amf: summary: 3 issues (2 done, 1 failed, 0 skipped); 41 GitHub calls; log …`.
 
-- `--log-level debug|info|warn|error` (or `AMF_LOG_LEVEL`, see [Configuration (.env)](../README.md#configuration-env)) sets what the
+- `--log-level debug|info|warn|error` (or `AMF_LOG_LEVEL`, see [Configuration (.env)](CONFIGURATION.md#configuration-env)) sets what the
   terminal and the log show. By default the terminal shows `info` and the
   log keeps `debug`.
 - `--log-file PATH` writes the log somewhere else, and `--log-file off`
