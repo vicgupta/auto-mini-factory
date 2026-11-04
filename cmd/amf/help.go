@@ -153,6 +153,9 @@ const updateHelp = `Usage:
   amf update [flags]
 
 Replaces this amf binary with the latest (or given) release.
+
+Release notes (changes in each version):
+https://github.com/vicgupta/auto-mini-factory/releases
 `
 
 const versionHelp = `Usage:

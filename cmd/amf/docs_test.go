@@ -123,6 +123,29 @@ func TestDocumentationEnvironment(t *testing.T) {
 	}
 }
 
+func TestUpdateReleaseNotes(t *testing.T) {
+	const url = "https://github.com/vicgupta/auto-mini-factory/releases"
+	var out strings.Builder
+	if err := run(context.Background(), []string{"help", "update"}, nil, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), url+"\n") {
+		t.Errorf("amf help update omits release notes: %s", &out)
+	}
+	b, err := os.ReadFile(filepath.Join("..", "..", "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, install, ok := strings.Cut(string(b), "## Install\n")
+	if !ok {
+		t.Fatal("README.md: missing Install section")
+	}
+	install, _, _ = strings.Cut(install, "\n## ")
+	if !strings.Contains(install, "]("+url+")") {
+		t.Error("README.md Install section omits release notes link")
+	}
+}
+
 func TestDocumentedFlagsExist(t *testing.T) {
 	flagName := regexp.MustCompile(`(?:^|[\s\[|(])--?([a-zA-Z][a-z-]*)`)
 	for _, cmd := range [][]string{
