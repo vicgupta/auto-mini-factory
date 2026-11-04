@@ -3536,6 +3536,46 @@ func TestHelpTopicPrintsGroupUsage(t *testing.T) {
 	}
 }
 
+func TestHelpSeeAlsoFooters(t *testing.T) {
+	topics := append(topicNames(), "", "list") // overview and hidden alias
+	for group, commands := range helpSubcommands {
+		for _, command := range commands {
+			topics = append(topics, group+" "+command)
+		}
+	}
+	for _, topic := range topics {
+		t.Run(topic, func(t *testing.T) {
+			var out, stderr bytes.Buffer
+			args := append([]string{"help"}, strings.Fields(topic)...)
+			if err := run(context.Background(), args, nil, &out, &stderr); err != nil || stderr.Len() != 0 {
+				t.Fatalf("help: %v, stderr %q", err, &stderr)
+			}
+			_, related, ok := strings.Cut(out.String(), "\n\nSee also: ")
+			if !ok || strings.Count(out.String(), "See also:") != 1 || !strings.HasSuffix(related, "\n") || strings.Contains(strings.TrimSuffix(related, "\n"), "\n") {
+				t.Fatalf("help must end with one See also line:\n%s", &out)
+			}
+			for _, link := range strings.Split(strings.TrimSuffix(related, "\n"), ", ") {
+				target, ok := strings.CutPrefix(link, "amf help ")
+				if !ok || target == "" {
+					t.Fatalf("invalid help link %q", link)
+				}
+				if err := run(context.Background(), append([]string{"help"}, strings.Fields(target)...), nil, io.Discard, io.Discard); err != nil {
+					t.Errorf("%s: %v", link, err)
+				}
+			}
+		})
+	}
+	for _, command := range []string{"run", "issue run"} {
+		var out bytes.Buffer
+		if err := run(context.Background(), append([]string{"help"}, strings.Fields(command)...), nil, &out, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasSuffix(out.String(), "\n\nSee also: amf help agents, amf help env, amf help memory\n") {
+			t.Errorf("%s help must link to agents, env and memory:\n%s", command, &out)
+		}
+	}
+}
+
 func TestHelpUnknownTopic(t *testing.T) {
 	var out, errb bytes.Buffer
 	err := run(context.Background(), []string{"help", "isue"}, nil, &out, &errb)

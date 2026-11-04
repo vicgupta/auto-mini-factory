@@ -17,6 +17,8 @@ Commands:
 
 amf issue "Title" … is a shortcut for amf issue create "Title" …
 Run amf help issue <command> or amf issue <command> --help for its flags.
+
+See also: amf help run, amf help watch, amf help pr
 `
 
 var issueSubcommands = []string{"create", "list", "label", "run", "watch", "help"}

@@ -26,6 +26,8 @@ Commands:
   draft <N>  convert a pull request to a draft
 
 Run amf help pr <command> or amf pr <command> --help for its flags.
+
+See also: amf help issue, amf help run, amf help watch
 `
 
 func cmdPR(ctx context.Context, args []string, stdout, stderr io.Writer) error {

@@ -50,6 +50,8 @@ Exit status:
 amf help <command> exits 0; unknown commands exit 2.
 Some commands return 2 for -h; use amf help <command> in scripts.
 Command-specific value validation can return 1 (for example, amf run 0).
+
+See also: amf help agents, amf help env, amf help flags
 `
 
 const runHelp = `Usage:
@@ -101,8 +103,6 @@ values resolve against it:
   --clone-dir DIR   use (or clone into) DIR instead of the checkout or ./<name>
   --log-file FILE   event log (default .amf/runs/<run_id>/events.jsonl, or off)
 amf keeps its state under <checkout>/.amf/, excluded from git.
-
-amf help agents says which agent runs; amf help env lists the settings.
 `
 
 const watchHelp = `Usage:
@@ -122,8 +122,6 @@ checks passed and labels its issue amf:done, and comments once on a PR
 that can't merge. It doesn't wait for pending checks.
 See merge methods at:
 https://github.com/vicgupta/auto-mini-factory/blob/main/docs/COMMANDS.md#merge-methods
-
-amf help agents says which agent runs; amf help env lists the settings.
 `
 
 const listHelp = `Usage:
@@ -136,7 +134,6 @@ const initHelp = `Usage:
   amf init [flags]
 
 Writes .env (backing up an existing one) and creates amf's labels.
-amf help env lists every setting .env can hold.
 `
 
 const pipelineHelp = `Usage:
@@ -180,6 +177,8 @@ const helpHelp = `Usage:
 Without an argument, prints the overview of commands and topics. With one,
 prints that command's or topic's details: amf help run prints the same as
 amf run --help, and amf help pr merge the same as amf pr merge --help.
+
+See also: amf help agents, amf help env, amf help flags
 `
 
 const agentsHelp = `Choosing the agent
@@ -194,7 +193,9 @@ OPENCODE_MODEL. If neither configured agent can run, amf picks the first of
 claude, codex and opencode that can. amf watch shows what it found for each.
 
 A pipeline in AGENTS.md names each stage's agent, and wins over --agent and
-both settings: see amf help pipeline. amf help env lists the settings.
+both settings.
+
+See also: amf help pipeline, amf help env, amf help run
 `
 
 const envHelp = `Configuration is read from .env (or the environment; environment variables win).
@@ -261,6 +262,8 @@ Placeholders ending in ..., and owner/name, count as unset.
 
 amf init writes the common settings to .env and preserves existing values;
 amf doctor checks the configuration.
+
+See also: amf help init, amf help doctor, amf help auth, amf help agents
 `
 
 // helpTopics maps each amf help <topic> to its text: every command, plus
@@ -284,8 +287,8 @@ func topicNames() []string {
 }
 
 // withHelp makes -h and --help on fs print the help for key: its topic
-// text, its flags in one aligned column, and examples. amf help <key> prints
-// the same, by running the command with --help.
+// text, its flags in one aligned column, examples and related topics.
+// amf help <key> prints the same, by running the command with --help.
 func withHelp(fs *flag.FlagSet, w io.Writer, key string) {
 	// run strips the path flags before the command parses its own, so these
 	// are only listed here; see paths.go.
@@ -307,6 +310,9 @@ func commandHelp(fs *flag.FlagSet, key string) string {
 	printGlobalFlags(&b)
 	if ex := helpExamples[key]; ex != "" {
 		b.WriteString("\nExamples:\n" + ex)
+	}
+	if related := helpSeeAlso[key]; len(related) != 0 {
+		b.WriteString("\nSee also: amf help " + strings.Join(related, ", amf help ") + "\n")
 	}
 	return b.String()
 }
