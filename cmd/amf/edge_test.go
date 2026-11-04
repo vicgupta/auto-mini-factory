@@ -3564,6 +3564,24 @@ func TestUsageListMentionsJSON(t *testing.T) {
 	}
 }
 
+func TestUsageDocumentationPointers(t *testing.T) {
+	for _, args := range [][]string{nil, {"help"}, {"-h"}, {"--help"}} {
+		var out bytes.Buffer
+		var wantErr error
+		if len(args) == 0 {
+			wantErr = errUsage
+		}
+		if err := run(context.Background(), args, nil, &out, &out); !errors.Is(err, wantErr) {
+			t.Fatalf("amf %v: %v, want %v", args, err, wantErr)
+		}
+		for _, want := range []string{"Examples: docs/EXAMPLES.md", "troubleshooting: docs/TROUBLESHOOTING.md"} {
+			if !strings.Contains(out.String(), want) {
+				t.Errorf("amf %v: overview omits %q", args, want)
+			}
+		}
+	}
+}
+
 // The overview lists each command and topic on one line, with no flags,
 // and points to the per-command help.
 func TestUsageIsOverview(t *testing.T) {

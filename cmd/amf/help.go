@@ -40,6 +40,7 @@ every command takes.
 
 Run amf help <command> or amf <command> -h for details.
 Every flag has a long form and common ones a short one: see amf help flags.
+Examples: docs/EXAMPLES.md; troubleshooting: docs/TROUBLESHOOTING.md.
 
 Exit status:
   0  success
