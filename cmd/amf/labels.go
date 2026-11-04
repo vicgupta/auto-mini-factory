@@ -22,10 +22,12 @@ func (s *stringList) Set(v string) error {
 	return nil
 }
 
-// cmdIssueLabel adds and removes labels on one issue, for fixing amf's
-// status labels (or any other) by hand.
+// cmdIssueLabel adds and removes labels on one issue or a filtered set.
 func cmdIssueLabel(ctx context.Context, command string, args []string, stdout, stderr io.Writer) error {
 	fs := newCommandFlags("issue "+command, stderr)
+	state := fs.String("state", "open", "select issues by state: open, closed or all (bulk mode)")
+	label := fs.String("label", "", "select issues with this label (bulk mode)")
+	unlabeled := fs.Bool("unlabeled", false, "select only issues with no labels (bulk mode)")
 	var add, remove stringList
 	if command == "label" {
 		fs.Var(&add, "add", "add this label (repeatable, or comma-separated)")
@@ -40,7 +42,7 @@ func cmdIssueLabel(ctx context.Context, command string, args []string, stdout, s
 			tail, args = args[i+1:], args[:i]
 			break
 		}
-		if args[i] == "--add" || args[i] == "--remove" {
+		if args[i] == "--add" || args[i] == "--remove" || args[i] == "--state" || args[i] == "--label" {
 			i++
 		}
 	}
@@ -52,11 +54,46 @@ func cmdIssueLabel(ctx context.Context, command string, args []string, stdout, s
 		return errUsage
 	}
 	pos = append(pos, tail...)
-	if len(pos) == 0 {
-		fs.Usage()
-		return errUsage
+	bulk := *unlabeled
+	labelSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "state" || f.Name == "label" {
+			bulk = true
+		}
+		if f.Name == "label" {
+			labelSet = true
+		}
+	})
+	*state = strings.ToLower(strings.TrimSpace(*state))
+	switch *state {
+	case "open", "closed", "all":
+	default:
+		return fmt.Errorf("--state must be open, closed or all, got %q", *state)
 	}
-	for _, l := range pos[1:] {
+	*label = strings.TrimSpace(*label)
+	if labelSet && *label == "" {
+		return fmt.Errorf("--label can't be empty")
+	}
+	if *unlabeled && *label != "" {
+		return fmt.Errorf("use --label or --unlabeled, not both")
+	}
+	var n int
+	if !bulk {
+		if len(pos) == 0 {
+			fs.Usage()
+			return errUsage
+		}
+		n, err = parsePRNumber(pos[0])
+		if err != nil {
+			return err
+		}
+		pos = pos[1:]
+	} else if len(pos) > 0 {
+		if _, err := parsePRNumber(pos[0]); err == nil {
+			return fmt.Errorf("use an issue number or bulk selectors, not both")
+		}
+	}
+	for _, l := range pos {
 		if command == "unlabel" {
 			_ = remove.Set(l)
 		} else {
@@ -66,10 +103,6 @@ func cmdIssueLabel(ctx context.Context, command string, args []string, stdout, s
 	if len(add)+len(remove) == 0 {
 		fs.Usage()
 		return errUsage
-	}
-	n, err := parsePRNumber(pos[0])
-	if err != nil {
-		return err
 	}
 	for _, l := range add {
 		if slices.Contains(remove, l) {
@@ -93,13 +126,40 @@ func cmdIssueLabel(ctx context.Context, command string, args []string, stdout, s
 	if err := checkRepo(ctx, gh, cfg.Repo); err != nil {
 		return err
 	}
-	is, err := gh.GetIssue(ctx, n)
-	if err != nil {
-		return err
+	var issues []Issue
+	if bulk {
+		issues, err = gh.ListIssues(ctx, *state, *label, false)
+		if err != nil {
+			return err
+		}
+		if *unlabeled {
+			issues = slices.DeleteFunc(issues, func(is Issue) bool { return len(is.Labels) != 0 })
+		}
+		if len(issues) == 0 {
+			_, err := fmt.Fprintf(stdout, "No matching issues in %s.\n", cfg.Repo)
+			return err
+		}
+	} else {
+		is, err := gh.GetIssue(ctx, n)
+		if err != nil {
+			return err
+		}
+		if is.PullRequest != nil {
+			return fmt.Errorf("#%d is a pull request, not an issue", n)
+		}
+		issues = []Issue{is}
 	}
-	if is.PullRequest != nil {
-		return fmt.Errorf("#%d is a pull request, not an issue", n)
+	for _, is := range issues {
+		if err := updateIssueLabels(ctx, gh, is, add, remove, statuses, stdout); err != nil {
+			return fmt.Errorf("#%d: %w", is.Number, err)
+		}
 	}
+	return nil
+}
+
+func updateIssueLabels(ctx context.Context, gh *GitHub, is Issue, add, remove, statuses []string, stdout io.Writer) error {
+	n := is.Number
+	remove = slices.Clone(remove)
 	// Adding a status label replaces the issue's other status label.
 	if len(statuses) == 1 {
 		for _, l := range statusLabels {
@@ -131,8 +191,8 @@ func cmdIssueLabel(ctx context.Context, command string, args []string, stdout, s
 		added = toAdd
 	}
 	if len(added)+len(removed) == 0 {
-		fmt.Fprintf(stdout, "#%d unchanged\n", n)
-		return nil
+		_, err := fmt.Fprintf(stdout, "#%d unchanged\n", n)
+		return err
 	}
 	var parts []string
 	if len(added) > 0 {
@@ -141,8 +201,8 @@ func cmdIssueLabel(ctx context.Context, command string, args []string, stdout, s
 	if len(removed) > 0 {
 		parts = append(parts, "removed "+strings.Join(removed, ", "))
 	}
-	fmt.Fprintf(stdout, "#%d: %s\n", n, strings.Join(parts, "; "))
-	return nil
+	_, err := fmt.Fprintf(stdout, "#%d: %s\n", n, strings.Join(parts, "; "))
+	return err
 }
 
 // labelFix is one issue whose amf status label disagrees with its

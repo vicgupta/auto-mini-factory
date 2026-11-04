@@ -137,6 +137,102 @@ func TestIssueLabelUnlabelFailures(t *testing.T) {
 	}
 }
 
+func TestIssueBulkLabelBadArgs(t *testing.T) {
+	t.Chdir(t.TempDir())
+	for _, command := range []string{"label", "unlabel"} {
+		for _, args := range [][]string{
+			{"--state", "open"}, {"--unlabeled", " , "},
+			{"--state", "invalid", "bug"}, {"--label", " ", "bug"},
+			{"--label", "bug", "--unlabeled", "docs"},
+			{"7", "--state", "open", "bug"}, {"#7", "--unlabeled", "bug"},
+			{"--unlabeled=false", "bug"},
+		} {
+			var out bytes.Buffer
+			err := run(context.Background(), append([]string{"issue", command}, args...), nil, &out, io.Discard)
+			if err == nil || strings.Contains(err.Error(), "GITHUB_TOKEN") || out.Len() != 0 {
+				t.Errorf("%s %v: err=%v stdout=%q", command, args, err, &out)
+			}
+		}
+		var out, stderr bytes.Buffer
+		if err := run(context.Background(), []string{"issue", command, "--unlabeled", "--help"}, nil, &out, &stderr); err != nil || out.Len() != 0 || !strings.Contains(stderr.String(), "--unlabeled") {
+			t.Errorf("%s help: err=%v out=%q stderr=%q", command, err, &out, &stderr)
+		}
+	}
+	for _, args := range [][]string{
+		{"--state", "all", "--add", "bug", "--remove", "bug"},
+		{"--state", "all", labelDone, labelFailed},
+	} {
+		if err := run(context.Background(), append([]string{"issue", "label"}, args...), nil, io.Discard, io.Discard); err == nil || strings.Contains(err.Error(), "GITHUB_TOKEN") {
+			t.Errorf("%v: err=%v", args, err)
+		}
+	}
+}
+
+func TestIssueBulkLabelFailures(t *testing.T) {
+	for _, scenario := range []string{"listing", "later page", "add", "remove"} {
+		t.Run(scenario, func(t *testing.T) {
+			gh, srv := newFakeGitHub(t)
+			listJSONEnv(t, srv)
+			count := 3
+			if scenario == "later page" {
+				count = 101
+			}
+			for n := 1; n <= count; n++ {
+				gh.issues[n] = &Issue{Number: n, State: "open", Labels: []Label{{Name: "bug"}}}
+			}
+			flaky := failingGitHub(t, srv, func(r *http.Request) bool {
+				switch scenario {
+				case "listing":
+					return r.URL.Path == "/repos/vic/demo/issues"
+				case "later page":
+					return r.URL.Query().Get("page") == "2"
+				default:
+					return r.Method != "GET" && strings.HasPrefix(r.URL.Path, "/repos/vic/demo/issues/2/")
+				}
+			})
+			t.Setenv("AMF_API_URL", flaky.URL)
+			command, label := "label", "docs"
+			if scenario == "remove" {
+				command, label = "unlabel", "bug"
+			}
+			var out bytes.Buffer
+			err := run(context.Background(), []string{"issue", command, "--state", "open", label}, nil, &out, io.Discard)
+			if err == nil || !strings.Contains(err.Error(), "Bad Gateway") {
+				t.Fatalf("err=%v", err)
+			}
+			if scenario == "listing" || scenario == "later page" {
+				if out.Len() != 0 || len(gh.writes) != 0 {
+					t.Fatalf("stdout=%q writes=%v", &out, gh.writes)
+				}
+			} else if !strings.Contains(err.Error(), "#2:") || !strings.HasPrefix(out.String(), "#3:") || strings.Count(out.String(), "\n") != 1 || len(gh.writes) != 1 || !reflect.DeepEqual(labelNames(*gh.issues[1]), []string{"bug"}) {
+				t.Fatalf("err=%v stdout=%q writes=%v", err, &out, gh.writes)
+			}
+		})
+	}
+}
+
+func TestIssueBulkLabelWriteErrors(t *testing.T) {
+	for _, scenario := range []string{"changed", "unchanged", "no matches"} {
+		t.Run(scenario, func(t *testing.T) {
+			gh, srv := newFakeGitHub(t)
+			listJSONEnv(t, srv)
+			label := "docs"
+			if scenario == "unchanged" {
+				label = "bug"
+			}
+			if scenario != "no matches" {
+				for n := 1; n <= 2; n++ {
+					gh.issues[n] = &Issue{Number: n, State: "open", Labels: []Label{{Name: "bug"}}}
+				}
+			}
+			err := run(context.Background(), []string{"issue", "label", "--state", "open", label}, nil, failWriter{}, io.Discard)
+			if err == nil || !strings.Contains(err.Error(), "disk full") || len(gh.writes) > 1 {
+				t.Fatalf("err=%v writes=%v", err, gh.writes)
+			}
+		})
+	}
+}
+
 func TestRunTroubleshooting(t *testing.T) {
 	for _, scenario := range []string{"configuration", "agent unavailable", "merge refused", "success", "help"} {
 		t.Run(scenario, func(t *testing.T) {
