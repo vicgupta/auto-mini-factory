@@ -18,7 +18,7 @@ Usage:
 Commands:
   init       write .env and create amf's labels
   auth       get a GitHub token: login, status, logout, token
-  issue      manage issues: create, list, label, unlabel, run, watch
+  issue      manage issues: create, list, label, unlabel, close, reopen, view, run, watch
   pr         manage pull requests: list, merge, sweep, view, diff, close, reopen, ready, draft
   run        process one issue into a PR (alias of issue run)
   watch      process amf:ready issues as they arrive (alias of issue watch)
@@ -348,6 +348,7 @@ var helpArgs = map[string][]string{
 	"init": {"init"}, "run": {"run"}, "watch": {"watch"}, "auto": {"auto"}, "list": {"issue", "list"},
 	"pipeline": {"pipeline"}, "doctor": {"doctor"}, "update": {"update"}, "man": {"man"}, "version": {"version"},
 	"issue create": {"issue", "create"}, "issue list": {"issue", "list"}, "issue label": {"issue", "label"}, "issue unlabel": {"issue", "unlabel"}, "issue run": {"run"}, "issue watch": {"watch"},
+	"issue close": {"issue", "close"}, "issue reopen": {"issue", "reopen"}, "issue view": {"issue", "view"},
 	"pr list": {"pr", "list"}, "pr merge": {"pr", "merge"}, "pr sweep": {"pr", "sweep"}, "pr view": {"pr", "view"}, "pr diff": {"pr", "diff"},
 	"auth login": {"auth", "login"}, "auth status": {"auth", "status"}, "auth logout": {"auth", "logout"}, "auth token": {"auth", "token"},
 	"memory sync": {"memory", "sync"}, "memory similar": {"memory", "similar"}, "memory show": {"memory", "show"},

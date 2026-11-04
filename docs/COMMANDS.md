@@ -15,7 +15,7 @@ For common failures and fixes, see the [troubleshooting guide](TROUBLESHOOTING.m
 |---|---|
 | `amf init` | write `.env` and create amf's labels |
 | `amf auth` | get a GitHub token: login, status, logout, token |
-| `amf issue` | manage issues: `create`, `list`, `label`, `unlabel`, `run`, `watch` |
+| `amf issue` | manage issues: `create`, `list`, `label`, `unlabel`, `close`, `reopen`, `view`, `run`, `watch` |
 | `amf pr` | manage pull requests: `list`, `merge`, `sweep`, `view`, `diff`, `close`, `reopen`, `ready`, `draft` |
 | `amf run` | process one issue into a PR (alias of `issue run`) |
 | `amf watch` | process `amf:ready` issues as they arrive (alias of `issue watch`) |
@@ -75,6 +75,9 @@ such as `amf run 0`.
 | `amf issue list [--state open\|closed\|all] [--label name] [--search text] [--limit n] [--json]` | list issues, newest first, with their amf labels |
 | `amf issue label <N> [label...] [--add name]... [--remove name]...` | add or remove an issue's labels |
 | `amf issue unlabel <N> [label...]` | remove an issue's labels |
+| `amf issue close <N> [--comment text] [--delete-branch]` | close an issue |
+| `amf issue reopen <N>` | reopen an issue |
+| `amf issue view <N> [--json]` | show an issue |
 | `amf issue run <N> [flags]` | process one issue into a PR: see amf help run |
 | `amf issue watch [flags]` | process amf:ready issues as they arrive: see amf help watch |
 
@@ -190,6 +193,76 @@ beginning with `-` to stop flag parsing.
 ```sh
 amf issue label 42 amf:ready "needs review"
 amf issue unlabel 42 amf:ready bug
+```
+
+### amf issue close
+
+```text
+amf issue close <N> [--comment text] [--delete-branch]
+```
+
+Closes an issue, leaving its labels unchanged. --comment posts its text
+before closing, with configured secrets redacted; a comment failure prevents
+closing. --delete-branch deletes the remote amf/issue-N branch in the
+configured repository after closing. Local branches and worktrees are
+unchanged. A deletion failure (including a missing branch) exits 1 after
+printing the success line; the issue stays closed.
+An already closed issue succeeds without commenting or deleting.
+Accepts `42` or `#42`, rejects pull requests, and needs no git checkout.
+
+```sh
+amf issue close 42 --comment "Superseded by #43"
+amf issue close 42 --delete-branch
+```
+
+Prints `Closed #42 https://github.com/owner/repo/issues/42`, or
+`#42 is already closed`.
+
+### amf issue reopen
+
+```text
+amf issue reopen <N>
+```
+
+Reopens a closed issue, leaving its labels unchanged. An already open issue
+succeeds without a write. Accepts `42` or `#42`, rejects pull requests, and
+needs no git checkout. No command-specific flags.
+
+```sh
+amf issue reopen 42
+```
+
+Prints `Reopened #42 https://github.com/owner/repo/issues/42`, or
+`#42 is already open`.
+
+### amf issue view
+
+```text
+amf issue view <N> [--json]
+```
+
+Shows the title, state, author, all labels, URL and body of an open or closed
+issue. Labels are comma-separated in GitHub's order, or - when empty.
+--json prints one object with number, title, state, url, labels, author and
+body. Labels is an array of names ([] when empty); body is preserved as
+returned by GitHub. Accepts `42` or `#42`, rejects pull requests, and needs
+no git checkout.
+
+```sh
+amf issue view 42
+amf issue view 42 --json
+```
+
+Example output:
+
+```text
+#42 Fix login
+state:     open
+author:    owner
+labels:    bug, amf:ready
+url:       https://github.com/owner/repo/issues/42
+
+Users cannot sign in.
 ```
 
 ### amf pr list
@@ -486,9 +559,9 @@ the same letter. `amf help flags` prints this table; `amf <command> --help`
 | `-B` | `--no-browser` | auth login |
 | `-C` | `--client-id` | auth login |
 | `-c` | `--check` | update |
-| `-c` | `--comment` | pr close |
+| `-c` | `--comment` | issue close, pr close |
 | `-c` | `--continue` | auto |
-| `-d` | `--delete-branch` | pr merge, pr close |
+| `-d` | `--delete-branch` | issue close, pr merge, pr close |
 | `-e` | `--eval-rounds` | run, watch, auto |
 | `-f` | `--file` | issue create |
 | `-f` | `--force` | run, auth token |
@@ -496,7 +569,7 @@ the same letter. `amf help flags` prints this table; `amf <command> --help`
 | `-H` | `--host` | auth login, auth status, auth logout, auth token |
 | `-i` | `--interval` | watch |
 | `-i` | `--issue` | pr list |
-| `-j` | `--json` | issue list, pr list, pr sweep, pr view, memory |
+| `-j` | `--json` | issue list, issue view, pr list, pr sweep, pr view, memory |
 | `-l` | `--label` | issue create, issue list, watch |
 | `-L` | `--limit` | issue list, pr list, memory |
 | `-m` | `--merge` | run, watch, auto, pr sweep |
@@ -647,6 +720,19 @@ Generated from each command's `--help`; `amf init`,
 | `-L, --limit <n>` | print at most N issues, 0 means no limit |
 | `-S, --search <text>` | only issues whose title contains this text, ignoring case |
 | `-s, --state <state>` | open, closed or all (default open) |
+
+### amf issue close
+
+| Flag | What it does |
+|---|---|
+| `-c, --comment <text>` | post a comment on the issue before closing |
+| `-d, --delete-branch` | delete this repository's amf/issue-N branch after closing |
+
+### amf issue view
+
+| Flag | What it does |
+|---|---|
+| `-j, --json` | print one JSON object |
 
 ### amf issue label
 

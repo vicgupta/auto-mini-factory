@@ -148,6 +148,7 @@ func TestHelpExamplesKnownCommands(t *testing.T) {
 func TestDocumentedFlagsExist(t *testing.T) {
 	flagName := regexp.MustCompile(`(?:^|[\s\[|(])--?([a-zA-Z][a-z-]*)`)
 	for _, cmd := range [][]string{
+		{"issue", "close"}, {"issue", "reopen"}, {"issue", "view"},
 		{"issue", "label"}, {"issue", "unlabel"},
 		{"init"}, {"issue", "create"}, {"issue", "list"}, {"issue", "run"}, {"issue", "watch"},
 		{"pr", "list"}, {"pr", "merge"}, {"pr", "view"}, {"pr", "diff"}, {"pr", "close"},

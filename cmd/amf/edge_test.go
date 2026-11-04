@@ -34,6 +34,55 @@ import (
 	"unicode/utf8"
 )
 
+func TestIssueActionsAPIFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name, command, method, path, state string
+		flags                              []string
+		wantState                          string
+		wantWrites                         int
+	}{
+		{"repo", "close", "GET", "/repos/vic/demo", "open", nil, "open", 0},
+		{"read", "view", "GET", "/repos/vic/demo/issues/7", "open", []string{"--json"}, "open", 0},
+		{"comment", "close", "POST", "/repos/vic/demo/issues/7/comments", "open", []string{"--comment", "Reason", "--delete-branch"}, "open", 0},
+		{"close", "close", "PATCH", "/repos/vic/demo/issues/7", "open", []string{"--comment", "Reason", "--delete-branch"}, "open", 1},
+		{"reopen", "reopen", "PATCH", "/repos/vic/demo/issues/7", "closed", nil, "closed", 0},
+		{"delete", "close", "DELETE", "/repos/vic/demo/git/refs/heads/amf/issue-7", "open", []string{"--delete-branch"}, "closed", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gh, srv := newFakeGitHub(t)
+			listJSONEnv(t, srv)
+			gh.issues[7] = &Issue{Number: 7, State: tc.state, HTMLURL: "https://github.com/vic/demo/issues/7"}
+			flaky := failingGitHub(t, srv, func(r *http.Request) bool {
+				return r.Method == tc.method && r.URL.Path == tc.path
+			})
+			t.Setenv("AMF_API_URL", flaky.URL)
+			var out bytes.Buffer
+			err := run(context.Background(), append([]string{"issue", tc.command, "7"}, tc.flags...), nil, &out, io.Discard)
+			if err == nil || !strings.Contains(err.Error(), "Bad Gateway") || gh.issues[7].State != tc.wantState || len(gh.writes) != tc.wantWrites {
+				t.Fatalf("err=%v state=%s writes=%v", err, gh.issues[7].State, gh.writes)
+			}
+			if tc.name == "delete" {
+				if !strings.Contains(err.Error(), "closed #7 but could not delete amf/issue-7") || !strings.HasPrefix(out.String(), "Closed #7 ") {
+					t.Fatalf("err=%v out=%q", err, &out)
+				}
+			} else if out.Len() != 0 {
+				t.Fatalf("unexpected stdout: %q", &out)
+			}
+		})
+	}
+}
+
+func TestIssueActionsWriteErrors(t *testing.T) {
+	gh, srv := newFakeGitHub(t)
+	listJSONEnv(t, srv)
+	for _, args := range [][]string{{"close", "7"}, {"reopen", "7"}, {"view", "7"}, {"view", "7", "--json"}} {
+		gh.issues[7] = &Issue{Number: 7, State: "open", Body: "Details"}
+		if err := run(context.Background(), append([]string{"issue"}, args...), nil, failWriter{}, io.Discard); err == nil || !strings.Contains(err.Error(), "disk full") {
+			t.Errorf("%v: %v", args, err)
+		}
+	}
+}
+
 func TestIssueLabelUnlabelBadArgs(t *testing.T) {
 	t.Chdir(t.TempDir())
 	for _, command := range []string{"label", "unlabel"} {
