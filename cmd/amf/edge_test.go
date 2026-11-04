@@ -34,6 +34,60 @@ import (
 	"unicode/utf8"
 )
 
+func TestIssueLabelUnlabelBadArgs(t *testing.T) {
+	t.Chdir(t.TempDir())
+	for _, command := range []string{"label", "unlabel"} {
+		for _, args := range [][]string{
+			nil, {"7"}, {"7", ""}, {"7", " , "}, {"0", "bug"},
+			{"nope", "bug"}, {"7", "bug", "--unknown"},
+		} {
+			var out, stderr bytes.Buffer
+			err := run(context.Background(), append([]string{"issue", command}, args...), nil, &out, &stderr)
+			if err == nil || strings.Contains(err.Error(), "GITHUB_TOKEN") || out.Len() != 0 {
+				t.Errorf("%s %v: err=%v stdout=%q stderr=%q", command, args, err, &out, &stderr)
+			}
+		}
+		for _, flag := range []string{"-h", "--help"} {
+			var out, stderr bytes.Buffer
+			if err := run(context.Background(), []string{"issue", command, "7", flag}, nil, &out, &stderr); err != nil || out.Len() != 0 || !strings.Contains(stderr.String(), "amf issue "+command) {
+				t.Errorf("%s %s: err=%v stdout=%q stderr=%q", command, flag, err, &out, &stderr)
+			}
+		}
+	}
+}
+
+func TestIssueLabelUnlabelFailures(t *testing.T) {
+	for _, command := range []string{"label", "unlabel"} {
+		for _, scenario := range []string{"pull request", "missing issue", "write fails"} {
+			t.Run(command+"/"+scenario, func(t *testing.T) {
+				gh, srv := newFakeGitHub(t)
+				listJSONEnv(t, srv)
+				gh.issues[7] = &Issue{Number: 7, State: "open", Labels: []Label{{Name: "bug"}}}
+				label, wantErr := "docs", "pull request, not an issue"
+				switch scenario {
+				case "pull request":
+					gh.issues[7].PullRequest = &struct{}{}
+				case "missing issue":
+					delete(gh.issues, 7)
+					wantErr = "404"
+				case "write fails":
+					label, wantErr = "bug", "Bad Gateway"
+					if command == "label" {
+						label = "docs"
+					}
+					flaky := failingGitHub(t, srv, func(r *http.Request) bool { return r.Method != "GET" })
+					t.Setenv("AMF_API_URL", flaky.URL)
+				}
+				var out bytes.Buffer
+				err := run(context.Background(), []string{"issue", command, "7", label}, nil, &out, io.Discard)
+				if err == nil || !strings.Contains(err.Error(), wantErr) || out.Len() != 0 || len(gh.writes) != 0 {
+					t.Fatalf("err=%v, want %q; stdout=%q writes=%v", err, wantErr, &out, gh.writes)
+				}
+			})
+		}
+	}
+}
+
 func TestRunTroubleshooting(t *testing.T) {
 	for _, scenario := range []string{"configuration", "agent unavailable", "merge refused", "success", "help"} {
 		t.Run(scenario, func(t *testing.T) {
