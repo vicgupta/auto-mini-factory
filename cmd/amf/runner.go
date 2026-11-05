@@ -107,8 +107,15 @@ type Runner struct {
 	// MergeRetry is how long amf waits before asking GitHub again to merge a
 	// PR it reports as not mergeable yet, in tests small. 0 means mergeRetry.
 	MergeRetry time.Duration
-	HTTP       *http.Client // for downloading skills; nil means a default client
-	Log        io.Writer    // progress output
+	// MergeSkipChecks merges without waiting for the PR head's checks
+	// (--wait-for-checks=false). By default a merge waits up to
+	// ChecksTimeout for them to pass, polling every ChecksPoll, and treats a
+	// head with no checks after NoChecksGrace as a repo without CI; zero
+	// values mean prChecksTimeout, prChecksPoll and prNoChecksGrace.
+	MergeSkipChecks                          bool
+	ChecksTimeout, ChecksPoll, NoChecksGrace time.Duration
+	HTTP                                     *http.Client // for downloading skills; nil means a default client
+	Log                                      io.Writer    // progress output
 	// DB, when set, also gets every agent's output; Log already sends it
 	// amf's own lines.
 	DB *dbLog

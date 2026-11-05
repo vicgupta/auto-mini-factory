@@ -249,6 +249,7 @@ func cmdRun(ctx context.Context, args []string, stderr io.Writer) (err error) {
 	agent := fs.String("agent", "", agentFlagHelp)
 	draft := fs.Bool("draft", false, draftFlagHelp)
 	merge := addMergeFlag(fs)
+	waitChecks := fs.Bool("wait-for-checks", true, waitChecksFlagHelp)
 	dryRun := fs.Bool("dry-run", false, "make the change on the local branch only: no label, comment, push, PR or merge")
 	force := fs.Bool("force", false, "run even if the issue already has an open PR or an amf/issue-N branch, updating that PR; this replaces the branch, first saving any commits it would drop to amf/backup/issue-N-<sha>-<time>")
 	lo := addLogFlags(fs)
@@ -293,6 +294,7 @@ func cmdRun(ctx context.Context, args []string, stderr io.Writer) (err error) {
 	defer r.Close()
 	r.Draft = *draft
 	r.Merge = merge.value
+	r.MergeSkipChecks = !*waitChecks
 	r.DryRun = *dryRun
 	r.Force = *force
 	if err := r.lockRepo("run"); err != nil {
@@ -320,6 +322,7 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 	agent := fs.String("agent", "", agentFlagHelp)
 	draft := fs.Bool("draft", false, draftFlagHelp)
 	merge := addMergeFlag(fs)
+	waitChecks := fs.Bool("wait-for-checks", true, waitChecksFlagHelp)
 	staleFlag := fs.String("stale-timeout", "", "put amf:in-progress issues no amf works on back to amf:ready after this long, as a Go duration (default AMF_STALE_TIMEOUT, else max(2x agent timeout, 2h); off disables)")
 	lo := addLogFlags(fs)
 	mo := addMemoryFlags(fs)
@@ -374,6 +377,7 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 	r.Draft = *draft
 	r.ExcludeLabels = exclude
 	r.Merge = merge.value
+	r.MergeSkipChecks = !*waitChecks
 	if *staleFlag != "" {
 		if r.StaleTimeout, err = parseStaleTimeout(*staleFlag, "--stale-timeout", r.Timeout); err != nil {
 			return err

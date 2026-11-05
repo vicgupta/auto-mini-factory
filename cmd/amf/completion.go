@@ -40,8 +40,8 @@ func cmdCompletion(args []string, stdout, stderr io.Writer) error {
 // and command groups come from the same lists as help and flag parsing.
 func completionOptions() map[string][]string {
 	const memory = "memory-backend= memory-dir="
-	const run = "agent-timeout= eval-rounds= agent= draft merge dry-run force log-level= log-file= " + memory
-	const watch = "agent-timeout= interval= label= exclude-label= eval-rounds= agent= draft merge stale-timeout= log-level= log-file= " + memory
+	const run = "agent-timeout= eval-rounds= agent= draft merge wait-for-checks dry-run force log-level= log-file= " + memory
+	const watch = "agent-timeout= interval= label= exclude-label= eval-rounds= agent= draft merge wait-for-checks stale-timeout= log-level= log-file= " + memory
 	flags := map[string]string{
 		"init": "", "version": "", "completion": "",
 		"run": run, "issue run": run, "watch": watch, "issue watch": watch,

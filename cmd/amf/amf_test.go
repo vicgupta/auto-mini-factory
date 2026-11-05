@@ -229,6 +229,8 @@ type fakeGitHub struct {
 	// checkRuns are GET /commits/{sha}/check-runs responses; a missing sha
 	// has none.
 	checkRuns map[string][]checkRun
+	// anyCheckRuns answers for a sha missing from checkRuns.
+	anyCheckRuns []checkRun
 }
 
 type fakeError struct {
@@ -599,7 +601,11 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
 	mux.HandleFunc("GET "+repo+"/commits/{sha}/check-runs", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		writeJSON(w, 200, map[string]any{"check_runs": append([]checkRun{}, f.checkRuns[r.PathValue("sha")]...)})
+		runs, ok := f.checkRuns[r.PathValue("sha")]
+		if !ok {
+			runs = f.anyCheckRuns
+		}
+		writeJSON(w, 200, map[string]any{"check_runs": append([]checkRun{}, runs...)})
 	})
 
 	mux.HandleFunc("POST /graphql", func(w http.ResponseWriter, r *http.Request) {
@@ -975,6 +981,8 @@ func TestMain(m *testing.M) {
 	os.Setenv("AMF_API_URL", "http://127.0.0.1:1") // unreachable unless a test sets a fake
 	// No real gh, and no saved token: a test that wants one sets a fake.
 	ghCommand = "amf-test-no-such-gh"
+	// Keep merge check waits short: a fake repo with no checks merges at once.
+	prChecksPoll, prNoChecksGrace, prChecksTimeout = time.Millisecond, 5*time.Millisecond, 2*time.Second
 	cfgDir, err := os.MkdirTemp("", "amf-config-")
 	if err != nil {
 		panic(err)

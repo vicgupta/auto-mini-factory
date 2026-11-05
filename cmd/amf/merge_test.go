@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRunMergesPR(t *testing.T) {
@@ -111,5 +112,46 @@ func TestMergeFlagRejectedAtStartup(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "--merge") {
 			t.Errorf("%v: error %v, want one about --merge", args, err)
 		}
+	}
+}
+
+func TestRunMergeWaitsForChecks(t *testing.T) {
+	cases := []struct {
+		name       string
+		runs       []checkRun
+		skip       bool
+		wantMerged bool
+	}{
+		{"passed", []checkRun{{Name: "build", Status: "completed", Conclusion: "success"}}, false, true},
+		{"none after grace", nil, false, true},
+		{"failed", []checkRun{{Name: "build", Status: "completed", Conclusion: "failure"}}, false, false},
+		{"failed but skipped", []checkRun{{Name: "build", Status: "completed", Conclusion: "failure"}}, true, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			root, _ := setupRepo(t)
+			gh, srv := newFakeGitHub(t)
+			gh.anyCheckRuns = c.runs
+			gh.issues[1] = &Issue{Number: 1, Title: "Add feature file", State: "open", Labels: []Label{{Name: "amf:ready"}}}
+			r, log := newTestRunner(t, srv, root, fakeClaude(t, `cat >/dev/null; echo hello > feature.txt; echo done`))
+			r.Merge = "squash"
+			r.MergeSkipChecks = c.skip
+			r.ChecksPoll, r.ChecksTimeout, r.NoChecksGrace = time.Millisecond, time.Second, 5*time.Millisecond
+
+			_ = r.Run(context.Background(), 1)
+			pr := gh.prs[0]
+			if merged := pr["state"] == "merged"; merged != c.wantMerged {
+				t.Fatalf("PR = %v, merged = %v, want %v\nlog:\n%s", pr, merged, c.wantMerged, log)
+			}
+			if c.wantMerged {
+				return
+			}
+			if got, want := gh.labels(1), []string{"amf:pr-open"}; !reflect.DeepEqual(got, want) {
+				t.Fatalf("labels = %v, want %v", got, want)
+			}
+			if cm := gh.comments[1]; len(cm) != 1 || !strings.Contains(cm[0], "checks failed") {
+				t.Fatalf("comments = %q, want one about failed checks", cm)
+			}
+		})
 	}
 }
