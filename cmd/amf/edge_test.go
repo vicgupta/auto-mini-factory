@@ -4051,6 +4051,7 @@ func TestOutputFlags(t *testing.T) {
 	for _, args := range [][]string{
 		{"--quiet", "version"}, {"version", "-q"}, {"version", "--quiet=false"},
 		{"--color=always", "version"}, {"version", "--color", "never"},
+		{"-O=always", "version"}, {"version", "-O", "never"},
 	} {
 		var out bytes.Buffer
 		if err := run(context.Background(), args, nil, &out, &out); err != nil || out.String() != "amf "+buildVersion()+"\n" {
@@ -4059,6 +4060,7 @@ func TestOutputFlags(t *testing.T) {
 	}
 	for _, args := range [][]string{
 		{"version", "--color"}, {"version", "--color="}, {"version", "--color=rainbow"}, {"version", "--quiet=maybe"},
+		{"version", "-O"}, {"version", "-O="}, {"version", "-O=rainbow"}, {"-O", "rainbow", "version"},
 	} {
 		var stderr bytes.Buffer
 		if err := run(context.Background(), args, nil, io.Discard, &stderr); !errors.Is(err, errUsage) {

@@ -141,8 +141,8 @@ label commands also return stdout write failures. No git checkout is needed.
   `amf help flags` lists the shared letters and states that
   durations are Go durations: `30s`, `5m`, `1h30m`, `2h`. The descriptions of
   `--interval`, `--agent-timeout` and `--stale-timeout` identify Go durations.
-- **Output controls.** Every command accepts `--quiet` (`-q`, default false)
-  and `--color=auto|always|never` (default `auto`), before or after the
+- **Output controls.** Every command accepts `-q, --quiet` (default false)
+  and `-O, --color=auto|always|never` (default `auto`), before or after the
   command name and before `--`. Quiet suppresses progress, including
   checkout and PostgreSQL connection announcements, while retaining warnings,
   errors, help, command results and the final run summary. It raises the
@@ -210,7 +210,7 @@ label commands also return stdout write failures. No git checkout is needed.
   runs a held issue.
 - `--eval-rounds` is how many times a pipeline's eval stage may send the
   change back to the code stage. A negative value is an error.
-- `--draft` (default off; `--draft=false` is the same as leaving it out)
+- `--draft` (`-D`, default off; `--draft=false` is the same as leaving it out)
   opens each PR that `run` or `watch` creates as a draft, with or without a
   pipeline. A retry that updates the branch's open PR leaves it a draft or
   ready for review as it was, whatever the flag says; amf never converts a
