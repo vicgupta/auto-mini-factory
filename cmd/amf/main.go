@@ -45,17 +45,42 @@ const troubleshootingURL = "https://github.com/vicgupta/auto-mini-factory/blob/m
 
 var errUsage = errors.New("usage")
 
+const (
+	exitOK      = 0
+	exitFailed  = 1
+	exitUsage   = 2
+	exitSkipped = 3
+)
+
+// exitCode maps a run error to amf's documented exit status.
+func exitCode(err error) int {
+	switch {
+	case err == nil:
+		return exitOK
+	case errors.Is(err, errUsage):
+		return exitUsage
+	case errors.As(err, new(*skipError)):
+		return exitSkipped
+	default:
+		return exitFailed
+	}
+}
+
+// execute runs amf and prints the error main used to print, except usage and
+// skip errors: the command already printed those.
+func execute(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	err := run(ctx, args, stdin, stdout, stderr)
+	code := exitCode(err)
+	if err != nil && code != exitUsage && code != exitSkipped {
+		fmt.Fprintln(stderr, "amf:", err)
+	}
+	return code
+}
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	err := run(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr)
-	if errors.Is(err, errUsage) {
-		os.Exit(2)
-	}
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "amf:", err)
-		os.Exit(1)
-	}
+	os.Exit(execute(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 }
 
 func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
@@ -283,7 +308,7 @@ func cmdRun(ctx context.Context, args []string, stderr io.Writer) (err error) {
 		return err
 	}
 	defer func() {
-		if err != nil {
+		if err != nil && !errors.As(err, new(*skipError)) {
 			fmt.Fprintln(stderr, "amf: troubleshooting:", troubleshootingURL)
 		}
 	}()

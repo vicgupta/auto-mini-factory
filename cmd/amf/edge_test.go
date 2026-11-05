@@ -4013,6 +4013,40 @@ func TestQuietRun(t *testing.T) {
 	}
 }
 
+func TestRunSkipOutputAndExitCode(t *testing.T) {
+	root, origin := setupRepo(t)
+	gh, srv := newFakeGitHub(t)
+	gh.issues[1] = readyIssue(1, "Add feature file")
+	mustGit(t, root, "push", "origin", "main:refs/heads/amf/issue-1")
+	t.Chdir(root)
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	t.Setenv("GITHUB_REPO", "vic/demo")
+	t.Setenv("AMF_API_URL", srv.URL)
+	t.Setenv("AMF_CLONE_URL", origin)
+	t.Setenv("AMF_PRIMARY_AGENT", "claudecode")
+	t.Setenv("AMF_SECONDARY_AGENT", "none")
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+	t.Setenv("AMF_CLAUDE", fakeAgent(t, "claude", "echo must not run >&2; exit 9"))
+
+	var stdout, stderr bytes.Buffer
+	code := execute(context.Background(), []string{"run", "1", "--log-file", "off"}, nil, &stdout, &stderr)
+	if code != exitSkipped {
+		t.Errorf("exit code = %d, want %d; stderr:\n%s", code, exitSkipped, &stderr)
+	}
+	want := "amf: #1: Add feature file\n" +
+		"amf: #1: branch amf/issue-1 already exists on origin, without an open pull request; delete it, or use amf run 1 --force, to retry\n" +
+		"amf: summary: 0 issues (0 done, 0 failed, 1 skipped); 3 GitHub calls\n"
+	if got := stderr.String(); got != want {
+		t.Errorf("stderr = %q, want %q", got, want)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout = %q, want empty", &stdout)
+	}
+	if got := gh.labels(1); !slices.Equal(got, []string{"amf:ready"}) {
+		t.Errorf("labels = %v, want them untouched", got)
+	}
+}
+
 func TestOutputFlags(t *testing.T) {
 	for _, args := range [][]string{
 		{"--quiet", "version"}, {"version", "-q"}, {"version", "--quiet=false"},

@@ -70,7 +70,7 @@ func (h *statsHandler) Handle(_ context.Context, r slog.Record) error {
 		h.sum.Issues.Done++
 	case "issue.failed":
 		h.sum.Issues.Failed++
-	case "watch.skip":
+	case "issue.skip", "watch.skip":
 		// watch skips the same issue on every poll; count it once.
 		if n := attrs["issue"]; n.Kind() == slog.KindInt64 && !h.skipped[int(n.Int64())] {
 			h.skipped[int(n.Int64())] = true
