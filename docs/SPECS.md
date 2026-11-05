@@ -49,13 +49,23 @@ amf:ready ──▶ amf:in-progress ──▶ amf:pr-open (PR opened, not merged
 
 ## Commands
 
+**Paging:** amf never invokes a pager. `amf pr diff` and `amf memory show`
+write directly to stdout, even in a terminal; there is nothing to disable.
+There is no `--no-pager` flag, and `PAGER` (including `PAGER=cat`) has no effect
+on amf's output. Users can opt into paging with `amf pr diff 42 | less` or
+`amf memory show 42 | less`, as documented in the README.
+
 | Command | Behavior |
 |---|---|
 | `amf init` | Writes `./.env` and creates the labels (see below). |
-| `amf issue <command>` | Groups issue operations: `create`, `list`, `label`, `run`, `watch`. Bare `amf issue`, `amf issue help`, `amf issue -h` and `amf issue --help` print the same group usage to stdout and exit 0, leaving stderr empty, without reading configuration, contacting GitHub or reading stdin. A stdout write failure follows the normal error path (exit 1). `amf issue create` without a title remains a usage error (exit 2). A single-word title within two edits of a subcommand, such as `amf issue lst`, creates nothing: it prints `amf: unknown issue command "lst"`, `Did you mean "list"?` and the way to create it anyway (`amf issue create "lst"`), then the group usage, to stderr and exits 2. The top-level `amf issue "Title"`, `amf run` and `amf watch` forms are aliases for `amf issue create`, `amf issue run` and `amf issue watch`. Top-level `amf list` still runs `amf issue list` as an undocumented alias, kept for existing scripts, and is not listed in the help overview; a mistyped top-level `lst` suggests `issue list`. |
+| `amf issue <command>` | Groups issue operations: `create`, `list`, `label`, `unlabel`, `close`, `reopen`, `view`, `run`, `watch`. Bare `amf issue`, `amf issue help`, `amf issue -h` and `amf issue --help` print the same group usage to stdout and exit 0, leaving stderr empty, without reading configuration, contacting GitHub or reading stdin. A stdout write failure follows the normal error path (exit 1). `amf issue create` without a title remains a usage error (exit 2). A single-word title within two edits of a subcommand, such as `amf issue lst`, creates nothing: it prints `amf: unknown issue command "lst"`, `Did you mean "list"?` and the way to create it anyway (`amf issue create "lst"`), then the group usage, to stderr and exits 2. The top-level `amf issue "Title"`, `amf run` and `amf watch` forms are aliases for `amf issue create`, `amf issue run` and `amf issue watch`. Top-level `amf list` still runs `amf issue list` as an undocumented alias, kept for existing scripts, and is not listed in the help overview; a mistyped top-level `lst` suggests `issue list`. |
 | `amf issue "Title" [--body text \| --file path \| --file -] [--label name] [--no-label]` | Creates an issue labeled `amf:ready` (or `--label`'s label; none with `--no-label`). `amf issue create -h` and `--help`, including either flag after a title in the explicit creation or title shortcut form, print the existing flag help to stderr, leave stdout empty, and exit 0 before validating the title, reading stdin, a body file or configuration, or contacting GitHub. Missing titles, unknown flags and missing flag values remain usage errors (exit 2); help follows normal argument parsing. The title's and the label's surrounding whitespace are trimmed before posting. The body can also come from stdin when it's piped; an explicitly supplied `--body` (`-b`), including an empty value, selects that body and `--body` and a nonempty `--file` (`-f`) together are an error (`use --body or --file, not both`). An explicit `--file -` reads stdin. An explicit `--label` with `--no-label` is an error. An empty or whitespace-only `--label` (without `--no-label`) fails with `--label can't be empty`, before anything is read or fetched. Prints `#N <url>`. |
 | `amf issue list [--state open\|closed\|all] [--label name] [--search text] [--limit n] [--json]` | Lists issues, newest first (highest number first), with every page fetched and PRs left out. `-h` and `--help` print the flag help to stderr, leave stdout empty, and exit 0 before reading configuration or contacting GitHub. Surrounding whitespace on `--state` and `--label` is trimmed, and `--state` ignores letter case; whitespace inside a label name is preserved. An omitted, empty or whitespace-only label applies no label filter. `--search TEXT` (default empty) keeps only issues whose title contains the trimmed text, ignoring case; an empty or whitespace-only value applies no filter, and the filter runs before `--limit`. Columns: `ISSUE`, `STATE` (with `--state all` only), `AMF` (the issue's `amf` and `amf:*` labels, or `-`) and `TITLE`. `--limit N` (default `0`, no limit) prints only the first N issues after filtering, and when that hides some, the table output is followed on stderr by `Showing N of M issues; use --limit 0 to list them all.` (stdout is unchanged, and `--json` prints no hint); a negative value errors with `--limit must be 0 or more, got N`. Tabs in a title print as spaces. `--state` takes only `open`, `closed` or `all`, in any letter case, after trimming surrounding whitespace. Prints `No … in owner/name.` when nothing matches, using the trimmed label when one is set, and `with "TEXT" in the title` after it when `--search` is set. `--json` (default `false`) prints instead one JSON array and a newline, with no header: one object per issue, in the same order and after the same filters and limit, with exactly `number` (integer), `title`, `state`, `url` (the issue's GitHub page) and `labels` (every label name, in GitHub's order, `[]` when none); titles are kept as GitHub sent them, tabs included. Nothing matching prints `[]`. Argument, configuration and API errors leave stdout empty. A failure to write stdout, including the no-matching-issues message, is returned as an error and exits 1. Needs no git checkout. |
-| `amf issue label <N> [--add name]... [--remove name]...` | Adds and removes labels on issue N (`42` or `#42`; a pull request is rejected). `--add` and `--remove` repeat or take comma-separated names; at least one is required, and a name in both is an error. Only labels that change are written: labels already present are not re-added and absent ones are not removed. Adding an amf status label (`amf:in-progress`, `amf:pr-open`, `amf:done`, `amf:failed`) removes the issue's other status labels; adding two status labels is an error. Prints `#N: added A; removed B` or `#N unchanged`. Needs no git checkout. |
+| `amf issue label [<N>] [label...] [--add name]... [--remove name]... [selectors]` | Adds positional labels and adds or removes labels with `--add` and `--remove` on open or closed issue N (`42` or `#42`; a pull request is rejected). Names may be comma-separated; flags repeat. At least one nonblank label is required (there is no default), and a name in both add and remove is an error. Only labels that change are written: labels already present are not re-added and absent ones are not removed. Adding an amf status label (`amf:in-progress`, `amf:pr-open`, `amf:done`, `amf:failed`) removes the issue's other status labels; adding two status labels is an error. Prints `#N: added A; removed B` or `#N unchanged`. `--` ends flag parsing, allowing names beginning with `-`. Needs no git checkout. `-h` and `--help` exit 0 before reading configuration or contacting GitHub. |
+| `amf issue unlabel [<N>] [label...] [selectors]` | Removes the given labels from open or closed issue N (`42` or `#42`; a pull request is rejected), leaving other labels unchanged. Names may be comma-separated; at least one nonblank label is required (there is no default). Duplicate names are removed once; absent labels cost no write. Prints `#N: removed A, B` or `#N unchanged`. `--` ends flag parsing, allowing names beginning with `-`. Needs no git checkout. `-h` and `--help` exit 0 before reading configuration or contacting GitHub. |
+| `amf issue close <N> [--comment text] [--delete-branch]` | Closes issue N (`42` or `#42`, surrounding whitespace trimmed; pull requests rejected). Posts a nonempty `--comment` first, with configured secrets redacted; comment failure prevents closing. Prints `Closed #N <url>`. With `--delete-branch`, deletes only the remote `amf/issue-N` branch in the configured repository after closing; no local branch or worktree is changed. A deletion failure (including a missing branch) exits 1 with `closed #N but could not delete amf/issue-N: …`, leaving the success line on stdout and the issue closed. An already closed issue prints `#N is already closed`, succeeds, and neither comments nor deletes. Labels are unchanged. Needs no git checkout. `-h` and `--help` exit 0 before reading configuration or contacting GitHub. Missing/extra arguments and unknown flags exit 2; invalid issue numbers exit 1. |
+| `amf issue reopen <N>` | Reopens a closed issue N (`42` or `#42`, surrounding whitespace trimmed; pull requests rejected) and prints `Reopened #N <url>`. An already open issue prints `#N is already open`, succeeds, and sends no write. Labels are unchanged. Needs no git checkout. `-h` and `--help` exit 0 before reading configuration or contacting GitHub. Missing/extra arguments and unknown flags exit 2; invalid issue numbers exit 1. |
+| `amf issue view <N> [--json]` | Shows an open or closed issue N (`42` or `#42`, surrounding whitespace trimmed; pull requests rejected). Text prints `#N <title>`, then `state:`, `author:`, `labels:` and `url:` fields (values start in column 12). Labels include every label in GitHub's order, comma-separated, or `-` when none. A nonempty body follows a blank line with trailing newlines normalized to one; an empty body adds no blank line. `--json` prints one object and a newline with exactly `number` (integer), `title`, `state`, `url`, `labels` (names in GitHub's order, `[]` when none), `author` (login) and `body` (as returned by GitHub). HTML characters are not escaped. No comments are fetched. Needs no git checkout. Argument, configuration and API failures leave stdout empty; stdout write failures exit 1. `-h` and `--help` exit 0 before reading configuration or contacting GitHub. Missing/extra arguments and unknown flags exit 2; invalid issue numbers exit 1. |
 | `amf pr` | Prints the pull request command group's usage to stdout, as `amf pr help`, `amf pr -h` and `amf pr --help` do. An unknown subcommand prints `amf: unknown pr command "<word>"` and then that usage to stderr and exits 2; one close to a real subcommand, such as `lst`, also prints `Did you mean "list"?` before the usage. |
 | `amf pr list [--state open\|closed\|merged\|all] [--limit N] [--issue N] [--json]` | Lists pull requests, including drafts, newest first. See [Pull requests](#pull-requests). |
 | `amf pr merge <N> [--squash \| --rebase] [--delete-branch] [--update-branch] [--wait-for-checks]` | Merges a chosen PR (`42` or `#42`); no git checkout needed. See below. |
@@ -70,8 +80,40 @@ amf:ready ──▶ amf:in-progress ──▶ amf:pr-open (PR opened, not merged
 | `amf pipeline [--fetch]` | Checks the pipeline in `AGENTS.md` of the enclosing checkout, as it is on disk. See below. |
 | `amf doctor [--fix-labels]` | Checks the whole setup, one line per check, changing nothing unless `--fix-labels` is given. See below. |
 | `amf update [--version vX.Y.Z] [--check]` | Replaces the running binary with the latest release, or with the given one, which can be a downgrade; surrounding whitespace on `--version` is trimmed. Needs no `.env`. See below. |
+| `amf completion <bash\|zsh\|fish>` | Prints a self-contained script for the selected shell to stdout, with no configuration or GitHub access. Scripts complete visible commands, nested subcommands, help topics, shell names, and command-specific long and short flags, including global path flags. Required flag values are skipped when finding the command; `--` stops command and flag suggestions. Scripts never invoke amf or GitHub during completion. Source Bash output in `.bashrc`, Zsh output after `compinit` in `.zshrc`, or pipe Fish output to `source` in `config.fish`; saved scripts must be regenerated after an upgrade to include new commands and flags. Missing or unsupported shells and extra positional arguments print usage to stderr, leave stdout empty and exit 2. `-h` and `--help` print help to stderr and exit 0; `amf help completion` prints the same help to stdout. A script write failure exits 1. |
 | `amf version` | Prints `amf <version>`: the release tag, or the module version for `go install`. `amf --version` is the same. |
-| `amf help` | Prints the usage, as `-h` and `--help` do. `amf help <command>` prints that command's help; every `pr` and `issue` subcommand has a topic reachable with `amf help <group> <subcommand>` (including `help`, which prints group usage), without reading configuration or contacting GitHub. Unknown multiword topics follow the same error path as unknown single-word topics. For `issue` and `pr` alone it prints the group usage, as `amf issue help` and `amf pr help` do. `amf help agents` describes agent selection, and `amf help env` lists every configuration setting with its default and purpose, matching the README configuration table. The overview command names and descriptions match the README and command reference. An unknown topic is an error: `amf: unknown help topic "x"`, a `Did you mean` suggestion when one is close, then the usage on stderr, exit code 2. |
+| `amf man` | Prints a section 1 man page in roff format to stdout, generated from the help overview and every listed command, subcommand and topic, including flags, examples and configuration settings. Output order is deterministic and has no generation date. Needs no configuration, git checkout, GitHub access or external tools. Takes no positional arguments or command-specific flags; extra arguments and unknown flags exit 2. `-h`, `--help` and `amf help man` print help and exit 0. A stdout write failure exits 1. Redirect output to `amf.1` and install it as `man1/amf.1` in a manual directory for `man amf`; see [Man page](COMMANDS.md#man-page). Generation and installation are manual: neither `install.sh` nor `amf update` installs the page. |
+| `amf help` | Prints the usage, as `-h` and `--help` do. `amf help <command>` prints that command's help; every `pr` and `issue` subcommand has a topic reachable with `amf help <group> <subcommand>` (including `help`, which prints group usage), without reading configuration or contacting GitHub. Unknown multiword topics follow the same error path as unknown single-word topics. For `issue` and `pr` alone it prints the group usage, as `amf issue help` and `amf pr help` do. `amf help agents` describes agent selection, and `amf help env` lists every configuration setting with its default and purpose, matching the [configuration guide](CONFIGURATION.md#configuration-env) table. The overview command names and descriptions match the [command reference](COMMANDS.md#commands). The overview, also printed by bare `amf`, points to `docs/EXAMPLES.md` for examples and `docs/TROUBLESHOOTING.md` for troubleshooting. An unknown topic is an error: `amf: unknown help topic "x"`, a `Did you mean` suggestion when one is close, then the usage on stderr, exit code 2. |
+
+For `issue label` and `issue unlabel`, replace the issue number with one or
+more selectors to operate on a set: `--state open|closed|all` (`-s`),
+`--label NAME` (`-l`), or `--unlabeled`. For example,
+`amf issue label --state open --unlabeled amf:ready` queues every open issue
+that has no labels. An explicit `--state` or `--label`, or a true
+`--unlabeled`, selects bulk mode; omitting selectors retains the single-issue
+form. `--unlabeled=false` alone does not select bulk mode. Bulk state defaults
+to `open`; `closed` and `all` are also accepted. State ignores case and
+surrounding whitespace, and label names have surrounding whitespace trimmed.
+A blank `--label`, an invalid state, or combining `--label` with a true
+`--unlabeled` errors before reading configuration or contacting GitHub.
+`--label` selects issues already carrying that label; `--unlabeled` selects
+issues with zero labels of any kind. Selectors combine.
+The labels to add or remove remain positional (or `--add`/`--remove` for
+`issue label`) and at least one nonblank label is required. Supplying an
+issue number with selectors is rejected: in bulk mode a first positional
+argument that parses as a positive issue number errors, so use `--add` for
+such label names with `issue label`.
+
+Bulk label operations fetch all pages before any writes, exclude pull
+requests, and apply the single-issue label rules independently to each
+match, newest first (highest number first). Each issue prints the same
+result as in single-issue mode, including `#N unchanged`. With no matches,
+stdout is `No matching issues in owner/name.` and the command succeeds.
+A listing error leaves stdout empty and changes nothing. Processing stops
+on the first API or stdout write error (exit 1); an update error names the
+issue as `#N: ...`. Earlier changes remain, and an API failure partway through
+an issue's label updates can leave that issue partially changed. Single-issue
+label commands also return stdout write failures. No git checkout is needed.
 
 - Flags follow one convention on every command (see
   [Flag conventions](COMMANDS.md#flag-conventions)). Each has a long
@@ -83,9 +125,37 @@ amf:ready ──▶ amf:in-progress ──▶ amf:pr-open (PR opened, not merged
   `amf help <command>`, which prints the same text to stdout) shows a usage
   line, a description, every visible flag in one aligned column as
   `-x, --long <value>  description (default ...)`, with `-h, --help` last,
-  and examples. `amf help flags` lists the shared letters and states that
+  and examples. Every command and subcommand has at least one example,
+  including aliases; the overview and group usage also include examples.
+  The `auto` examples include inspecting saved progress with `amf auto status`
+  and removing the saved run with `amf auto --abort`.
+  Command, group and topic help end with a blank line and a
+  single `See also: amf help <topic>, amf help <topic>` line linking related
+  topics, after any flags and examples. Aliases show the same footer as
+  their canonical command; `run` links to `agents`, `env` and `memory`.
+  The overview also ends with a See also line.
+  `amf help flags` lists the shared letters and states that
   durations are Go durations: `30s`, `5m`, `1h30m`, `2h`. The descriptions of
   `--interval`, `--agent-timeout` and `--stale-timeout` identify Go durations.
+- **Output controls.** Every command accepts `--quiet` (`-q`, default false)
+  and `--color=auto|always|never` (default `auto`), before or after the
+  command name and before `--`. Quiet suppresses progress, including
+  checkout and PostgreSQL connection announcements, while retaining warnings,
+  errors, help, command results and the final run summary. It raises the
+  terminal log threshold to at least `warn`, even with `--log-level debug`
+  or `AMF_LOG_LEVEL=debug`; file logging and summary files keep their
+  configured behavior. The final summary remains visible with quiet even
+  when the log threshold is `error` or the event log is off.
+  Color applies to run/watch/auto's `amf:` prefixes and doctor's status
+  labels. Auto uses color only when that output's destination is a terminal,
+  `NO_COLOR` is empty or unset, and `TERM` is not `dumb`. Any nonempty
+  `NO_COLOR` value disables automatic color; `--color=always` overrides it
+  and colors redirected status output too. `--color=never` disables color.
+  `NO_COLOR` and `TERM` are special process environment variables, documented
+  by `amf help env`; they are not read from `.env` or added to init's template
+  (existing `.env` entries are preserved).
+  Stored logs and JSON output remain plain. Invalid output flag values
+  are usage errors (exit 2), before configuration or GitHub access.
 - `--agent-timeout` limits each agent run, not the whole issue; the old
   `--timeout` is accepted as a deprecated alias of it, hidden from help. Both must be at least
   1m and at most 24h, and 0 and negatives are errors; every out-of-range or
@@ -249,9 +319,19 @@ command-specific `--help` and `-h` paths, including `amf run --help`,
 currently exit 2. Scripts needing help to exit successfully should use
 `amf help <command>`. Command-specific value validation can exit 1, such as
 `amf run 0`. Errors print as `amf: <error>` on
-stderr. SIGINT and
-SIGTERM cancel the current step, with the run's process group killed as on
-expiry; the issue is still marked failed.
+stderr. For SIGINT/SIGTERM handling in `run`, `watch` and `auto`, including
+lock release and saved auto progress, see [Signals](../README.md#signals).
+
+### Output
+
+Command data (issue/PR numbers and URLs, tables, JSON and diffs) goes to
+stdout; progress logs, warnings and errors go to stderr. Redirect or pipe
+stdout to capture results while keeping diagnostics visible. Use `--json`
+where available for machine-readable results. Workflow commands such as
+`init`, `auto`, `pr merge`, `pr sweep --wait-for-checks` and `update` also
+print status messages or prompts to stdout, so their output is not always
+a data-only stream. The README and the `amf help output` topic describe
+this contract; the help overview lists the topic.
 
 ### `amf auto`
 

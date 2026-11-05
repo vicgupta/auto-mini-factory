@@ -26,6 +26,7 @@ type doctor struct {
 	w     *tabwriter.Writer
 	fails int
 	login string // the token's account, once GitHub accepted it
+	color bool
 	// fixLabels makes the label state check relabel, not only report.
 	fixLabels bool
 }
@@ -33,6 +34,10 @@ type doctor struct {
 func (d *doctor) line(status, check, format string, a ...any) {
 	if status == "FAIL" {
 		d.fails++
+	}
+	if d.color {
+		code := map[string]string{"ok": "32", "warn": "33", "FAIL": "31", "skip": "36"}[status]
+		status = colorText(status, code)
 	}
 	fmt.Fprintf(d.w, "%s\t%s\t%s\n", status, check, fmt.Sprintf(format, a...))
 }
@@ -50,7 +55,7 @@ func cmdDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) err
 		fmt.Fprintln(stderr, "usage: amf doctor [--fix-labels]")
 		return errUsage
 	}
-	d := &doctor{w: tabwriter.NewWriter(stdout, 0, 4, 2, ' ', 0), fixLabels: *fixLabels}
+	d := &doctor{w: tabwriter.NewWriter(stdout, 0, 4, 2, ' ', 0), fixLabels: *fixLabels, color: commandOutput(ctx).colorEnabled(stdout)}
 	d.check(ctx)
 	d.w.Flush()
 	if d.fails > 0 {
