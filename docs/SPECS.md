@@ -508,8 +508,12 @@ one status comment per head and reason, suggesting `amf run N --force` for a
 conflict. `--dry-run` only reads from GitHub: it reports a conflicting PR
 (GitHub's `mergeable` false or `mergeable_state` `dirty`) as `blocked` with
 that suggestion, not `would-update`; non-conflicting PRs get the read-only
-actions (`would-update`, `would-merge`, `waiting`, `ready` or `blocked`). See
-`amf help pr sweep` for the text and JSON output.
+actions (`would-update`, `would-merge`, `waiting`, `ready` or `blocked`). It
+exits 1 when at least one PR is blocked and none was merged or updated, so a
+sweep that could only block fails; it exits 0 when there was nothing to
+sweep or progress was made. With `--dry-run`, `would-merge` and
+`would-update` count as progress. See `amf help pr sweep` for the text and
+JSON output.
 
 ### `amf pr merge`
 

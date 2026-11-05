@@ -430,6 +430,11 @@ Prints one line per PR, `#N (issue #M) <action>[: reason] <url>`, or
 `issue`, `url`, `action`, `reason` (may be empty) and `commit` (set once
 merged).
 
+Exits 1 when at least one PR is blocked and none was merged or updated, so
+a sweep that could only block fails; it exits 0 when there was nothing to
+sweep or progress was made. With `--dry-run`, `would-merge` and
+`would-update` count as progress.
+
 Example output:
 
 ```text

@@ -17,12 +17,13 @@ import (
 
 // sweepFake is a GitHub with a handful of open PRs in different states.
 type sweepFake struct {
-	mu       sync.Mutex
-	t        *testing.T
-	writes   []string
-	comments map[int][]string
-	heads    map[int]string
-	merged   map[int]bool
+	mu          sync.Mutex
+	t           *testing.T
+	writes      []string
+	comments    map[int][]string
+	heads       map[int]string
+	merged      map[int]bool
+	blockedOnly bool
 }
 
 func newSweepFake(t *testing.T) (*sweepFake, *httptest.Server) {
@@ -54,6 +55,10 @@ func (f *sweepFake) serve(w http.ResponseWriter, r *http.Request) {
 		return p
 	}
 	refs := map[int]string{201: "amf/issue-1", 202: "amf/issue-2", 203: "amf/issue-3", 204: "amf/issue-4", 205: "feature/x", 206: "amf/issue-6", 207: "amf/issue-7", 208: "amf/issue-8", 209: "amf/issue-9"}
+	issueNumbers, prNumbers := []int{1, 2, 3, 4, 6, 8, 9}, []int{209, 208, 207, 206, 205, 204, 203, 202, 201}
+	if f.blockedOnly {
+		issueNumbers, prNumbers = []int{3, 9}, []int{209, 203}
+	}
 	switch {
 	case p == "/repos/vic/demo":
 		writeJSON(w, 200, map[string]any{"default_branch": "main", "permissions": map[string]bool{"push": true}})
@@ -62,13 +67,13 @@ func (f *sweepFake) serve(w http.ResponseWriter, r *http.Request) {
 			f.t.Errorf("issues query %v", r.URL.RawQuery)
 		}
 		var out []map[string]any
-		for _, n := range []int{1, 2, 3, 4, 6, 8, 9} {
+		for _, n := range issueNumbers {
 			out = append(out, map[string]any{"number": n, "state": "open", "labels": []map[string]string{{"name": labelPROpen}}})
 		}
 		writeJSON(w, 200, out)
 	case p == "/repos/vic/demo/pulls" && r.Method == "GET":
 		var out []map[string]any
-		for n := 209; n >= 201; n-- {
+		for _, n := range prNumbers {
 			out = append(out, pr(n, refs[n], n == 206))
 		}
 		writeJSON(w, 200, out)
@@ -192,6 +197,26 @@ func TestPRSweep(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "#204 (issue #4) waiting: checks pending") {
 		t.Errorf("text output = %s", out.String())
+	}
+}
+
+func TestPRSweepBlockedExitCode(t *testing.T) {
+	for _, args := range [][]string{{"pr", "sweep", "-m", "squash"}, {"pr", "sweep", "-n"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			f, srv := newSweepFake(t)
+			f.blockedOnly = true
+			listJSONEnv(t, srv)
+			var out, stderr bytes.Buffer
+			if code := execute(context.Background(), args, strings.NewReader(""), &out, &stderr); code != exitFailed {
+				t.Fatalf("exit code = %d, want %d; stdout:\n%s\nstderr:\n%s", code, exitFailed, &out, &stderr)
+			}
+			if !strings.Contains(out.String(), "#203 (issue #3) blocked") || !strings.Contains(out.String(), "#209 (issue #9) blocked") {
+				t.Errorf("stdout = %s", &out)
+			}
+			if !strings.Contains(stderr.String(), "2 pull requests are blocked") {
+				t.Errorf("stderr = %s", &stderr)
+			}
+		})
 	}
 }
 

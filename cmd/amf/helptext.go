@@ -149,6 +149,11 @@ Prints one line per PR: #N (issue #M) <action>[: reason] <url>, where the
 action is merged, updated, waiting, ready, blocked, or would-update or
 would-merge with --dry-run. --json prints an array of {number, issue, url,
 action, reason, commit}.
+
+Exits 1 when at least one PR is blocked and none was merged or updated, so a
+sweep that could only block fails; it exits 0 when there was nothing to
+sweep or progress was made. With --dry-run, would-merge and would-update
+count as progress.
 `,
 	"pr view": `Usage:
   amf pr view <number> [flags]
