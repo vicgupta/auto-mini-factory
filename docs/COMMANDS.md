@@ -605,6 +605,7 @@ the same letter. `amf help flags` prints this table; `amf <command> --help`
 | `-m` | `--merge` | run, watch, auto, pr sweep |
 | `-n` | `--dry-run` | run, auto, pr sweep |
 | `-o` | `--scopes` | auth login |
+| `-q` | `--quiet` | every command |
 | `-r` | `--rebase` | pr merge |
 | `-s` | `--squash` | pr merge |
 | `-s` | `--state` | issue list, issue label, issue unlabel, pr list |
@@ -638,6 +639,23 @@ The global path flags `--dir <folder>`, `--env-file <file>` and
 short form so they never collide with a command's letters (`-d` is
 `--delete-branch`, `-f` is `--file` or `--force`). Each command's help lists
 them under "Global flags".
+
+The output flags are global too, before or after the command, before `--`:
+
+- `-q, --quiet` suppresses progress, including checkout and database connection
+  announcements. Warnings, errors, command results, help and the final run
+  summary remain visible. It overrides verbose terminal logging without
+  changing the event log's level or the summary file.
+- `--color <mode>` takes `auto` (default), `always` or `never`. It colors
+  `amf:` progress/summary prefixes and doctor's status labels. Auto colors
+  only when the destination is a terminal, `TERM` is not `dumb` and
+  `NO_COLOR` is empty or unset. Any nonempty `NO_COLOR` value disables
+  automatic color; `--color=always` overrides it, even with redirected output.
+  `--color=never` disables color. These environment variables are read from
+  the process environment, not `.env`. Stored logs and JSON remain plain.
+
+For scripts: `amf run 42 --quiet --color=never`. To disable automatic color
+for diagnostics: `NO_COLOR=1 amf doctor`. See also `amf help env`.
 
 Older spellings keep working, though help shows only the forms above. Go's
 flag parser accepts one or two dashes for any flag, so `-agent` and `--a`

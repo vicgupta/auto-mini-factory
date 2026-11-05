@@ -288,7 +288,7 @@ func updatePRBranch(ctx context.Context, gh *GitHub, n int, pr prDetails, stdout
 		return pr, fmt.Errorf("could not compare #%d with %s: %w", n, pr.Base.Ref, err)
 	}
 	if behind == 0 {
-		fmt.Fprintf(stdout, "#%d is up to date with %s\n", n, pr.Base.Ref)
+		progress(ctx, stdout, "#%d is up to date with %s\n", n, pr.Base.Ref)
 		return pr, nil
 	}
 	if err := gh.UpdateBranch(ctx, n, pr.Head.SHA); err != nil {
@@ -299,7 +299,7 @@ func updatePRBranch(ctx context.Context, gh *GitHub, n int, pr prDetails, stdout
 	for {
 		next, err := gh.GetPR(ctx, n)
 		if err == nil && next.Head.SHA != "" && next.Head.SHA != old {
-			fmt.Fprintf(stdout, "Updated #%d with %s (was %d %s behind)\n", n, pr.Base.Ref, behind, plural(behind, "commit", "commits"))
+			progress(ctx, stdout, "Updated #%d with %s (was %d %s behind)\n", n, pr.Base.Ref, behind, plural(behind, "commit", "commits"))
 			return next, nil
 		}
 		if time.Now().After(deadline) {
@@ -316,7 +316,7 @@ func updatePRBranch(ctx context.Context, gh *GitHub, n int, pr prDetails, stdout
 // waitPRChecks waits for the check runs on sha, pr n's head, to pass. A
 // head that reports no checks within prNoChecksGrace is merged as is.
 func waitPRChecks(ctx context.Context, gh *GitHub, n int, sha string, stdout io.Writer) error {
-	fmt.Fprintf(stdout, "Waiting up to %s for checks on #%d (%s)...\n", prChecksTimeout, n, shortSHA(sha))
+	progress(ctx, stdout, "Waiting up to %s for checks on #%d (%s)...\n", prChecksTimeout, n, shortSHA(sha))
 	wctx, cancel := context.WithTimeout(ctx, prChecksTimeout)
 	defer cancel()
 	state, summary, err := gh.waitChecks(wctx, sha, true, prChecksPoll, prNoChecksGrace)
@@ -330,9 +330,9 @@ func waitPRChecks(ctx context.Context, gh *GitHub, n int, sha string, stdout io.
 	case state == "failed":
 		return fmt.Errorf("checks failed on #%d (%s); not merging", n, summary)
 	case state == "none":
-		fmt.Fprintf(stdout, "No checks reported on #%d after %s; merging\n", n, prNoChecksGrace)
+		progress(ctx, stdout, "No checks reported on #%d after %s; merging\n", n, prNoChecksGrace)
 	default:
-		fmt.Fprintf(stdout, "Checks passed on #%d (%s)\n", n, summary)
+		progress(ctx, stdout, "Checks passed on #%d (%s)\n", n, summary)
 	}
 	return nil
 }

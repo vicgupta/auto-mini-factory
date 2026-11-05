@@ -37,7 +37,7 @@ Topics:
   env        configuration: every .env setting, with its default
   flags      flag conventions: long and short forms, shared letters
 
-Paths default to the current directory; amf help run lists the path flags
+Paths default to the current directory; amf help run lists the global flags
 every command takes.
 
 Run amf help <command> or amf <command> -h for details.
@@ -263,6 +263,14 @@ Placeholders ending in ..., and owner/name, count as unset.
 
 amf init writes the common settings to .env and preserves existing values;
 amf doctor checks the configuration.
+
+Special environment variables (environment only, not .env settings):
+  NO_COLOR
+    Any nonempty value disables automatic color. An empty value has no effect.
+    --color=always overrides it; --color=never disables color unconditionally.
+  TERM
+    dumb disables automatic color. Otherwise auto colors status output only
+    when its destination is a terminal.
 
 See also: amf help init, amf help doctor, amf help auth, amf help agents
 `

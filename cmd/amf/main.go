@@ -60,8 +60,15 @@ func main() {
 
 func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	paths = pathOptions{}
+	var output outputOptions
+	args, err := extractOutputFlags(args, &output)
+	if err != nil {
+		fmt.Fprintln(stderr, "amf:", err)
+		return errUsage
+	}
+	ctx = context.WithValue(ctx, outputKey{}, output)
 	var po pathOptions
-	args, err := extractPathFlags(args, &po)
+	args, err = extractPathFlags(args, &po)
 	if err != nil {
 		fmt.Fprintln(stderr, "amf:", err)
 		return errUsage
@@ -504,6 +511,13 @@ func newRunner(ctx context.Context, timeout time.Duration, evalRounds int, agent
 	if err != nil {
 		return nil, err
 	}
+	output := commandOutput(ctx)
+	if output.Quiet {
+		consoleLevel = max(consoleLevel, slog.LevelWarn)
+	}
+	if output.colorEnabled(log) {
+		log = colorPrefixWriter{w: log}
+	}
 	agent, err := parseAgent(agentFlag)
 	if err != nil {
 		return nil, err
@@ -531,6 +545,7 @@ func newRunner(ctx context.Context, timeout time.Duration, evalRounds int, agent
 	}
 	r.DB = db
 	r.Redact = red
+	r.Quiet = output.Quiet
 
 	runID := newRunID()
 	path := lo.File
