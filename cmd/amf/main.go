@@ -311,7 +311,7 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 	fs := flag.NewFlagSet("watch", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	withHelp(fs, stderr, "watch")
-	interval := fs.Duration("interval", 60*time.Second, "how often to poll GitHub")
+	interval := fs.Duration("interval", 60*time.Second, "how often to poll GitHub (Go duration, e.g. 30s or 5m)")
 	label := fs.String("label", labelReady, "process open issues with this label")
 	var exclude labelsFlag
 	fs.Var(&exclude, "exclude-label", "skip issues with this `label`, leaving them as they are (repeatable: any of them skips)")
@@ -320,7 +320,7 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 	agent := fs.String("agent", "", agentFlagHelp)
 	draft := fs.Bool("draft", false, draftFlagHelp)
 	merge := addMergeFlag(fs)
-	staleFlag := fs.String("stale-timeout", "", "put amf:in-progress issues no amf works on back to amf:ready after this long (default AMF_STALE_TIMEOUT, else max(2x agent timeout, 2h); off disables)")
+	staleFlag := fs.String("stale-timeout", "", "put amf:in-progress issues no amf works on back to amf:ready after this long, as a Go duration (default AMF_STALE_TIMEOUT, else max(2x agent timeout, 2h); off disables)")
 	lo := addLogFlags(fs)
 	mo := addMemoryFlags(fs)
 	pos, err := parseArgs(fs, args)
@@ -412,7 +412,7 @@ const draftFlagHelp = "open new pull requests as drafts (a retry leaves an open 
 // addTimeoutFlags registers the agent timeout flags for run and watch:
 // --agent-timeout, and the deprecated --timeout alias next to it.
 func addTimeoutFlags(fs *flag.FlagSet) (at, alias *time.Duration) {
-	at = fs.Duration("agent-timeout", defaultAgentTimeout, "maximum time each agent run may take")
+	at = fs.Duration("agent-timeout", defaultAgentTimeout, "maximum time each agent run may take (Go duration, e.g. 90m or 1h30m)")
 	alias = fs.Duration("timeout", defaultAgentTimeout, "deprecated alias of --agent-timeout")
 	return at, alias
 }

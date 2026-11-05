@@ -609,6 +609,8 @@ the same letter. `amf help flags` prints this table; `amf <command> --help`
 (or `-h`, or `amf help <command>`) lists each command's flags in one column as
 `-x, --long <value>  description (default ...)`.
 
+Durations are Go durations: `30s`, `5m`, `1h30m`, `2h`.
+
 | Short | Long | Commands |
 |---|---|---|
 | `-a` | `--agent` | run, watch, auto |
@@ -838,7 +840,7 @@ Generated from each command's `--help`; `amf init`,
 | Flag | What it does |
 |---|---|
 | `-a, --agent <name>` | agent for issues without a pipeline: claudecode, codex or opencode with no fallback (default: AMF_PRIMARY_AGENT, codex, then AMF_SECONDARY_AGENT, claudecode, if it fails) |
-| `-t, --agent-timeout <duration>` | maximum time each agent run may take (default 1h) |
+| `-t, --agent-timeout <duration>` | maximum time each agent run may take (Go duration, e.g. 90m or 1h30m) (default 1h) |
 | `--draft` | open new pull requests as drafts (a retry leaves an open PR a draft or ready for review as it was) |
 | `-n, --dry-run` | make the change on the local branch only: no label, comment, push, PR or merge |
 | `-e, --eval-rounds <n>` | how many times a pipeline's eval stage may send the change back to code (default 2) |
@@ -854,18 +856,18 @@ Generated from each command's `--help`; `amf init`,
 | Flag | What it does |
 |---|---|
 | `-a, --agent <name>` | agent for issues without a pipeline: claudecode, codex or opencode with no fallback (default: AMF_PRIMARY_AGENT, codex, then AMF_SECONDARY_AGENT, claudecode, if it fails) |
-| `-t, --agent-timeout <duration>` | maximum time each agent run may take (default 1h) |
+| `-t, --agent-timeout <duration>` | maximum time each agent run may take (Go duration, e.g. 90m or 1h30m) (default 1h) |
 | `--draft` | open new pull requests as drafts (a retry leaves an open PR a draft or ready for review as it was) |
 | `-e, --eval-rounds <n>` | how many times a pipeline's eval stage may send the change back to code (default 2) |
 | `-x, --exclude-label <name>` | skip issues with this label, leaving them as they are (repeatable: any of them skips) |
-| `-i, --interval <duration>` | how often to poll GitHub (default 1m) |
+| `-i, --interval <duration>` | how often to poll GitHub (Go duration, e.g. 30s or 5m) (default 1m) |
 | `-l, --label <name>` | process open issues with this label (default amf:ready) |
 | `--log-file <path>` | where the event log goes (default .amf/runs/<run_id>/events.jsonl; "off" for none) |
 | `--log-level <level>` | debug, info, warn or error, for the terminal and the event log (default info, and debug in the event log) |
 | `--memory-backend <backend>` | where amf keeps the repo's memory: sqlite, markdown or logfiles (default sqlite) |
 | `--memory-dir <dir>` | directory the amf-memory folder goes in (default: the current directory) |
 | `-m, --merge[=<method>]` | merge each PR amf opens or updates: --merge (or -m) alone for a merge commit, or a method after = or as the next word: --merge=squash, -m squash, -m rebase |
-| `--stale-timeout <duration>` | put amf:in-progress issues no amf works on back to amf:ready after this long (default AMF_STALE_TIMEOUT, else max(2x agent timeout, 2h); off disables) |
+| `--stale-timeout <duration>` | put amf:in-progress issues no amf works on back to amf:ready after this long, as a Go duration (default AMF_STALE_TIMEOUT, else max(2x agent timeout, 2h); off disables) |
 
 ### amf auto
 
@@ -873,7 +875,7 @@ Generated from each command's `--help`; `amf init`,
 |---|---|
 | `--abort` | abandon the saved run by removing its state |
 | `-a, --agent <name>` | agent for issues without a pipeline: claudecode, codex or opencode with no fallback (default: AMF_PRIMARY_AGENT, codex, then AMF_SECONDARY_AGENT, claudecode, if it fails) |
-| `-t, --agent-timeout <duration>` | maximum time each agent run may take (default 1h) |
+| `-t, --agent-timeout <duration>` | maximum time each agent run may take (Go duration, e.g. 90m or 1h30m) (default 1h) |
 | `-y, --approve` | approve the checkpoint without prompting |
 | `--checkpoint-after <n>` | checkpoint after this many merges (must be positive) (default 1) |
 | `--close-issues` | with --abort, close the created, unmerged issues first |

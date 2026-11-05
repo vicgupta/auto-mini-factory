@@ -134,7 +134,9 @@ label commands also return stdout write failures. No git checkout is needed.
   topics, after any flags and examples. Aliases show the same footer as
   their canonical command; `run` links to `agents`, `env` and `memory`.
   The overview also ends with a See also line.
-  `amf help flags` lists the shared letters.
+  `amf help flags` lists the shared letters and states that
+  durations are Go durations: `30s`, `5m`, `1h30m`, `2h`. The descriptions of
+  `--interval`, `--agent-timeout` and `--stale-timeout` identify Go durations.
 - **Output controls.** Every command accepts `--quiet` (`-q`, default false)
   and `--color=auto|always|never` (default `auto`), before or after the
   command name and before `--`. Quiet suppresses progress, including

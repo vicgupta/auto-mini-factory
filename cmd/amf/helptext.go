@@ -355,6 +355,8 @@ Values follow the flag as the next word or after =: --agent codex,
 --agent=codex, -a codex and -a=codex are the same. A boolean flag takes no
 value (--dry-run), or =true / =false.
 
+Durations are Go durations: 30s, 5m, 1h30m, 2h.
+
 --merge's method is optional: --merge alone is a merge commit, and
 --merge=squash, --merge squash, -m squash and -m=squash all squash. Only the
 words merge, squash and rebase are taken as its method.
