@@ -98,6 +98,11 @@ func (r *Runner) tryMerge(ctx context.Context, n int, base string, pr PullReques
 	if slices.Contains(changed, "AGENTS.md") {
 		return errors.New("the change edits AGENTS.md, which declares amf's pipeline, so amf leaves it for review")
 	}
+	if !r.MergeSkipChecks {
+		if err := r.waitMergeChecks(ctx, n, pr); err != nil {
+			return err
+		}
+	}
 	wait := cmp.Or(r.MergeRetry, mergeRetry)
 	commit, attempts, err := r.GH.mergePRWithRetry(ctx, pr.Number, r.Merge, pr.Head, wait, func(attempt int, err error) {
 		r.event(slog.LevelDebug, "issue.merge", n, fmt.Sprintf("#%d: %s is not mergeable yet; asking again in %s", n, pr.HTMLURL, wait),
@@ -134,3 +139,39 @@ func (g *GitHub) mergePRWithRetry(ctx context.Context, n int, method, sha string
 		}
 	}
 }
+
+// waitMergeChecks waits for the check runs on the head amf pushed to pass
+// before run, watch or auto merge it, as amf pr merge --wait-for-checks
+// does: up to prChecksTimeout (and never past ctx, the run's own deadline).
+// A head that reports no checks within prNoChecksGrace counts as a repo
+// without CI and is merged; failed checks or a timeout leave the PR open.
+func (r *Runner) waitMergeChecks(ctx context.Context, n int, pr PullRequest) error {
+	timeout := cmp.Or(r.ChecksTimeout, prChecksTimeout)
+	r.event(slog.LevelInfo, "issue.checks", n, fmt.Sprintf("#%d: waiting up to %s for checks on %s (%s)", n, timeout, pr.HTMLURL, shortSHA(pr.Head)),
+		"action", "waiting", "number", pr.Number, "sha", pr.Head)
+	wctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	state, summary, err := r.GH.waitChecks(wctx, pr.Head, true, cmp.Or(r.ChecksPoll, prChecksPoll), cmp.Or(r.NoChecksGrace, prNoChecksGrace))
+	switch {
+	case state == "timeout" && ctx.Err() != nil:
+		return ctx.Err()
+	case state == "timeout":
+		err = fmt.Errorf("timed out after %s waiting for checks on %s (%s); not merging", timeout, shortSHA(pr.Head), summary)
+	case err != nil:
+		err = fmt.Errorf("could not read checks on %s: %w; not merging", shortSHA(pr.Head), err)
+	case state == "failed":
+		err = fmt.Errorf("checks failed on %s (%s); not merging", shortSHA(pr.Head), summary)
+	}
+	if err != nil {
+		r.event(slog.LevelWarn, "issue.checks", n, fmt.Sprintf("#%d: %v", n, err), "action", "failed", "number", pr.Number, "state", state, "summary", summary)
+		return err
+	}
+	msg := fmt.Sprintf("#%d: checks passed on %s (%s)", n, shortSHA(pr.Head), summary)
+	if state == "none" {
+		msg = fmt.Sprintf("#%d: no checks reported on %s after %s; merging", n, shortSHA(pr.Head), cmp.Or(r.NoChecksGrace, prNoChecksGrace))
+	}
+	r.event(slog.LevelInfo, "issue.checks", n, msg, "action", state, "number", pr.Number, "summary", summary)
+	return nil
+}
+
+const waitChecksFlagHelp = "with --merge, wait up to 30 minutes for the PR's checks to pass before merging (a head with no checks after 2 minutes is merged); --wait-for-checks=false merges at once"

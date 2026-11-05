@@ -347,7 +347,7 @@ A letter keeps its meaning on every command that has the flag.
   -S  --search           issue list
   -t  --agent-timeout    run, watch, auto
   -u  --update-branch    pr merge
-  -w  --wait-for-checks  auto, pr merge, pr sweep
+  -w  --wait-for-checks  run, watch, auto, pr merge, pr sweep
   -x  --exclude-label    watch
   -y  --approve          auto
 
