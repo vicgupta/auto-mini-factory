@@ -140,6 +140,9 @@ type Runner struct {
 	// pre-start guard: amf runs the issue even though it already has an
 	// open PR or an amf/issue-N branch, and updates that PR.
 	Force bool
+	// backupNote tells the issue comment where process saved the commits
+	// a force push replaced, "" when it saved none.
+	backupNote string
 	// StaleTimeout is how long an issue may stay amf:in-progress, with no
 	// amf process working on it, before watch puts it back to amf:ready
 	// (see sweepStale). 0 turns the sweep off.
@@ -348,6 +351,9 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 	} else {
 		r.statusEvent(n, labelInProgress, status)
 	}
+	if r.backupNote != "" {
+		msg += "\n\n" + r.backupNote
+	}
 	r.comment(ctx, n, msg)
 	r.event(slog.LevelDebug, "issue.done", n, fmt.Sprintf("#%d: done", n), "pr", pr.Number)
 	if merr != nil {
@@ -402,6 +408,11 @@ func (r *Runner) process(ctx context.Context, issue Issue, base string, p *Pipel
 
 	r.event(slog.LevelInfo, "issue.push", n, fmt.Sprintf("#%d: pushing %s", n, branch), "branch", branch)
 	// amf owns amf/issue-* branches, so a re-run may replace an earlier push.
+	// Any commits on it that the new push would drop are saved first.
+	r.backupNote = ""
+	if err := r.backupBranch(ctx, wt, n, branch, base); err != nil {
+		return PullRequest{}, false, err
+	}
 	if _, err := git(ctx, wt, "push", "--force", "-u", "origin", branch); err != nil {
 		return PullRequest{}, false, err
 	}
@@ -970,4 +981,39 @@ func (r *Runner) confirmMerged(ctx context.Context, n int) bool {
 		return true
 	}
 	return pr.Merged
+}
+
+// backupBranch saves the remote branch before process force-pushes over it:
+// when origin/branch has commits that are neither on origin/base nor in the
+// new local head, they are pushed to amf/backup/issue-N-<sha>-<time> first.
+// A failed backup is an error, so amf never overwrites commits it could not
+// save.
+func (r *Runner) backupBranch(ctx context.Context, wt string, n int, branch, base string) error {
+	out, err := git(ctx, wt, "ls-remote", "--heads", "origin", "refs/heads/"+branch)
+	if err != nil {
+		return fmt.Errorf("could not check origin/%s before replacing it: %w", branch, err)
+	}
+	fields := strings.Fields(out)
+	if len(fields) == 0 {
+		return nil // a new branch: nothing to replace
+	}
+	old := fields[0]
+	if _, err := git(ctx, wt, "fetch", "origin", old); err != nil {
+		return fmt.Errorf("could not fetch origin/%s before replacing it: %w", branch, err)
+	}
+	lost, err := git(ctx, wt, "rev-list", "--count", old, "^HEAD", "^origin/"+base)
+	if err != nil {
+		return fmt.Errorf("could not compare origin/%s before replacing it: %w", branch, err)
+	}
+	if strings.TrimSpace(lost) == "0" {
+		return nil
+	}
+	backup := fmt.Sprintf("amf/backup/issue-%d-%s-%s", n, shortSHA(old), time.Now().UTC().Format("20060102T150405Z"))
+	if _, err := git(ctx, wt, "push", "origin", old+":refs/heads/"+backup); err != nil {
+		return fmt.Errorf("not replacing %s: could not back up its %s commit(s) to %s: %w", branch, strings.TrimSpace(lost), backup, err)
+	}
+	r.event(slog.LevelInfo, "issue.backup", n, fmt.Sprintf("#%d: backed up %s (%s, %s commit(s) not in the new push) to %s", n, branch, shortSHA(old), strings.TrimSpace(lost), backup),
+		"branch", branch, "sha", old, "backup", backup)
+	r.backupNote = fmt.Sprintf("The earlier `%s` (%s) had %s commit(s) this push replaced; amf saved them to the `%s` branch.", branch, shortSHA(old), strings.TrimSpace(lost), backup)
+	return nil
 }

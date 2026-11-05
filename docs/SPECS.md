@@ -996,7 +996,12 @@ and exit code are preserved.
    the error names the offending paths. Changes elsewhere, even under a
    directory whose name contains `.github`, are fine.
 8. **Push.** `git push --force -u origin amf/issue-N`, with the user's git
-   credentials.
+   credentials. If `origin/amf/issue-N` already exists and has commits that
+   are neither on the base nor in the new head (a `--force` re-run that
+   starts over), amf first pushes its old tip to
+   `amf/backup/issue-N-<shortsha>-<UTC time>`, logs it, and names it in the
+   issue comment. If that backup push fails, amf stops without replacing
+   the branch.
 9. **PR.** Open `amf/issue-N` → `<default>`, titled `Fix #N: <title>`. If
    the branch already has an open PR (a retry), the push has updated it, so
    amf replaces that PR's title and body instead. With `--draft`, the create
