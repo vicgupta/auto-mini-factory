@@ -251,7 +251,7 @@ func cmdRun(ctx context.Context, args []string, stderr io.Writer) (err error) {
 	merge := addMergeFlag(fs)
 	waitChecks := fs.Bool("wait-for-checks", true, waitChecksFlagHelp)
 	dryRun := fs.Bool("dry-run", false, "make the change on the local branch only: no label, comment, push, PR or merge")
-	force := fs.Bool("force", false, "run even if the issue already has an open PR or an amf/issue-N branch, updating that PR")
+	force := fs.Bool("force", false, "run even if the issue already has an open PR or an amf/issue-N branch, updating that PR; this replaces the branch, first saving any commits it would drop to amf/backup/issue-N-<sha>-<time>")
 	lo := addLogFlags(fs)
 	mo := addMemoryFlags(fs)
 	pos, err := parseArgs(fs, args)

@@ -858,7 +858,7 @@ Generated from each command's `--help`; `amf init`,
 | `--draft` | open new pull requests as drafts (a retry leaves an open PR a draft or ready for review as it was) |
 | `-n, --dry-run` | make the change on the local branch only: no label, comment, push, PR or merge |
 | `-e, --eval-rounds <n>` | how many times a pipeline's eval stage may send the change back to code (default 2) |
-| `-f, --force` | run even if the issue already has an open PR or an amf/issue-N branch, updating that PR |
+| `-f, --force` | run even if the issue already has an open PR or an amf/issue-N branch, updating that PR; this replaces the branch, first saving any commits it would drop to amf/backup/issue-N-<sha>-<time> |
 | `--log-file <path>` | where the event log goes (default .amf/runs/<run_id>/events.jsonl; "off" for none) |
 | `--log-level <level>` | debug, info, warn or error, for the terminal and the event log (default info, and debug in the event log) |
 | `--memory-backend <backend>` | where amf keeps the repo's memory: sqlite, markdown or logfiles (default sqlite) |
