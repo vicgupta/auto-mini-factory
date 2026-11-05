@@ -92,6 +92,7 @@ The binary installer and `amf update` do not install the man page.
 - `0` — success.
 - `1` — a command failed (for example, a GitHub error, agent failure, or refused merge).
 - `2` — a usage error (for example, no command, an unknown command or flag, or missing arguments).
+- `3` — `amf run` skipped the issue because it already has an open PR or an `amf/issue-N` branch. Nothing changed; `--force` may run it.
 
 `amf --help` and `amf help <command>` exit `0`; unknown commands exit `2`.
 Some commands currently return `2` for `amf <command> --help` (or `-h`),
@@ -1167,7 +1168,8 @@ Without a pipeline (see below), amf runs one agent once. With Claude Code:
    `amf/issue-N` it labels the issue `amf:pr-open` and stops; with an
    `amf/issue-N` branch on origin and no open PR it stops too (unless the
    issue is `amf:failed`, which is a retry). `--force` skips this check.
-   Then labels the issue `amf:in-progress` and removes `amf:ready`.
+   A skip prints its reason once, counts as one skipped in the summary, and
+   exits 3. Then labels the issue `amf:in-progress` and removes `amf:ready`.
 2. Fetches the default branch and creates a worktree at
    `.amf/worktrees/issue-N` on branch `amf/issue-N` from `origin/<default>`.
 3. Runs `claude -p --dangerously-skip-permissions --output-format stream-json --verbose` in the
