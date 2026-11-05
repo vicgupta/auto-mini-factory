@@ -593,7 +593,11 @@ duration per agent run (default `AMF_AGENT_TIMEOUT` or `60m`, range `1m` to
 `24h`), with deprecated alias `--timeout`. `--eval-rounds` defaults to 2 and accepts nonnegative integers.
 `--draft` defaults off and cannot be combined with `--merge`.
 `--merge[=merge|squash|rebase]` defaults off; bare `--merge` uses a merge
-commit. `--log-level` selects debug, info, warn or error (default info in the
+commit. With `--merge`, `--wait-for-checks` (`-w`, default on) waits up to
+30 minutes for the PR's checks to pass before merging; failed or timed-out
+checks leave the PR open with `amf:pr-open` and a comment, and a head with no
+checks after 2 minutes is merged. `--wait-for-checks=false` merges at once.
+`amf auto` merges always wait. `--log-level` selects debug, info, warn or error (default info in the
 terminal, debug in the event log, or `AMF_LOG_LEVEL`). `--log-file PATH`
 overrides the event log path; `off` disables it.
 
@@ -651,7 +655,7 @@ Durations are Go durations: `30s`, `5m`, `1h30m`, `2h`.
 | `-S` | `--search` | issue list |
 | `-t` | `--agent-timeout` | run, watch, auto |
 | `-u` | `--update-branch` | pr merge |
-| `-w` | `--wait-for-checks` | auto, pr merge, pr sweep |
+| `-w` | `--wait-for-checks` | run, watch, auto, pr merge, pr sweep |
 | `-x` | `--exclude-label` | watch |
 | `-y` | `--approve` | auto |
 
@@ -860,6 +864,7 @@ Generated from each command's `--help`; `amf init`,
 | `--memory-backend <backend>` | where amf keeps the repo's memory: sqlite, markdown or logfiles (default sqlite) |
 | `--memory-dir <dir>` | directory the amf-memory folder goes in (default: the current directory) |
 | `-m, --merge[=<method>]` | merge each PR amf opens or updates: --merge (or -m) alone for a merge commit, or a method after = or as the next word: --merge=squash, -m squash, -m rebase |
+| `-w, --wait-for-checks` | with --merge, wait up to 30 minutes for the PR's checks to pass before merging (a head with no checks after 2 minutes is merged); --wait-for-checks=false merges at once (default true) |
 
 ### amf watch
 
@@ -878,6 +883,7 @@ Generated from each command's `--help`; `amf init`,
 | `--memory-dir <dir>` | directory the amf-memory folder goes in (default: the current directory) |
 | `-m, --merge[=<method>]` | merge each PR amf opens or updates: --merge (or -m) alone for a merge commit, or a method after = or as the next word: --merge=squash, -m squash, -m rebase |
 | `--stale-timeout <duration>` | put amf:in-progress issues no amf works on back to amf:ready after this long, as a Go duration (default AMF_STALE_TIMEOUT, else max(2x agent timeout, 2h); off disables) |
+| `-w, --wait-for-checks` | with --merge, wait up to 30 minutes for the PR's checks to pass before merging (a head with no checks after 2 minutes is merged); --wait-for-checks=false merges at once (default true) |
 
 ### amf auto
 
