@@ -8,6 +8,7 @@ explains the long and short forms. Every setting is in
 
 For complete command sequences, see the [examples cookbook](EXAMPLES.md).
 For common failures and fixes, see the [troubleshooting guide](TROUBLESHOOTING.md).
+For every `--json` command and its schema, see the [JSON output index](JSON.md).
 
 ## Commands
 

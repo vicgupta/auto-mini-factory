@@ -173,6 +173,26 @@ func TestUpdateReleaseNotes(t *testing.T) {
 	}
 }
 
+func TestJSONDocumentationCoversJSONCommands(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", "docs", "JSON.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := string(b)
+	for _, cmd := range helpCommands {
+		hasJSON := slices.ContainsFunc(helpFlags(commandHelpOutput(t, cmd)), func(f helpFlag) bool {
+			return f.long == "json"
+		})
+		if !hasJSON {
+			continue
+		}
+		name := "amf " + strings.Join(cmd, " ")
+		if !strings.Contains(doc, "`"+name) {
+			t.Errorf("docs/JSON.md omits %s", name)
+		}
+	}
+}
+
 func TestHelpExamplesKnownCommands(t *testing.T) {
 	// Include commands embedded in shell substitutions, such as auth token.
 	command := regexp.MustCompile(`(?:^|\$\()amf\s+([^\s)]+)(?:\s+([^\s)]+))?`)
