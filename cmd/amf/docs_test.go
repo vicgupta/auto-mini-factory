@@ -75,10 +75,8 @@ func TestDocumentationCommands(t *testing.T) {
 	if !slices.Equal(names, topCommands) {
 		t.Fatalf("overview commands = %v, want %v", names, topCommands)
 	}
-	for _, path := range []string{"README.md", "docs/COMMANDS.md"} {
-		if got := docTable(t, path, "## Commands"); !reflect.DeepEqual(got, want) {
-			t.Errorf("%s commands = %v, help lists %v", path, got, want)
-		}
+	if got := docTable(t, "docs/COMMANDS.md", "## Commands"); !reflect.DeepEqual(got, want) {
+		t.Errorf("command reference = %v, help lists %v", got, want)
 	}
 	for _, group := range []struct {
 		name, help string
@@ -143,7 +141,7 @@ func TestDocumentationEnvironment(t *testing.T) {
 		t.Fatal("env help has no settings with defaults")
 	}
 	for _, doc := range []struct{ path, heading string }{
-		{"README.md", "### Configuration (.env)"},
+		{"docs/CONFIGURATION.md", "### Configuration (.env)"},
 		{"docs/SPECS.md", "## Configuration (`.env`)"},
 	} {
 		if got := docTable(t, doc.path, doc.heading); !reflect.DeepEqual(got, want) {
@@ -152,9 +150,35 @@ func TestDocumentationEnvironment(t *testing.T) {
 	}
 }
 
+func TestHelpExamplesKnownCommands(t *testing.T) {
+	// Include commands embedded in shell substitutions, such as auth token.
+	command := regexp.MustCompile(`(?:^|\$\()amf\s+([^\s)]+)(?:\s+([^\s)]+))?`)
+	for key, examples := range helpExamples {
+		t.Run(key, func(t *testing.T) {
+			for _, line := range strings.Split(strings.TrimSpace(examples), "\n") {
+				matches := command.FindAllStringSubmatch(strings.TrimSpace(line), -1)
+				if len(matches) == 0 {
+					t.Errorf("example has no amf command: %q", line)
+					continue
+				}
+				for _, m := range matches {
+					if !slices.Contains(topCommands, m[1]) {
+						t.Errorf("example uses unknown command %q: %q", m[1], line)
+					}
+					if subs, ok := helpSubcommands[m[1]]; ok && !slices.Contains(subs, m[2]) {
+						t.Errorf("example uses unknown %s subcommand %q: %q", m[1], m[2], line)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestDocumentedFlagsExist(t *testing.T) {
 	flagName := regexp.MustCompile(`(?:^|[\s\[|(])--?([a-zA-Z][a-z-]*)`)
 	for _, cmd := range [][]string{
+		{"issue", "close"}, {"issue", "reopen"}, {"issue", "view"},
+		{"issue", "label"}, {"issue", "unlabel"},
 		{"init"}, {"issue", "create"}, {"issue", "list"}, {"issue", "run"}, {"issue", "watch"},
 		{"pr", "list"}, {"pr", "merge"}, {"pr", "view"}, {"pr", "diff"}, {"pr", "close"},
 		{"pr", "reopen"}, {"pr", "ready"}, {"pr", "draft"},
@@ -193,7 +217,7 @@ func TestDocumentedFlagsExist(t *testing.T) {
 					}
 				}
 			}
-			for _, path := range []string{"README.md", "docs/COMMANDS.md"} {
+			for _, path := range []string{"README.md", "docs/COMMANDS.md", "docs/CONFIGURATION.md"} {
 				b, err := os.ReadFile(filepath.Join("..", "..", path))
 				if err != nil {
 					t.Fatal(err)

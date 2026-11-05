@@ -132,6 +132,9 @@ func (r *Runner) summarize(final bool) {
 	level := slog.LevelDebug
 	if final {
 		level = slog.LevelInfo
+		if r.Quiet {
+			fmt.Fprintln(r.Log, "amf:", text)
+		}
 	}
 	lowest := any(nil)
 	if s.RateLimitLowest != nil {
