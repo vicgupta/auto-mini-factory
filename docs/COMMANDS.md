@@ -30,6 +30,15 @@ For every `--json` command and its schema, see the [JSON output index](JSON.md).
 | `amf version` | print amf's version |
 | `amf help` | show help for a command or topic |
 
+## Topics
+
+| Topic | What it covers |
+|---|---|
+| `amf help agents` | [Choosing the agent](#choosing-the-agent) and its fallback |
+| `amf help env` | [Configuration (.env)](CONFIGURATION.md#configuration-env), including defaults |
+| `amf help flags` | [Flag conventions](#flag-conventions): long and short forms |
+| `amf help output` | [Output](../README.md#output): stdout data, stderr diagnostics and status messages |
+
 Setup and utility examples:
 
 ```sh
