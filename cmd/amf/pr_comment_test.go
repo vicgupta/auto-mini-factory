@@ -52,6 +52,37 @@ func TestPRComment(t *testing.T) {
 	}
 }
 
+func TestPRCommentRequiresPullRequest(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		issue bool
+		n     string
+		want  string
+	}{
+		{name: "issue", issue: true, n: "101", want: "#101 is not a pull request in vic/demo"},
+		{name: "nonexistent", n: "999", want: "#999 is not a pull request in vic/demo"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gh, srv := newFakeGitHub(t)
+			if tc.issue {
+				gh.issues[101] = &Issue{Number: 101, State: "open", HTMLURL: "https://github.com/vic/demo/issues/101"}
+			}
+			listJSONEnv(t, srv)
+			var out, stderr bytes.Buffer
+			err := run(context.Background(), []string{"pr", "comment", tc.n, "--body", "Hi"}, nil, &out, &stderr)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want %q", err, tc.want)
+			}
+			if out.Len() != 0 {
+				t.Fatalf("stdout = %q, want empty", &out)
+			}
+			if len(gh.comments) != 0 {
+				t.Fatalf("posted comments despite error: %v", gh.comments)
+			}
+		})
+	}
+}
+
 func TestPRCommentRejectsBadBody(t *testing.T) {
 	gh, srv := newFakeGitHub(t)
 	gh.prs = []map[string]string{{"head": "feature/topic", "base": "main", "state": "open"}}

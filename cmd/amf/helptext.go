@@ -185,7 +185,8 @@ changed files.
 Posts a comment on a pull request. Exactly one of --body or --file is
 required; --file reads a file, or stdin for --file -. An empty or
 whitespace-only comment is rejected. Configured secrets are redacted.
-Prints the comment's URL.
+The number must be a pull request; an issue fails with
+"#N is not a pull request in OWNER/REPO". Prints the comment's URL.
 `,
 	"pr close": `Usage:
   amf pr close <number> [flags]
