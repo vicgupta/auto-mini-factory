@@ -106,6 +106,7 @@ type dbLog struct {
 	cfg        pgConfig
 	host, repo string
 	local      io.Writer // for amf's own warnings about the database
+	quiet      bool      // suppress connection progress on the terminal
 	red        *redactor // masks every line before it is queued
 
 	mu      sync.Mutex
@@ -162,16 +163,16 @@ const (
 // connects (and creates what's missing) before returning, so the first line
 // says whether that worked.
 func startDBLog(ctx context.Context, c pgConfig, repo string, local io.Writer, red *redactor) *dbLog {
-	d := &dbLog{cfg: c, host: hostname(), repo: repo, local: local, red: red, ch: make(chan logRow, dbLogQueue), done: make(chan struct{})}
+	d := &dbLog{cfg: c, host: hostname(), repo: repo, local: local, quiet: commandOutput(ctx).Quiet, red: red, ch: make(chan logRow, dbLogQueue), done: make(chan struct{})}
 	conn, created, err := openLogDatabase(ctx, c, true)
 	d.first = append(d.connectAttrs(conn, err), "created", created)
 	switch {
 	case err != nil:
 		fmt.Fprintf(local, "amf: warning: can't log to PostgreSQL at %s: %v; logging locally only, and retrying\n", c, err)
 	case created:
-		fmt.Fprintf(local, "amf: created database %s at %s; logging there too\n", logDatabase, c)
+		progress(ctx, local, "amf: created database %s at %s; logging there too\n", logDatabase, c)
 	default:
-		fmt.Fprintf(local, "amf: logging to database %s at %s too\n", logDatabase, c)
+		progress(ctx, local, "amf: logging to database %s at %s too\n", logDatabase, c)
 	}
 	d.conn = conn
 	go d.run(err != nil)
@@ -262,7 +263,9 @@ func (d *dbLog) run(down bool) {
 		err := d.send(&pending)
 		if err == nil {
 			if down {
-				fmt.Fprintf(d.local, "amf: logging to PostgreSQL at %s again\n", d.cfg)
+				if !d.quiet {
+					fmt.Fprintf(d.local, "amf: logging to PostgreSQL at %s again\n", d.cfg)
+				}
 				down, backoff = false, time.Second
 			}
 			d.mu.Lock()

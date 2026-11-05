@@ -46,6 +46,7 @@ var shortFlags = map[string]string{
 	"limit":           "L",
 	"merge":           "m",
 	"no-browser":      "B",
+	"quiet":           "q",
 	"rebase":          "r",
 	"scopes":          "o",
 	"search":          "S",
@@ -164,6 +165,7 @@ func flagPlaceholder(f *flag.Flag) string {
 
 // placeholders name the value a flag takes, where its type says too little.
 var placeholders = map[string]string{
+	"color": "mode",
 	"agent": "name", "label": "name", "exclude-label": "name", "log-level": "level", "log-file": "path",
 	"state": "state", "search": "text", "comment": "text", "version": "tag", "stale-timeout": "duration",
 	"memory-backend": "backend", "memory-dir": "dir",
@@ -210,9 +212,11 @@ func flagLines(fs *flag.FlagSet) [][2]string {
 // command's help.
 var pathFlags = map[string]bool{"dir": true, "env-file": true, "clone-dir": true}
 
-// printGlobalFlags lists the path flags every command takes.
+// printGlobalFlags lists the flags every command takes.
 func printGlobalFlags(w io.Writer) {
 	fs := flag.NewFlagSet("global", flag.ContinueOnError)
+	fs.Bool("quiet", false, "suppress progress; keep warnings, errors and the final summary")
+	fs.String("color", "auto", "color status output: auto, always or never (auto honors NO_COLOR)")
 	fs.String("dir", "", "work as if amf were started in this `folder` (default: the current directory)")
 	fs.String("env-file", "", "read only this .env `file` (default: ./.env, then the checkout's top-level .env)")
 	fs.String("clone-dir", "", "use, or clone GITHUB_REPO into, this `folder` (default: the enclosing checkout, else ./<repo name>)")

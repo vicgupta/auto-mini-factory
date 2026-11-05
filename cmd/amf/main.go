@@ -60,8 +60,15 @@ func main() {
 
 func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	paths = pathOptions{}
+	var output outputOptions
+	args, err := extractOutputFlags(args, &output)
+	if err != nil {
+		fmt.Fprintln(stderr, "amf:", err)
+		return errUsage
+	}
+	ctx = context.WithValue(ctx, outputKey{}, output)
 	var po pathOptions
-	args, err := extractPathFlags(args, &po)
+	args, err = extractPathFlags(args, &po)
 	if err != nil {
 		fmt.Fprintln(stderr, "amf:", err)
 		return errUsage
@@ -98,6 +105,10 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return cmdDoctor(ctx, rest, stdout, stderr)
 	case "update":
 		return cmdUpdate(ctx, rest, stdout, stderr)
+	case "completion":
+		return cmdCompletion(rest, stdout, stderr)
+	case "man":
+		return cmdMan(ctx, rest, stdout, stderr)
 	case "--version":
 		fmt.Fprintln(stdout, "amf", buildVersion())
 		return nil
@@ -300,7 +311,7 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 	fs := flag.NewFlagSet("watch", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	withHelp(fs, stderr, "watch")
-	interval := fs.Duration("interval", 60*time.Second, "how often to poll GitHub")
+	interval := fs.Duration("interval", 60*time.Second, "how often to poll GitHub (Go duration, e.g. 30s or 5m)")
 	label := fs.String("label", labelReady, "process open issues with this label")
 	var exclude labelsFlag
 	fs.Var(&exclude, "exclude-label", "skip issues with this `label`, leaving them as they are (repeatable: any of them skips)")
@@ -309,7 +320,7 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 	agent := fs.String("agent", "", agentFlagHelp)
 	draft := fs.Bool("draft", false, draftFlagHelp)
 	merge := addMergeFlag(fs)
-	staleFlag := fs.String("stale-timeout", "", "put amf:in-progress issues no amf works on back to amf:ready after this long (default AMF_STALE_TIMEOUT, else max(2x agent timeout, 2h); off disables)")
+	staleFlag := fs.String("stale-timeout", "", "put amf:in-progress issues no amf works on back to amf:ready after this long, as a Go duration (default AMF_STALE_TIMEOUT, else max(2x agent timeout, 2h); off disables)")
 	lo := addLogFlags(fs)
 	mo := addMemoryFlags(fs)
 	pos, err := parseArgs(fs, args)
@@ -401,7 +412,7 @@ const draftFlagHelp = "open new pull requests as drafts (a retry leaves an open 
 // addTimeoutFlags registers the agent timeout flags for run and watch:
 // --agent-timeout, and the deprecated --timeout alias next to it.
 func addTimeoutFlags(fs *flag.FlagSet) (at, alias *time.Duration) {
-	at = fs.Duration("agent-timeout", defaultAgentTimeout, "maximum time each agent run may take")
+	at = fs.Duration("agent-timeout", defaultAgentTimeout, "maximum time each agent run may take (Go duration, e.g. 90m or 1h30m)")
 	alias = fs.Duration("timeout", defaultAgentTimeout, "deprecated alias of --agent-timeout")
 	return at, alias
 }
@@ -500,6 +511,13 @@ func newRunner(ctx context.Context, timeout time.Duration, evalRounds int, agent
 	if err != nil {
 		return nil, err
 	}
+	output := commandOutput(ctx)
+	if output.Quiet {
+		consoleLevel = max(consoleLevel, slog.LevelWarn)
+	}
+	if output.colorEnabled(log) {
+		log = colorPrefixWriter{w: log}
+	}
 	agent, err := parseAgent(agentFlag)
 	if err != nil {
 		return nil, err
@@ -527,6 +545,7 @@ func newRunner(ctx context.Context, timeout time.Duration, evalRounds int, agent
 	}
 	r.DB = db
 	r.Redact = red
+	r.Quiet = output.Quiet
 
 	runID := newRunID()
 	path := lo.File
@@ -681,7 +700,7 @@ func isTerminal(r io.Reader) bool {
 	return err == nil && st.Mode()&os.ModeCharDevice != 0
 }
 
-var topCommands = []string{"init", "auth", "issue", "pr", "run", "watch", "auto", "memory", "pipeline", "doctor", "update", "version", "help"}
+var topCommands = []string{"init", "auth", "issue", "pr", "run", "watch", "auto", "memory", "pipeline", "doctor", "update", "completion", "man", "version", "help"}
 
 // suggestCommand returns the command closest to a mistyped one, or "" when
 // nothing is close enough to be a likely typo.
