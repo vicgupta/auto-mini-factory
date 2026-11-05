@@ -88,8 +88,9 @@ scopes search stale-timeout state timeout version`)
 func flagNeedsValue(name, command, subcommand string) bool {
 	if len(name) == 1 {
 		switch name {
-		case "f": // --file on issue creation, --force elsewhere
-			return command == "issue" && (subcommand == "create" || !slices.Contains(issueSubcommands, subcommand))
+		case "f": // --file on issue creation and pr comment, --force elsewhere
+			return command == "issue" && (subcommand == "create" || !slices.Contains(issueSubcommands, subcommand)) ||
+				command == "pr" && subcommand == "comment"
 		case "c": // --comment, --check or --continue
 			return (command == "issue" || command == "pr") && subcommand == "close"
 		case "s": // --state or --squash

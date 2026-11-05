@@ -247,7 +247,7 @@ func TestDocumentedFlagsExist(t *testing.T) {
 		{"issue", "close"}, {"issue", "reopen"}, {"issue", "view"},
 		{"issue", "label"}, {"issue", "unlabel"},
 		{"init"}, {"issue", "create"}, {"issue", "list"}, {"issue", "run"}, {"issue", "watch"},
-		{"pr", "list"}, {"pr", "merge"}, {"pr", "view"}, {"pr", "diff"}, {"pr", "close"},
+		{"pr", "list"}, {"pr", "merge"}, {"pr", "view"}, {"pr", "diff"}, {"pr", "comment"}, {"pr", "close"},
 		{"pr", "reopen"}, {"pr", "ready"}, {"pr", "draft"},
 		{"run"}, {"watch"}, {"auto"}, {"pipeline"}, {"doctor"}, {"update"},
 	} {

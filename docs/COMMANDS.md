@@ -17,7 +17,7 @@ For every `--json` command and its schema, see the [JSON output index](JSON.md).
 | `amf init` | write `.env` and create amf's labels |
 | `amf auth` | get a GitHub token: login, status, logout, token |
 | `amf issue` | manage issues: `create`, `list`, `label`, `unlabel`, `close`, `reopen`, `view`, `run`, `watch` |
-| `amf pr` | manage pull requests: `list`, `merge`, `sweep`, `view`, `diff`, `close`, `reopen`, `ready`, `draft` |
+| `amf pr` | manage pull requests: `list`, `merge`, `sweep`, `view`, `diff`, `comment`, `close`, `reopen`, `ready`, `draft` |
 | `amf run` | process one issue into a PR (alias of `issue run`) |
 | `amf watch` | process `amf:ready` issues as they arrive (alias of `issue watch`) |
 | `amf auto` | plan one sentence into up to 5 issues and merge their PRs, pausing after the first by default |
@@ -124,6 +124,7 @@ such as `amf run 0`.
 | `amf pr sweep [--merge[=method]] [--wait-for-checks] [--dry-run] [--json]` | update, merge and label the open amf pull requests |
 | `amf pr view <N> [--json]` | show a pull request |
 | `amf pr diff <N> [--name-only]` | show a pull request's diff, or one changed path per line |
+| `amf pr comment <N> (--body text \| --file path)` | post a comment on a pull request |
 | `amf pr close <N> [--comment text] [--delete-branch]` | close a pull request |
 | `amf pr reopen <N>` | reopen a pull request |
 | `amf pr ready <N>` | mark a draft pull request ready for review |
@@ -508,6 +509,28 @@ Example output with `--name-only`:
 src/login.go
 ```
 
+### amf pr comment
+
+```text
+amf pr comment <N> (--body text | --file path)
+```
+
+Posts a comment on a pull request. Exactly one of --body or --file is
+required; --file reads a file, or stdin for --file -. An empty or
+whitespace-only comment is rejected, and configured secrets are redacted.
+Prints the comment's URL. There is no --json flag.
+
+```sh
+amf pr comment 57 --body "Looks good to me"
+amf pr comment 57 --file review.md
+```
+
+Example output:
+
+```text
+https://github.com/owner/repo/pull/57#issuecomment-123456789
+```
+
 ### amf pr close
 
 ```text
@@ -640,7 +663,7 @@ Durations are Go durations: `30s`, `5m`, `1h30m`, `2h`.
 | Short | Long | Commands |
 |---|---|---|
 | `-a` | `--agent` | run, watch, auto |
-| `-b` | `--body` | issue create |
+| `-b` | `--body` | issue create, pr comment |
 | `-B` | `--no-browser` | auth login |
 | `-C` | `--client-id` | auth login |
 | `-c` | `--check` | update |
@@ -649,7 +672,7 @@ Durations are Go durations: `30s`, `5m`, `1h30m`, `2h`.
 | `-d` | `--delete-branch` | issue close, pr merge, pr close |
 | `-D` | `--draft` | run, watch |
 | `-e` | `--eval-rounds` | run, watch, auto |
-| `-f` | `--file` | issue create |
+| `-f` | `--file` | issue create, pr comment |
 | `-f` | `--force` | run, auth token |
 | `-h` | `--help` | every command |
 | `-H` | `--host` | auth login, auth status, auth logout, auth token |
@@ -981,6 +1004,13 @@ Generated from each command's `--help`; `amf init`,
 | Flag | What it does |
 |---|---|
 | `--name-only` | print one changed path per line instead of the diff |
+
+### amf pr comment
+
+| Flag | What it does |
+|---|---|
+| `-b, --body <text>` | text of the comment |
+| `-f, --file <path>` | read the comment from the file at path (- for stdin) |
 
 ### amf pr close
 

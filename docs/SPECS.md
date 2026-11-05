@@ -75,6 +75,7 @@ on amf's output. Users can opt into paging with `amf pr diff 42 | less` or
 | `amf pr merge <N> [--squash \| --rebase] [--delete-branch] [--update-branch] [--wait-for-checks]` | Merges a chosen PR (`42` or `#42`); no git checkout needed. See below. |
 | `amf pr view <N> [--json]` | Shows one pull request without a git checkout. See below. |
 | `amf pr diff <N> [--name-only]` | Prints a pull request's unified diff, or one changed path per line with `--name-only`; no git checkout needed. See below. |
+| `amf pr comment <N> (--body text \| --file path)` | Posts a comment on a chosen PR (`42` or `#42`), with configured secrets redacted; no git checkout needed. Exactly one of `--body` and `--file` is required, `--file -` reads stdin, and an empty or whitespace-only comment is rejected. Prints the comment URL. See below. |
 | `amf pr close <N> [--comment text] [--delete-branch]` | Closes a chosen PR (`42` or `#42`); no git checkout needed. See below. |
 | `amf pr reopen <N>` | Reopens a chosen closed PR (`42` or `#42`); no git checkout needed. See below. |
 | `amf pr ready <N>` | Marks a draft pull request ready for review; no git checkout needed. See below. |
@@ -648,6 +649,25 @@ A diff GitHub refuses as too large (a 406 or 422 whose message contains
 
 The other GitHub calls are unchanged: they still send
 `Accept: application/vnd.github+json`. On any error nothing is written to
+stdout, and a failure to write stdout is an error.
+
+### `amf pr comment`
+
+`amf pr comment <N> (--body TEXT | --file PATH)` reads `.env` and the
+environment and checks repository access, as `amf issue list` does, and needs
+no git checkout. Exactly one positive PR number is required; its surrounding
+whitespace is trimmed. Missing or extra arguments and unknown flags exit 2,
+and an invalid number exits 1.
+
+Exactly one of `--body` and `--file` must be given. `--file PATH` reads the
+comment from PATH, and `--file -` reads stdin. Giving both fails with
+`use --body or --file, not both`; giving neither fails with
+`use --body or --file`. An empty or whitespace-only comment fails with
+`comment body can't be empty` before configuration is read or GitHub is
+contacted. The comment is posted with
+`POST /repos/{repo}/issues/N/comments` `{"body":"..."}`; configured secrets
+are redacted like amf's other comments. The command prints the `html_url` of
+the created comment, one line on stdout. On any error nothing is written to
 stdout, and a failure to write stdout is an error.
 
 ### `amf pr close` and `amf pr reopen`

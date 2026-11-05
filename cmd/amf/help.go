@@ -19,7 +19,7 @@ Commands:
   init       write .env and create amf's labels
   auth       get a GitHub token: login, status, logout, token
   issue      manage issues: create, list, label, unlabel, close, reopen, view, run, watch
-  pr         manage pull requests: list, merge, sweep, view, diff, close, reopen, ready, draft
+  pr         manage pull requests: list, merge, sweep, view, diff, comment, close, reopen, ready, draft
   run        process one issue into a PR (alias of issue run)
   watch      process amf:ready issues as they arrive (alias of issue watch)
   auto       plan one sentence into up to 5 issues and merge their PRs, pausing after the first by default
@@ -383,7 +383,7 @@ var helpArgs = map[string][]string{
 	"pr list": {"pr", "list"}, "pr merge": {"pr", "merge"}, "pr sweep": {"pr", "sweep"}, "pr view": {"pr", "view"}, "pr diff": {"pr", "diff"},
 	"auth login": {"auth", "login"}, "auth status": {"auth", "status"}, "auth logout": {"auth", "logout"}, "auth token": {"auth", "token"},
 	"memory sync": {"memory", "sync"}, "memory similar": {"memory", "similar"}, "memory show": {"memory", "show"},
-	"pr close": {"pr", "close"}, "pr reopen": {"pr", "reopen"}, "pr ready": {"pr", "ready"}, "pr draft": {"pr", "draft"},
+	"pr comment": {"pr", "comment"}, "pr close": {"pr", "close"}, "pr reopen": {"pr", "reopen"}, "pr ready": {"pr", "ready"}, "pr draft": {"pr", "draft"},
 }
 
 func init() {

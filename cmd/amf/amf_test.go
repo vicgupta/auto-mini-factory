@@ -362,10 +362,24 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
 	mux.HandleFunc("POST "+repo+"/issues/{n}/comments", func(w http.ResponseWriter, r *http.Request) {
 		var in struct{ Body string }
 		decode(t, r, &in)
-		f.withIssue(w, r, func(is *Issue) {
-			f.comments[is.Number] = append(f.comments[is.Number], in.Body)
-			writeJSON(w, 201, map[string]any{})
-		})
+		n, _ := strconv.Atoi(r.PathValue("n"))
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		isPR := false
+		if _, ok := f.issues[n]; !ok {
+			_, inView := f.views[n]
+			if !inView && (n < 101 || n > 100+len(f.prs)) {
+				writeJSON(w, 404, map[string]string{"message": "Not Found"})
+				return
+			}
+			isPR = true
+		}
+		f.comments[n] = append(f.comments[n], in.Body)
+		page := "issues"
+		if isPR {
+			page = "pull"
+		}
+		writeJSON(w, 201, map[string]any{"html_url": fmt.Sprintf("https://github.com/vic/demo/%s/%d#issuecomment-%d", page, n, len(f.comments[n]))})
 	})
 	mux.HandleFunc("POST "+repo+"/pulls", func(w http.ResponseWriter, r *http.Request) {
 		var raw map[string]any

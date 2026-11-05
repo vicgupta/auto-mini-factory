@@ -619,7 +619,18 @@ func (g *GitHub) RemoveLabel(ctx context.Context, n int, label string) error {
 }
 
 func (g *GitHub) Comment(ctx context.Context, n int, body string) error {
-	return g.do(ctx, "POST", g.repoPath("/issues/%d/comments", n), map[string]any{"body": body}, nil)
+	_, err := g.CreateComment(ctx, n, body)
+	return err
+}
+
+// CreateComment posts a comment on an issue or pull request and returns its
+// HTML URL.
+func (g *GitHub) CreateComment(ctx context.Context, n int, body string) (string, error) {
+	var out struct {
+		HTMLURL string `json:"html_url"`
+	}
+	err := g.do(ctx, "POST", g.repoPath("/issues/%d/comments", n), map[string]any{"body": body}, &out)
+	return out.HTMLURL, err
 }
 
 // CreatePR opens a pull request from head into base, as a draft when draft
