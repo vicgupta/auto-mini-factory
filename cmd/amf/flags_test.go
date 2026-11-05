@@ -23,7 +23,7 @@ var helpCommands = [][]string{
 	{"pr", "list"}, {"pr", "merge"}, {"pr", "view"}, {"pr", "diff"}, {"pr", "close"},
 	{"pr", "reopen"}, {"pr", "ready"}, {"pr", "draft"},
 	{"memory", "sync"}, {"memory", "similar"}, {"memory", "show"},
-	{"pipeline"}, {"doctor"}, {"update"}, {"version"},
+	{"pipeline"}, {"doctor"}, {"update"}, {"completion"}, {"version"},
 }
 
 type helpFlag struct{ short, long, line string }

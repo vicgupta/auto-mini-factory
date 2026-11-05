@@ -222,6 +222,7 @@ var helpSeeAlso = map[string][]string{
 	"doctor":         {"init", "env", "auth"},
 	"update":         {"version"},
 	"version":        {"update"},
+	"completion":     {"help", "flags"},
 	"man":            {"help", "flags"},
 	"issue create":   {"issue label", "issue list", "run"},
 	"issue label":    {"issue unlabel", "issue list", "run", "watch"},

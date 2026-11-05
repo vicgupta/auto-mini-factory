@@ -27,6 +27,7 @@ Commands:
   pipeline   check the plan/code/eval pipeline in this checkout's AGENTS.md
   doctor     check the setup here, changing nothing
   update     replace this amf binary with the latest (or given) release
+  completion  print a shell completion script for bash, zsh or fish
   man        generate a man page from amf's help text
   version    print amf's version
   help       show help for a command or topic
@@ -272,6 +273,7 @@ var helpTopics = map[string]string{
 	"issue": issueUsage, "auth": authUsage, "pr": prUsage, "list": listHelp, "run": runHelp, "watch": watchHelp, "auto": autoHelp, "memory": memoryUsage,
 	"init": initHelp, "pipeline": pipelineHelp, "doctor": doctorHelp, "update": updateHelp,
 	"version": versionHelp, "man": manHelp, "help": helpHelp, "agents": agentsHelp, "env": envHelp, "flags": flagsHelp,
+	"completion": completionHelp,
 }
 
 // topicNames is every help topic, for typo suggestions.
@@ -347,6 +349,7 @@ var helpSubcommands = map[string][]string{
 var helpArgs = map[string][]string{
 	"init": {"init"}, "run": {"run"}, "watch": {"watch"}, "auto": {"auto"}, "list": {"issue", "list"},
 	"pipeline": {"pipeline"}, "doctor": {"doctor"}, "update": {"update"}, "man": {"man"}, "version": {"version"},
+	"completion":   {"completion"},
 	"issue create": {"issue", "create"}, "issue list": {"issue", "list"}, "issue label": {"issue", "label"}, "issue unlabel": {"issue", "unlabel"}, "issue run": {"run"}, "issue watch": {"watch"},
 	"issue close": {"issue", "close"}, "issue reopen": {"issue", "reopen"}, "issue view": {"issue", "view"},
 	"pr list": {"pr", "list"}, "pr merge": {"pr", "merge"}, "pr sweep": {"pr", "sweep"}, "pr view": {"pr", "view"}, "pr diff": {"pr", "diff"},

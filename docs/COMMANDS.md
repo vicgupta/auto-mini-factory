@@ -24,9 +24,16 @@ For common failures and fixes, see the [troubleshooting guide](TROUBLESHOOTING.m
 | `amf pipeline` | check the plan/code/eval pipeline in this checkout's `AGENTS.md` |
 | `amf doctor` | check the setup here, changing nothing |
 | `amf update` | replace this amf binary with the latest (or given) release |
+| `amf completion` | print a shell completion script for bash, zsh or fish |
 | `amf man` | generate a man page from amf's help text |
 | `amf version` | print amf's version |
 | `amf help` | show help for a command or topic |
+
+`amf completion <bash|zsh|fish>` prints a self-contained completion script
+to stdout, without reading configuration or contacting GitHub. See
+[Shell completion](../README.md#shell-completion) for shell startup snippets.
+`amf completion --help` and `amf help completion` explain how to source it.
+A missing or unsupported shell, or extra arguments, is a usage error (exit 2).
 
 ## Man page
 

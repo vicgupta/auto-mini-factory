@@ -47,6 +47,36 @@ amf update --version v0.0.7   # install a specific release (also downgrades)
 against `checksums.txt`, makes sure the new binary runs, then swaps it in place
 of the running one. It needs write access to the folder `amf` is in.
 
+### Shell completion
+
+`amf completion bash|zsh|fish` prints a script that completes commands,
+subcommands and their long and short flags, including global path flags.
+It needs no `.env` or GitHub access.
+
+For Bash, add this to `~/.bashrc`:
+
+```bash
+source <(amf completion bash)
+```
+
+For Zsh, add this to `~/.zshrc` after initializing completion (omit the first
+line if your shell configuration already runs `compinit`):
+
+```zsh
+autoload -Uz compinit; compinit
+source <(amf completion zsh)
+```
+
+For Fish, add this to `~/.config/fish/config.fish`:
+
+```fish
+amf completion fish | source
+```
+
+Start a new shell, or run the appropriate snippet to enable completion now.
+You can also save the output to a file and source it; regenerate that file
+after upgrading amf to pick up new commands and flags.
+
 ## Quick start
 
 Have a git identity and credentials that can push to your repo. See
@@ -84,6 +114,7 @@ amf memory show 42 | less
 
 - [Command reference](docs/COMMANDS.md): commands, flags, exit status, paths and logs
 - [Man page](docs/COMMANDS.md#man-page): generate and install with `amf man`
+- [Shell completion](#shell-completion): enable completion in bash, zsh or fish
 - [Configuration](docs/CONFIGURATION.md): `.env`, authentication and `amf doctor`
 - [Examples cookbook](docs/EXAMPLES.md): complete workflows
 - [Troubleshooting](docs/TROUBLESHOOTING.md): common failures and fixes
