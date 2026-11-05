@@ -659,6 +659,9 @@ func cmdPRComment(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	if err := checkRepo(ctx, gh, cfg.Repo); err != nil {
 		return err
 	}
+	if _, err := gh.GetPRView(ctx, n); err != nil {
+		return err
+	}
 	url, err := gh.CreateComment(ctx, n, configRedactor(cfg).Redact(text))
 	if err != nil {
 		return err

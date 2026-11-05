@@ -75,7 +75,7 @@ on amf's output. Users can opt into paging with `amf pr diff 42 | less` or
 | `amf pr merge <N> [--squash \| --rebase] [--delete-branch] [--update-branch] [--wait-for-checks]` | Merges a chosen PR (`42` or `#42`); no git checkout needed. See below. |
 | `amf pr view <N> [--json]` | Shows one pull request without a git checkout. See below. |
 | `amf pr diff <N> [--name-only]` | Prints a pull request's unified diff, or one changed path per line with `--name-only`; no git checkout needed. See below. |
-| `amf pr comment <N> (--body text \| --file path)` | Posts a comment on a chosen PR (`42` or `#42`), with configured secrets redacted; no git checkout needed. Exactly one of `--body` and `--file` is required, `--file -` reads stdin, and an empty or whitespace-only comment is rejected. Prints the comment URL. See below. |
+| `amf pr comment <N> (--body text \| --file path)` | Posts a comment on a chosen PR (`42` or `#42`), with configured secrets redacted; no git checkout needed. Exactly one of `--body` and `--file` is required, `--file -` reads stdin, and an empty or whitespace-only comment is rejected. The number must be a pull request; an issue fails with `#N is not a pull request in OWNER/REPO` and nothing is posted. Prints the comment URL. See below. |
 | `amf pr close <N> [--comment text] [--delete-branch]` | Closes a chosen PR (`42` or `#42`); no git checkout needed. See below. |
 | `amf pr reopen <N>` | Reopens a chosen closed PR (`42` or `#42`); no git checkout needed. See below. |
 | `amf pr ready <N>` | Marks a draft pull request ready for review; no git checkout needed. See below. |
@@ -664,9 +664,12 @@ comment from PATH, and `--file -` reads stdin. Giving both fails with
 `use --body or --file, not both`; giving neither fails with
 `use --body or --file`. An empty or whitespace-only comment fails with
 `comment body can't be empty` before configuration is read or GitHub is
-contacted. The comment is posted with
-`POST /repos/{repo}/issues/N/comments` `{"body":"..."}`; configured secrets
-are redacted like amf's other comments. The command prints the `html_url` of
+contacted. After checking repository access, the command reads the pull
+request with `GET /repos/{repo}/pulls/N`, as `amf pr view` does; when N is
+an issue or does not exist it fails with
+`#N is not a pull request in OWNER/REPO` and posts nothing. The comment is
+then posted with `POST /repos/{repo}/issues/N/comments` `{"body":"..."}`;
+configured secrets are redacted like amf's other comments. The command prints the `html_url` of
 the created comment, one line on stdout. On any error nothing is written to
 stdout, and a failure to write stdout is an error.
 
