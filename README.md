@@ -53,6 +53,9 @@ amf update --check    # only say whether there is a newer one
 amf update --version v0.0.7   # install a specific release (also downgrades)
 ```
 
+See [release notes](https://github.com/vicgupta/auto-mini-factory/releases)
+for what changed in each version.
+
 `amf update` downloads the same release archives as `install.sh`, checks them
 against `checksums.txt`, makes sure the new binary runs, then swaps it in place
 of the running one. It needs write access to the folder `amf` is in.

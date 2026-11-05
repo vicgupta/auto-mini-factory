@@ -1173,6 +1173,10 @@ to `amf:ready`; `amf run N` recovers it too.
 
 ## Updating (`amf update`)
 
+`amf help update` and the README's Install section link to
+[release notes](https://github.com/vicgupta/auto-mini-factory/releases)
+for changes in each version.
+
 1. Resolve the target: `--version` (surrounding whitespace is trimmed, then
    a leading `v` is added if missing), or
    the tag that `https://github.com/vicgupta/auto-mini-factory/releases/latest`
