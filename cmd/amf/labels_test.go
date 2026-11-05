@@ -4,11 +4,96 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"net/http"
 	"reflect"
 	"strings"
 	"testing"
 	"text/tabwriter"
 )
+
+func TestSetIssueStatusAddsBeforeRemoving(t *testing.T) {
+	gh, srv := newFakeGitHub(t)
+	gh.issues[1] = &Issue{Number: 1, State: "open", Labels: []Label{{Name: labelFailed}, {Name: "bug"}}}
+	g := newGitHub(Config{Token: "test-token", Repo: "vic/demo", APIURL: srv.URL})
+
+	changed, err := g.SetIssueStatus(context.Background(), 1, labelDone)
+	if err != nil || !changed {
+		t.Fatalf("changed=%t err=%v", changed, err)
+	}
+	if len(gh.writes) != 2 || gh.writes[0] != "POST /repos/vic/demo/issues/1/labels" || !strings.HasPrefix(gh.writes[1], "DELETE /repos/vic/demo/issues/1/labels/") || !strings.HasSuffix(gh.writes[1], labelFailed) {
+		t.Fatalf("writes = %v", gh.writes)
+	}
+	if got := labelNames(*gh.issues[1]); !reflect.DeepEqual(got, []string{"bug", labelDone}) {
+		t.Fatalf("labels = %v", got)
+	}
+
+	gh.writes = nil
+	changed, err = g.SetIssueStatus(context.Background(), 1, labelDone)
+	if err != nil || changed || len(gh.writes) != 0 {
+		t.Fatalf("unchanged: changed=%t err=%v writes=%v", changed, err, gh.writes)
+	}
+}
+
+func TestSetIssueStatusFailureKeepsAStatusLabel(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		fail func(*http.Request) bool
+		want []string
+	}{
+		{"add fails", func(r *http.Request) bool {
+			return r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/issues/1/labels")
+		}, []string{labelFailed, "bug"}},
+		{"remove fails", func(r *http.Request) bool {
+			return r.Method == "DELETE" && strings.HasSuffix(r.URL.Path, "failed")
+		}, []string{labelDone, labelFailed, "bug"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gh, srv := newFakeGitHub(t)
+			gh.issues[1] = &Issue{Number: 1, State: "open", Labels: []Label{{Name: labelFailed}, {Name: "bug"}}}
+			flaky := failingGitHub(t, srv, tc.fail)
+			g := newGitHub(Config{Token: "test-token", Repo: "vic/demo", APIURL: flaky.URL})
+			if _, err := g.SetIssueStatus(context.Background(), 1, labelDone); err == nil {
+				t.Fatal("no error")
+			}
+			if got := gh.labels(1); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("labels = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRunnerSetStatusAddsBeforeRemoving(t *testing.T) {
+	gh, srv := newFakeGitHub(t)
+	gh.issues[1] = &Issue{Number: 1, State: "open", Labels: []Label{{Name: labelInProgress}, {Name: "bug"}}}
+	r := &Runner{GH: newGitHub(Config{Token: "test-token", Repo: "vic/demo", APIURL: srv.URL})}
+
+	if err := r.setStatus(context.Background(), 1, labelDone); err != nil {
+		t.Fatal(err)
+	}
+	if len(gh.writes) != 4 || gh.writes[0] != "POST /repos/vic/demo/issues/1/labels" {
+		t.Fatalf("writes = %v", gh.writes)
+	}
+	for _, w := range gh.writes[1:] {
+		if !strings.HasPrefix(w, "DELETE /repos/vic/demo/issues/1/labels/") {
+			t.Fatalf("writes = %v", gh.writes)
+		}
+	}
+	if got := labelNames(*gh.issues[1]); !reflect.DeepEqual(got, []string{"bug", labelDone}) {
+		t.Fatalf("labels = %v", got)
+	}
+
+	gh.issues[2] = &Issue{Number: 2, State: "open", Labels: []Label{{Name: labelInProgress}, {Name: "bug"}}}
+	flaky := failingGitHub(t, srv, func(r *http.Request) bool {
+		return r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/issues/2/labels")
+	})
+	r.GH = newGitHub(Config{Token: "test-token", Repo: "vic/demo", APIURL: flaky.URL})
+	if err := r.setStatus(context.Background(), 2, labelDone); err == nil {
+		t.Fatal("no error")
+	}
+	if got := gh.labels(2); !reflect.DeepEqual(got, []string{labelInProgress, "bug"}) {
+		t.Fatalf("labels after failed add = %v", got)
+	}
+}
 
 func TestIssueLabel(t *testing.T) {
 	gh, srv := newFakeGitHub(t)
@@ -84,6 +169,23 @@ func TestIssuePositionalLabels(t *testing.T) {
 				t.Fatalf("output = %q, writes = %v; want %q, %d writes", &out, gh.writes, tc.output, tc.writes)
 			}
 		})
+	}
+}
+
+func TestIssueLabelStatusAddsBeforeRemoving(t *testing.T) {
+	gh, srv := newFakeGitHub(t)
+	listJSONEnv(t, srv)
+	gh.issues[7] = &Issue{Number: 7, State: "open", Labels: []Label{{Name: labelFailed}, {Name: "bug"}}}
+
+	var out bytes.Buffer
+	if err := run(context.Background(), []string{"issue", "label", "7", labelDone}, nil, &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if len(gh.writes) != 2 || gh.writes[0] != "POST /repos/vic/demo/issues/7/labels" || !strings.HasPrefix(gh.writes[1], "DELETE /repos/vic/demo/issues/7/labels/") || !strings.HasSuffix(gh.writes[1], labelFailed) {
+		t.Fatalf("writes = %v", gh.writes)
+	}
+	if got := labelNames(*gh.issues[7]); !reflect.DeepEqual(got, []string{"bug", labelDone}) {
+		t.Fatalf("labels = %v", got)
 	}
 }
 

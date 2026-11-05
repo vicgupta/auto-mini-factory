@@ -817,6 +817,9 @@ func lastOfType(msgs []claudeResult) (claudeResult, bool, bool) {
 }
 
 func (r *Runner) setStatus(ctx context.Context, n int, status string) error {
+	if err := r.GH.AddLabels(ctx, n, status); err != nil {
+		return err
+	}
 	for _, l := range statusLabels {
 		if l == status {
 			continue
@@ -825,7 +828,7 @@ func (r *Runner) setStatus(ctx context.Context, n int, status string) error {
 			return err
 		}
 	}
-	return r.GH.AddLabels(ctx, n, status)
+	return nil
 }
 
 // needsWork reports whether watch should pick up an issue: one that isn't

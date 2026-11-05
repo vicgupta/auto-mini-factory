@@ -756,14 +756,21 @@ func (g *GitHub) Compare(ctx context.Context, base, head string) (ahead, behind 
 }
 
 // SetIssueStatus gives issue n the amf status label status and removes the
-// other status labels it has, touching only labels that change. It reports
-// whether anything changed.
+// other status labels it has, touching only labels that change. It adds the
+// new label before removing the old ones, so an interrupted change leaves an
+// extra status label rather than none. It reports whether anything changed.
 func (g *GitHub) SetIssueStatus(ctx context.Context, n int, status string) (bool, error) {
 	is, err := g.GetIssue(ctx, n)
 	if err != nil {
 		return false, err
 	}
 	changed := false
+	if !is.HasLabel(status) {
+		if err := g.AddLabels(ctx, n, status); err != nil {
+			return changed, err
+		}
+		changed = true
+	}
 	for _, l := range statusLabels {
 		if l != status && is.HasLabel(l) {
 			if err := g.RemoveLabel(ctx, n, l); err != nil {
@@ -771,12 +778,6 @@ func (g *GitHub) SetIssueStatus(ctx context.Context, n int, status string) (bool
 			}
 			changed = true
 		}
-	}
-	if !is.HasLabel(status) {
-		if err := g.AddLabels(ctx, n, status); err != nil {
-			return changed, err
-		}
-		changed = true
 	}
 	return changed, nil
 }

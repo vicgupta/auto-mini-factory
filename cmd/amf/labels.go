@@ -160,7 +160,9 @@ func cmdIssueLabel(ctx context.Context, command string, args []string, stdout, s
 func updateIssueLabels(ctx context.Context, gh *GitHub, is Issue, add, remove, statuses []string, stdout io.Writer) error {
 	n := is.Number
 	remove = slices.Clone(remove)
-	// Adding a status label replaces the issue's other status label.
+	// Adding a status label replaces the issue's other status label. Write
+	// the additions first, so a failure can leave an extra status but never
+	// none.
 	if len(statuses) == 1 {
 		for _, l := range statusLabels {
 			if l != statuses[0] && is.HasLabel(l) && !slices.Contains(remove, l) {
@@ -168,7 +170,19 @@ func updateIssueLabels(ctx context.Context, gh *GitHub, is Issue, add, remove, s
 			}
 		}
 	}
+	var toAdd []string
+	for _, l := range add {
+		if !is.HasLabel(l) && !slices.Contains(toAdd, l) {
+			toAdd = append(toAdd, l)
+		}
+	}
 	var added, removed []string
+	if len(toAdd) > 0 {
+		if err := gh.AddLabels(ctx, n, toAdd...); err != nil {
+			return err
+		}
+		added = toAdd
+	}
 	for _, l := range remove {
 		if !is.HasLabel(l) || slices.Contains(removed, l) {
 			continue
@@ -177,18 +191,6 @@ func updateIssueLabels(ctx context.Context, gh *GitHub, is Issue, add, remove, s
 			return err
 		}
 		removed = append(removed, l)
-	}
-	var toAdd []string
-	for _, l := range add {
-		if !is.HasLabel(l) && !slices.Contains(toAdd, l) {
-			toAdd = append(toAdd, l)
-		}
-	}
-	if len(toAdd) > 0 {
-		if err := gh.AddLabels(ctx, n, toAdd...); err != nil {
-			return err
-		}
-		added = toAdd
 	}
 	if len(added)+len(removed) == 0 {
 		_, err := fmt.Fprintf(stdout, "#%d unchanged\n", n)
