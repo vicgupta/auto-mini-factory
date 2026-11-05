@@ -20,10 +20,10 @@ var helpCommands = [][]string{
 	{"issue", "close"}, {"issue", "reopen"}, {"issue", "view"},
 	{"issue", "label"}, {"issue", "unlabel"},
 	{"init"}, {"auth", "login"}, {"auth", "status"}, {"auth", "logout"}, {"auth", "token"}, {"issue", "create"}, {"issue", "list"}, {"list"}, {"run"}, {"watch"}, {"auto"},
-	{"pr", "list"}, {"pr", "merge"}, {"pr", "view"}, {"pr", "diff"}, {"pr", "close"},
+	{"pr", "list"}, {"pr", "merge"}, {"pr", "sweep"}, {"pr", "view"}, {"pr", "diff"}, {"pr", "close"},
 	{"pr", "reopen"}, {"pr", "ready"}, {"pr", "draft"},
 	{"memory", "sync"}, {"memory", "similar"}, {"memory", "show"},
-	{"pipeline"}, {"doctor"}, {"update"}, {"completion"}, {"version"},
+	{"pipeline"}, {"doctor"}, {"update"}, {"completion"}, {"man"}, {"version"},
 }
 
 type helpFlag struct{ short, long, line string }
