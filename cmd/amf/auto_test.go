@@ -249,6 +249,38 @@ func TestAutoCheckpointHelp(t *testing.T) {
 	}
 }
 
+func TestAutoHelpStatesBothChecksWaits(t *testing.T) {
+	var out bytes.Buffer
+	cmdAuto(context.Background(), []string{"--help"}, nil, &bytes.Buffer{}, &out)
+	help := out.String()
+	build := help
+	if i := strings.Index(build, "2. Build:"); i < 0 {
+		t.Fatalf("auto help lacks the Build section:\n%s", help)
+	} else {
+		build = build[i:]
+	}
+	if i := strings.Index(build, "3. Checkpoint:"); i >= 0 {
+		build = build[:i]
+	}
+	if !strings.Contains(build, "30 minutes") {
+		t.Errorf("auto Build help lacks the 30-minute PR merge checks wait:\n%s", help)
+	}
+	var waitFlag string
+	for _, f := range helpFlags(help) {
+		if f.long == "wait-for-checks" {
+			waitFlag = f.line
+		}
+	}
+	if waitFlag == "" {
+		t.Fatalf("auto help lacks --wait-for-checks:\n%s", help)
+	}
+	for _, want := range []string{"5 minutes", "30 minutes"} {
+		if !strings.Contains(waitFlag, want) {
+			t.Errorf("auto --wait-for-checks help lacks %q:\n%s", want, waitFlag)
+		}
+	}
+}
+
 func TestAutoCheckpointControls(t *testing.T) {
 	for _, tc := range []struct {
 		name            string
