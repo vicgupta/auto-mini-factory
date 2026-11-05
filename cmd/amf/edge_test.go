@@ -1269,7 +1269,7 @@ func TestIssueCreateHelp(t *testing.T) {
 				if err := run(context.Background(), args, stdin, &stdout, &stderr); err != nil {
 					t.Fatalf("help: %v", err)
 				}
-				if stdout.Len() != 0 || !strings.Contains(stderr.String(), "amf issue create \"Title\" [flags]") || !strings.Contains(stderr.String(), "    --no-label") {
+				if stdout.Len() != 0 || !strings.Contains(stderr.String(), "amf issue create \"Title\" [flags]") || !strings.Contains(stderr.String(), "  -N, --no-label") {
 					t.Fatalf("stdout = %q, stderr = %q; want empty stdout and creation flag help on stderr", stdout.String(), stderr.String())
 				}
 				if stdin.reads != 0 {

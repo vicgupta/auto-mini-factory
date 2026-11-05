@@ -10,11 +10,10 @@ import (
 
 // Flag conventions
 //
-// Every flag has a long form, --full-word in kebab-case, which is what help
-// and the docs show. Common flags also have a one-letter short form. The
-// letter belongs to the flag's meaning, so --agent is -a on every command
-// that takes it; shortFlags is the single list of them, and docs/COMMANDS.md
-// has the same table under "Flag conventions".
+// Every flag has a long form, --full-word in kebab-case, and a one-letter
+// short form. The letter belongs to the flag's meaning, so --agent is -a on
+// every command that takes it; shortFlags is the single list of them, and
+// docs/COMMANDS.md has the same table under "Flag conventions".
 //
 // Go's flag package treats -x and --x alike, so --a, -agent and -b (the old
 // spelling of --body) keep working too.
@@ -24,38 +23,60 @@ import (
 // --squash on amf pr merge), but never two flags on one command:
 // TestShortFlagsUnique checks every command.
 var shortFlags = map[string]string{
-	"agent":           "a",
-	"agent-timeout":   "t",
-	"approve":         "y",
-	"body":            "b",
-	"client-id":       "C",
-	"check":           "c",
-	"color":           "O",
-	"comment":         "c",
-	"continue":        "c",
-	"delete-branch":   "d",
-	"draft":           "D",
-	"dry-run":         "n",
-	"eval-rounds":     "e",
-	"exclude-label":   "x",
-	"file":            "f",
-	"force":           "f",
-	"host":            "H",
-	"interval":        "i",
-	"issue":           "i",
-	"json":            "j",
-	"label":           "l",
-	"limit":           "L",
-	"merge":           "m",
-	"no-browser":      "B",
-	"quiet":           "q",
-	"rebase":          "r",
-	"scopes":          "o",
-	"search":          "S",
-	"squash":          "s",
-	"state":           "s",
-	"update-branch":   "u",
-	"wait-for-checks": "w",
+	"abort":            "A",
+	"add":              "a",
+	"agent":            "a",
+	"agent-timeout":    "t",
+	"approve":          "y",
+	"body":             "b",
+	"check":            "c",
+	"checkpoint-after": "P",
+	"client-id":        "C",
+	"clone-dir":        "G",
+	"close-issues":     "X",
+	"color":            "O",
+	"comment":          "c",
+	"continue":         "c",
+	"delete-branch":    "d",
+	"dir":              "g",
+	"draft":            "D",
+	"dry-run":          "n",
+	"env-file":         "E",
+	"eval-rounds":      "e",
+	"exclude-label":    "x",
+	"fetch":            "F",
+	"file":             "f",
+	"fix-labels":       "F",
+	"force":            "f",
+	"full":             "F",
+	"host":             "H",
+	"interval":         "i",
+	"issue":            "i",
+	"json":             "j",
+	"label":            "l",
+	"limit":            "L",
+	"log-file":         "W",
+	"log-level":        "v",
+	"max-issues":       "M",
+	"memory-backend":   "b",
+	"memory-dir":       "p",
+	"merge":            "m",
+	"name-only":        "N",
+	"no-browser":       "B",
+	"no-checkpoint":    "N",
+	"no-label":         "N",
+	"quiet":            "q",
+	"rebase":           "r",
+	"remove":           "R",
+	"scopes":           "o",
+	"search":           "S",
+	"squash":           "s",
+	"stale-timeout":    "T",
+	"state":            "s",
+	"unlabeled":        "U",
+	"update-branch":    "u",
+	"version":          "V",
+	"wait-for-checks":  "w",
 }
 
 // hiddenFlags still parse but are left out of help: deprecated spellings.

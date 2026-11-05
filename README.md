@@ -125,9 +125,10 @@ amf run 42                  # process one issue now
 amf watch --interval 60s    # process issues labeled `amf:ready`, one at a time
 amf watch --agent codex     # without a pipeline, use Codex only, no fallback
 amf watch --exclude-label blocked --exclude-label needs-human  # ...leaving issues with either label alone until it's removed
-amf run 42 --draft          # open the PR as a draft
+amf run 42 --draft          # open the PR as a draft (-D)
 amf watch --draft           # ...opening each new PR as a draft
 amf run 42 --merge          # ...and merge its PR with a merge commit
+amf run 42 --merge --wait-for-checks  # ...after waiting for CI (-w)
 amf watch --merge=squash    # squash and merge each PR (or --merge=rebase)
 amf auto "Add a dark mode toggle"  # plan issues, merge the first PR, then ask before the rest
 amf auto "Add a dark mode toggle" --checkpoint-after 2 --wait-for-checks # review CI after two merges
@@ -137,10 +138,17 @@ amf auto --continue        # approve the checkpoint and resume
 amf auto status            # inspect saved progress
 amf auto --abort           # forget the saved run, leaving GitHub issues and PRs unchanged
 amf run 42 --dry-run        # make the change locally and show the PR, touching nothing on GitHub
+amf run 42 --force          # rerun an issue with an open PR; dropped commits are saved on amf/backup/issue-42-<sha>-<time> (-f)
 
+amf issue label 42 --add bug --remove needs-triage  # change labels by hand (-a/-R); select a set with --state/--label/--unlabeled
+amf pr view 57              # state, branch, author, checks, mergeability and diff stats
+amf pr comment 57 --body "LGTM"  # comment (-b); use --file review.md (-f) for a file or - for stdin
+amf pr merge 57 --update-branch --wait-for-checks  # -u/-w: update from the base branch, wait for CI, then merge
+amf pr sweep --merge --wait-for-checks --dry-run --json  # -m/-w/-n/-j: update, merge and label every open amf PR
 amf pr reopen 57            # reopen a closed, unmerged PR
 amf pr ready 57             # mark an open draft PR ready for review
 amf pr draft 57             # convert an open PR to a draft
+amf doctor --fix-labels     # correct amf status labels that disagree with the PRs (-F)
 
 amf memory sync             # backfill the repo's memory from GitHub (then only what changed)
 amf memory similar 42       # past issues, PRs and runs like issue 42
@@ -150,6 +158,14 @@ amf watch --memory-backend markdown --memory-dir ~/amf-notes  # keep memory as M
 ```
 
 Or run `amf watch` to process open issues labeled `amf:ready`, oldest first.
+
+`amf auth login` (with `--client-id` or `-C`, else `AMF_GITHUB_CLIENT_ID`)
+saves a token; `amf auth status`, `amf auth logout` and `amf auth token` (with
+`-f, --force` to print to a terminal) manage it. Every flag has a long and a
+short form: `amf help flags` lists them, including `-D, --draft` and
+`-O, --color=auto|always|never`. An agent that prints no output for
+`AMF_AGENT_IDLE_TIMEOUT` (default 15m; `off` disables it) is stopped and the
+run fails, so the fallback agent can try.
 
 For all settings and defaults, run `amf help env` or see the
 [configuration guide](docs/CONFIGURATION.md).

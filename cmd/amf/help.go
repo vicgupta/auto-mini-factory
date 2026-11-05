@@ -42,7 +42,7 @@ Paths default to the current directory; amf help run lists the global flags
 every command takes.
 
 Run amf help <command> or amf <command> -h for details.
-Every flag has a long form and common ones a short one: see amf help flags.
+Every flag has a long form and a short one: see amf help flags.
 Examples: docs/EXAMPLES.md; troubleshooting: docs/TROUBLESHOOTING.md.
 
 Exit status:

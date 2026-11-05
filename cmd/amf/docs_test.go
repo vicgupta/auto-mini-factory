@@ -197,6 +197,33 @@ func TestUpdateReleaseNotes(t *testing.T) {
 	}
 }
 
+// The README is the user-facing overview; keep the recent commands and flags
+// it advertises in step with the CLI.
+func TestReadmeMentionsCommandsAndFlags(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	readme := string(b)
+	for _, want := range []string{
+		"amf pr merge", "--update-branch", "--wait-for-checks",
+		"amf pr sweep", "--merge", "--dry-run", "--json",
+		"amf pr view",
+		"amf pr comment", "--body", "--file",
+		"amf issue label",
+		"amf doctor --fix-labels",
+		"amf auth login", "amf auth status", "amf auth logout", "amf auth token",
+		"--client-id", "AMF_GITHUB_CLIENT_ID",
+		"-D, --draft", "-O, --color",
+		"amf/backup/issue-42-",
+		"AMF_AGENT_IDLE_TIMEOUT",
+	} {
+		if !strings.Contains(readme, want) {
+			t.Errorf("README.md does not mention %q", want)
+		}
+	}
+}
+
 func TestJSONDocumentationCoversJSONCommands(t *testing.T) {
 	b, err := os.ReadFile(filepath.Join("..", "..", "docs", "JSON.md"))
 	if err != nil {

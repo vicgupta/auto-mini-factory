@@ -122,8 +122,9 @@ label commands also return stdout write failures. No git checkout is needed.
 
 - Flags follow one convention on every command (see
   [Flag conventions](COMMANDS.md#flag-conventions)). Each has a long
-  `--kebab-case` name; common ones also have a one-letter short form that
-  means the same on every command and is unique within each command. Short
+  `--kebab-case` name and a one-letter short form; a short form means the
+  same on every command that has the flag and is unique within each command
+  (unrelated commands may reuse a letter). Short
   forms are rewritten to their long names before parsing, so `-a codex`,
   `-a=codex`, `--agent codex` and `-agent codex` are equivalent; they can't
   be bundled (`-nf`). A command's help (`amf <command> --help`, `-h`, or
@@ -1491,10 +1492,11 @@ get without it. Other commands don't log there.
 Every path default resolves at run time to the current directory
 (`os.Getwd`, made absolute) or a subpath of it, unless a command-line flag
 names one. `$PWD`, `$HOME` and the OS temp folder never decide a default.
-All commands take `--dir <folder>` (change into DIR first), `--env-file <file>` (read
-and, for `amf init`, write only FILE) and `--clone-dir <folder>` (the checkout run,
-watch, auto and doctor use; it wins over the enclosing checkout, and is cloned
-when missing), before or after the command name. Relative values resolve
+All commands take `-g, --dir <folder>` (change into DIR first),
+`-E, --env-file <file>` (read and, for `amf init`, write only FILE) and
+`-G, --clone-dir <folder>` (the checkout run, watch, auto and doctor use; it
+wins over the enclosing checkout, and is cloned when missing), before or after
+the command name. Relative values resolve
 against the directory amf was started in; `~` is not expanded. run, watch and
 auto also take `--log-file` and `--memory-dir`, made absolute the same way. No environment
 variable sets a path; `AMF_CLAUDE`, `AMF_CODEX` and `AMF_OPENCODE` name
