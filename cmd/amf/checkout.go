@@ -33,11 +33,11 @@ func checkoutRoot(ctx context.Context, cfg Config, log io.Writer) (root, how str
 		if err != nil || !strings.EqualFold(repoFromRemote(origin), cfg.Repo) && origin != cfg.CloneURL {
 			return "", "", fmt.Errorf("%s already exists but is not a clone of %s; move it, or run amf inside a clone", dir, cfg.Repo)
 		}
-		fmt.Fprintf(log, "amf: not inside a git checkout; using the clone at %s\n", dir)
+		progress(ctx, log, "amf: not inside a git checkout; using the clone at %s\n", dir)
 		return dir, "clone", nil
 	}
 
-	fmt.Fprintf(log, "amf: not inside a git checkout; cloning %s into %s\n", cfg.Repo, dir)
+	progress(ctx, log, "amf: not inside a git checkout; cloning %s into %s\n", cfg.Repo, dir)
 	if _, err := git(ctx, ".", "clone", cfg.CloneURL, dir); err != nil {
 		return "", "", fmt.Errorf("%w\namf clones with your own git credentials (e.g. run `gh auth setup-git`), or clone %s yourself and run amf inside it", err, cfg.Repo)
 	}

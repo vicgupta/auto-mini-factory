@@ -75,10 +75,8 @@ func TestDocumentationCommands(t *testing.T) {
 	if !slices.Equal(names, topCommands) {
 		t.Fatalf("overview commands = %v, want %v", names, topCommands)
 	}
-	for _, path := range []string{"README.md", "docs/COMMANDS.md"} {
-		if got := docTable(t, path, "## Commands"); !reflect.DeepEqual(got, want) {
-			t.Errorf("%s commands = %v, help lists %v", path, got, want)
-		}
+	if got := docTable(t, "docs/COMMANDS.md", "## Commands"); !reflect.DeepEqual(got, want) {
+		t.Errorf("command reference = %v, help lists %v", got, want)
 	}
 	for _, group := range []struct {
 		name, help string
@@ -104,6 +102,35 @@ func TestDocumentationCommands(t *testing.T) {
 	}
 }
 
+func TestHelpExamplesCoverCommands(t *testing.T) {
+	commands := slices.Clone(topCommands)
+	for group, subcommands := range helpSubcommands {
+		for _, subcommand := range subcommands {
+			commands = append(commands, group+" "+subcommand)
+		}
+	}
+	for _, command := range commands {
+		t.Run(command, func(t *testing.T) {
+			examples := helpExamples[command]
+			if strings.TrimSpace(examples) == "" {
+				t.Fatalf("amf %s has no examples", command)
+			}
+			var out, stderr strings.Builder
+			if err := run(context.Background(), append([]string{"help"}, strings.Fields(command)...), nil, &out, &stderr); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(out.String(), "\nExamples:\n"+examples) || stderr.Len() != 0 {
+				t.Errorf("amf help %s: missing examples in stdout %q; stderr %q", command, out.String(), stderr.String())
+			}
+		})
+	}
+	for _, example := range []string{"amf auto status", "amf auto --abort"} {
+		if !strings.Contains(helpExamples["auto"], example+"\n") {
+			t.Errorf("auto help lacks %q", example)
+		}
+	}
+}
+
 func TestDocumentationEnvironment(t *testing.T) {
 	var want [][]string
 	entry := regexp.MustCompile(`(?m)^  ([A-Z][A-Z0-9_]+) \(default: ([^\n]+)\)\n((?:    [^\n]+\n)+)`)
@@ -114,7 +141,7 @@ func TestDocumentationEnvironment(t *testing.T) {
 		t.Fatal("env help has no settings with defaults")
 	}
 	for _, doc := range []struct{ path, heading string }{
-		{"README.md", "### Configuration (.env)"},
+		{"docs/CONFIGURATION.md", "### Configuration (.env)"},
 		{"docs/SPECS.md", "## Configuration (`.env`)"},
 	} {
 		if got := docTable(t, doc.path, doc.heading); !reflect.DeepEqual(got, want) {
@@ -123,9 +150,35 @@ func TestDocumentationEnvironment(t *testing.T) {
 	}
 }
 
+func TestHelpExamplesKnownCommands(t *testing.T) {
+	// Include commands embedded in shell substitutions, such as auth token.
+	command := regexp.MustCompile(`(?:^|\$\()amf\s+([^\s)]+)(?:\s+([^\s)]+))?`)
+	for key, examples := range helpExamples {
+		t.Run(key, func(t *testing.T) {
+			for _, line := range strings.Split(strings.TrimSpace(examples), "\n") {
+				matches := command.FindAllStringSubmatch(strings.TrimSpace(line), -1)
+				if len(matches) == 0 {
+					t.Errorf("example has no amf command: %q", line)
+					continue
+				}
+				for _, m := range matches {
+					if !slices.Contains(topCommands, m[1]) {
+						t.Errorf("example uses unknown command %q: %q", m[1], line)
+					}
+					if subs, ok := helpSubcommands[m[1]]; ok && !slices.Contains(subs, m[2]) {
+						t.Errorf("example uses unknown %s subcommand %q: %q", m[1], m[2], line)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestDocumentedFlagsExist(t *testing.T) {
 	flagName := regexp.MustCompile(`(?:^|[\s\[|(])--?([a-zA-Z][a-z-]*)`)
 	for _, cmd := range [][]string{
+		{"issue", "close"}, {"issue", "reopen"}, {"issue", "view"},
+		{"issue", "label"}, {"issue", "unlabel"},
 		{"init"}, {"issue", "create"}, {"issue", "list"}, {"issue", "run"}, {"issue", "watch"},
 		{"pr", "list"}, {"pr", "merge"}, {"pr", "view"}, {"pr", "diff"}, {"pr", "close"},
 		{"pr", "reopen"}, {"pr", "ready"}, {"pr", "draft"},
@@ -164,7 +217,7 @@ func TestDocumentedFlagsExist(t *testing.T) {
 					}
 				}
 			}
-			for _, path := range []string{"README.md", "docs/COMMANDS.md"} {
+			for _, path := range []string{"README.md", "docs/COMMANDS.md", "docs/CONFIGURATION.md"} {
 				b, err := os.ReadFile(filepath.Join("..", "..", path))
 				if err != nil {
 					t.Fatal(err)

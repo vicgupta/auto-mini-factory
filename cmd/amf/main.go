@@ -60,8 +60,15 @@ func main() {
 
 func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	paths = pathOptions{}
+	var output outputOptions
+	args, err := extractOutputFlags(args, &output)
+	if err != nil {
+		fmt.Fprintln(stderr, "amf:", err)
+		return errUsage
+	}
+	ctx = context.WithValue(ctx, outputKey{}, output)
 	var po pathOptions
-	args, err := extractPathFlags(args, &po)
+	args, err = extractPathFlags(args, &po)
 	if err != nil {
 		fmt.Fprintln(stderr, "amf:", err)
 		return errUsage
@@ -98,6 +105,10 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return cmdDoctor(ctx, rest, stdout, stderr)
 	case "update":
 		return cmdUpdate(ctx, rest, stdout, stderr)
+	case "completion":
+		return cmdCompletion(rest, stdout, stderr)
+	case "man":
+		return cmdMan(ctx, rest, stdout, stderr)
 	case "--version":
 		fmt.Fprintln(stdout, "amf", buildVersion())
 		return nil
@@ -500,6 +511,13 @@ func newRunner(ctx context.Context, timeout time.Duration, evalRounds int, agent
 	if err != nil {
 		return nil, err
 	}
+	output := commandOutput(ctx)
+	if output.Quiet {
+		consoleLevel = max(consoleLevel, slog.LevelWarn)
+	}
+	if output.colorEnabled(log) {
+		log = colorPrefixWriter{w: log}
+	}
 	agent, err := parseAgent(agentFlag)
 	if err != nil {
 		return nil, err
@@ -527,6 +545,7 @@ func newRunner(ctx context.Context, timeout time.Duration, evalRounds int, agent
 	}
 	r.DB = db
 	r.Redact = red
+	r.Quiet = output.Quiet
 
 	runID := newRunID()
 	path := lo.File
@@ -681,7 +700,7 @@ func isTerminal(r io.Reader) bool {
 	return err == nil && st.Mode()&os.ModeCharDevice != 0
 }
 
-var topCommands = []string{"init", "auth", "issue", "pr", "run", "watch", "auto", "memory", "pipeline", "doctor", "update", "version", "help"}
+var topCommands = []string{"init", "auth", "issue", "pr", "run", "watch", "auto", "memory", "pipeline", "doctor", "update", "completion", "man", "version", "help"}
 
 // suggestCommand returns the command closest to a mistyped one, or "" when
 // nothing is close enough to be a likely typo.

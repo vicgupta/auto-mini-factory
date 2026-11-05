@@ -120,7 +120,7 @@ func cmdInit(ctx context.Context, args []string, stdout, stderr io.Writer) error
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(stdout, "amf: backed up %s to %s\n", path, backup)
+			progress(ctx, stdout, "amf: backed up %s to %s\n", path, backup)
 		}
 		if err := writeFileAtomic(path, []byte(b.String()), 0o600); err != nil {
 			return err
@@ -183,7 +183,7 @@ func ensureLabels(ctx context.Context, gh *GitHub, repo string, stdout io.Writer
 		if created {
 			state = "created"
 		}
-		fmt.Fprintf(stdout, "amf: label %-16s %s in %s\n", l.Name, state, repo)
+		progress(ctx, stdout, "amf: label %-16s %s in %s\n", l.Name, state, repo)
 	}
 	return nil
 }
