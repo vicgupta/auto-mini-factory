@@ -8,19 +8,16 @@ var subHelp = map[string]string{
 
 Backfills or refreshes the repo's memory from GitHub's issues and pull
 requests: only what changed since the last sync, or everything with --full.
-amf help memory describes the backends.
 `,
 	"memory similar": `Usage:
   amf memory similar <issue-number | "text"> [flags]
 
 Ranks past issues, pull requests and runs like an issue or a piece of text.
-amf help memory describes the backends.
 `,
 	"memory show": `Usage:
   amf memory show <issue-number> [flags]
 
 Shows an issue's full history from memory: its pull requests and every run.
-amf help memory describes the backends.
 `,
 	"issue create": `Usage:
   amf issue create "Title" [flags]
@@ -36,13 +33,66 @@ a blank label is rejected. Surrounding whitespace in the title and label is
 trimmed. Prints #N <url>.
 `,
 	"issue label": `Usage:
-  amf issue label <issue-number> [flags]
+  amf issue label <issue-number> [label...] [flags]
+  amf issue label <selectors> [label...] [flags]
 
-Adds and removes labels on an issue: --add and --remove may repeat or take
-comma-separated names. Labels already present (or absent) are skipped.
+Adds the given labels to an issue. --add and --remove also add and remove
+labels and may repeat. Names may be comma-separated; at least one label
+is required. Labels already present (or absent) are skipped.
 Adding an amf status label (amf:in-progress, amf:pr-open, amf:done,
 amf:failed) removes the issue's other status label, so an issue keeps one.
 Prints #N: added ...; removed ..., or #N unchanged.
+
+To act on a set, replace the issue number with --state, --label or
+--unlabeled. Selectors combine; state defaults to open. --label selects an
+existing label; --unlabeled selects issues with no labels and conflicts
+with --label. Pull requests are excluded. All pages are fetched before
+changes, newest first. Stops on the first error; earlier changes remain.
+No matches prints No matching issues in owner/name.
+`,
+	"issue unlabel": `Usage:
+  amf issue unlabel <issue-number> [label...]
+  amf issue unlabel <selectors> [label...]
+
+Removes the given labels from an issue. Names may be comma-separated;
+at least one label is required. Labels already absent are skipped.
+Accepts open or closed issues, but not pull requests.
+Prints #N: removed ..., or #N unchanged.
+
+To act on a set, replace the issue number with --state, --label or
+--unlabeled, as for issue label. State defaults to open; selectors combine,
+but --label and --unlabeled conflict. All pages are fetched before changes,
+newest first. Stops on the first error; earlier changes remain.
+No matches prints No matching issues in owner/name.
+`,
+	"issue close": `Usage:
+  amf issue close <issue-number> [flags]
+
+Closes an issue, optionally commenting first. Accepts 42 or #42, but not
+pull requests. Labels are left as they are. Needs no git checkout.
+
+--comment posts its text before closing, with configured secrets redacted.
+--delete-branch deletes this repository's remote amf/issue-N branch after
+closing. A deletion failure (including a missing branch) reports an error;
+the issue stays closed. Local branches and worktrees are left as they are.
+An already closed issue succeeds without commenting or deleting.
+Prints Closed #N <url>, or #N is already closed.
+`,
+	"issue reopen": `Usage:
+  amf issue reopen <issue-number>
+
+Reopens a closed issue. Accepts 42 or #42, but not pull requests.
+An open issue succeeds unchanged. Labels are left as they are.
+Needs no git checkout. Prints Reopened #N <url>, or #N is already open.
+`,
+	"issue view": `Usage:
+  amf issue view <issue-number> [flags]
+
+Shows an open or closed issue: title, state, author, every label, URL and
+body. Labels are shown in GitHub's order, or - when there are none.
+Accepts 42 or #42, but not pull requests. Needs no git checkout.
+--json prints one object with number, title, state, url, labels, author and
+body; labels is an array of names ([] when empty).
 `,
 	"pr list": `Usage:
   amf pr list [flags]
@@ -160,7 +210,45 @@ Closed or merged PRs fail. Issue labels are left as they are. Prints
 `,
 }
 
-// helpExamples are the short examples at the end of a command's help.
+// helpSeeAlso lists related topics for commands with flags. Group and topic
+// help include their footers directly, since they don't use commandHelp.
+var helpSeeAlso = map[string][]string{
+	"init":           {"env", "auth", "doctor"},
+	"run":            {"agents", "env", "memory"},
+	"watch":          {"run", "agents", "env", "memory"},
+	"auto":           {"run", "agents", "pipeline", "memory"},
+	"list":           {"issue", "issue label", "run"},
+	"pipeline":       {"agents", "run", "env"},
+	"doctor":         {"init", "env", "auth"},
+	"update":         {"version"},
+	"version":        {"update"},
+	"completion":     {"help", "flags"},
+	"man":            {"help", "flags"},
+	"issue create":   {"issue label", "issue list", "run"},
+	"issue label":    {"issue unlabel", "issue list", "run", "watch"},
+	"issue unlabel":  {"issue label", "issue list", "watch"},
+	"issue close":    {"issue reopen", "issue view"},
+	"issue reopen":   {"issue close", "issue view"},
+	"issue view":     {"issue list", "issue close", "issue label"},
+	"pr list":        {"pr view", "pr diff", "pr merge"},
+	"pr merge":       {"pr view", "pr sweep", "run"},
+	"pr sweep":       {"pr merge", "watch"},
+	"pr view":        {"pr diff", "pr merge"},
+	"pr diff":        {"pr view"},
+	"pr close":       {"pr reopen", "issue label"},
+	"pr reopen":      {"pr close", "pr view"},
+	"pr ready":       {"pr draft", "pr merge"},
+	"pr draft":       {"pr ready", "pr view"},
+	"auth login":     {"auth", "auth status", "env"},
+	"auth status":    {"auth", "auth login", "doctor"},
+	"auth logout":    {"auth", "auth login"},
+	"auth token":     {"auth", "auth login", "env"},
+	"memory sync":    {"memory", "memory similar", "memory show"},
+	"memory similar": {"memory", "memory sync", "memory show"},
+	"memory show":    {"memory", "memory sync", "memory similar"},
+}
+
+// helpExamples are the short examples before a command's See also footer.
 var helpExamples = map[string]string{
 	"memory sync":    "  amf memory sync\n  amf memory sync --full --memory-backend markdown\n",
 	"memory similar": "  amf memory similar 42\n  amf memory similar \"login redirect loops\" --limit 10 --json\n",
@@ -168,7 +256,11 @@ var helpExamples = map[string]string{
 	"init":           "  amf init\n",
 	"doctor":         "  amf doctor\n  amf doctor --fix-labels\n",
 	"version":        "  amf version\n",
-	"issue label":    "  amf issue label 42 --add amf:done\n  amf issue label 42 --remove amf:failed --add amf:ready\n",
+	"issue label":    "  amf issue label 42 amf:ready bug\n  amf issue label 42 --remove amf:failed --add amf:ready\n  amf issue label --state open --unlabeled amf:ready\n",
+	"issue unlabel":  "  amf issue unlabel 42 amf:ready bug\n  amf issue unlabel --state closed --label amf:ready amf:ready\n",
+	"issue close":    "  amf issue close 42 --comment \"Superseded by #43\"\n  amf issue close 42 --delete-branch\n",
+	"issue reopen":   "  amf issue reopen 42\n",
+	"issue view":     "  amf issue view 42\n  amf issue view 42 --json\n",
 	"issue create": `  amf issue create "Fix the login redirect" --body "Users land on /404 after login"
   amf issue create "Add a dark mode" --file spec.md --no-label
 `,
@@ -220,10 +312,10 @@ A letter keeps its meaning on every command that has the flag.
   -b  --body             issue create
   -B  --no-browser       auth login
   -C  --client-id        auth login
-  -c  --comment          pr close
+  -c  --comment          issue close, pr close
   -c  --continue         auto
   -c  --check            update
-  -d  --delete-branch    pr merge, pr close
+  -d  --delete-branch    issue close, pr merge, pr close
   -e  --eval-rounds      run, watch, auto
   -f  --file             issue create
   -f  --force            run, auth token
@@ -231,14 +323,15 @@ A letter keeps its meaning on every command that has the flag.
   -H  --host             auth login, auth status, auth logout, auth token
   -i  --interval         watch
   -i  --issue            pr list
-  -j  --json             issue list, pr list, pr sweep, pr view, memory
-  -l  --label            issue create, issue list, watch
+  -j  --json             issue list, issue view, pr list, pr sweep, pr view, memory
+  -l  --label            issue create, issue list, issue label, issue unlabel, watch
   -L  --limit            issue list, pr list, memory
   -m  --merge            run, watch, auto, pr sweep
   -n  --dry-run          run, auto, pr sweep
   -o  --scopes           auth login
+  -q  --quiet            every command
   -r  --rebase           pr merge
-  -s  --state            issue list, pr list
+  -s  --state            issue list, issue label, issue unlabel, pr list
   -s  --squash           pr merge
   -S  --search           issue list
   -t  --agent-timeout    run, watch, auto
@@ -261,4 +354,9 @@ keep working; --timeout is a hidden, deprecated alias of --agent-timeout.
 Flags without a short form are rarer ones, spelled out to stay clear.
 The global path flags --dir, --env-file and --clone-dir work on any command,
 before --, and have no short form.
+--quiet (-q) suppresses progress, keeping warnings, errors and the final
+summary. --color=auto|always|never controls status color (default auto).
+Auto uses color only on terminals, unless NO_COLOR is nonempty or TERM=dumb.
+
+See also: amf help run, amf help env
 `
