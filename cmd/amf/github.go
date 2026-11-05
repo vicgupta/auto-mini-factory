@@ -648,11 +648,13 @@ func (g *GitHub) UpdatePR(ctx context.Context, n int, title, body string) (PullR
 // prDetails is GitHub's preflight metadata. It stays separate from
 // PullRequest.Head, the runner's locally pinned commit.
 type prDetails struct {
-	HTMLURL string `json:"html_url"`
-	State   string `json:"state"`
-	Draft   bool   `json:"draft"`
-	Merged  bool   `json:"merged"`
-	Base    struct {
+	HTMLURL        string `json:"html_url"`
+	State          string `json:"state"`
+	Draft          bool   `json:"draft"`
+	Merged         bool   `json:"merged"`
+	Mergeable      *bool  `json:"mergeable"`
+	MergeableState string `json:"mergeable_state"`
+	Base           struct {
 		Ref string `json:"ref"`
 	} `json:"base"`
 	Head struct {

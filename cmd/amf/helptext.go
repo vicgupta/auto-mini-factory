@@ -143,7 +143,8 @@ head and reason. Pending checks are left for the next sweep.
 
 In a checkout, the sweep holds the repo lock (.amf/watch.lock), so it
 fails while watch, run or auto works there. --dry-run only reads from
-GitHub. amf watch --merge runs the same sweep each poll.
+GitHub and reports a conflicting PR as blocked, suggesting amf run N --force,
+instead of would-update. amf watch --merge runs the same sweep each poll.
 Prints one line per PR: #N (issue #M) <action>[: reason] <url>, where the
 action is merged, updated, waiting, ready, blocked, or would-update or
 would-merge with --dry-run. --json prints an array of {number, issue, url,
