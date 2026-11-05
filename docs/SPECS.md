@@ -125,7 +125,11 @@ label commands also return stdout write failures. No git checkout is needed.
   `amf help <command>`, which prints the same text to stdout) shows a usage
   line, a description, every visible flag in one aligned column as
   `-x, --long <value>  description (default ...)`, with `-h, --help` last,
-  and examples. Command, group and topic help end with a blank line and a
+  and examples. Every command and subcommand has at least one example,
+  including aliases; the overview and group usage also include examples.
+  The `auto` examples include inspecting saved progress with `amf auto status`
+  and removing the saved run with `amf auto --abort`.
+  Command, group and topic help end with a blank line and a
   single `See also: amf help <topic>, amf help <topic>` line linking related
   topics, after any flags and examples. Aliases show the same footer as
   their canonical command; `run` links to `agents`, `env` and `memory`.

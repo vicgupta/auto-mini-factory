@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const prUsage = `usage: amf pr <command>
+var prUsage = `usage: amf pr <command>
 
 Commands:
   list [--state open|closed|merged|all] [--limit n] [--issue n] [--json]  list pull requests, newest first
@@ -26,9 +26,7 @@ Commands:
   draft <N>  convert a pull request to a draft
 
 Run amf help pr <command> or amf pr <command> --help for its flags.
-
-See also: amf help issue, amf help run, amf help watch
-`
+` + "\nExamples:\n" + helpExamples["pr"] + "\nSee also: amf help issue, amf help run, amf help watch\n"
 
 func cmdPR(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {

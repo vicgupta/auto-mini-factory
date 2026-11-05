@@ -10,7 +10,7 @@ import (
 
 // usage is the short overview amf, amf help, -h and --help print: one line
 // per command and help topic. The details live in helpTopics.
-const usage = `amf turns GitHub issues into pull requests with coding agents: Claude Code, Codex or opencode.
+var usage = `amf turns GitHub issues into pull requests with coding agents: Claude Code, Codex or opencode.
 
 Usage:
   amf <command> [arguments]
@@ -52,9 +52,7 @@ Exit status:
 amf help <command> exits 0; unknown commands exit 2.
 Some commands return 2 for -h; use amf help <command> in scripts.
 Command-specific value validation can return 1 (for example, amf run 0).
-
-See also: amf help agents, amf help env, amf help flags
-`
+` + "\nExamples:\n" + helpExamples["help"] + "\nSee also: amf help agents, amf help env, amf help flags\n"
 
 const outputHelp = `Output
 
@@ -186,15 +184,13 @@ const versionHelp = `Usage:
 Prints amf's version (also amf --version).
 `
 
-const helpHelp = `Usage:
+var helpHelp = `Usage:
   amf help [command [subcommand] | topic]
 
 Without an argument, prints the overview of commands and topics. With one,
 prints that command's or topic's details: amf help run prints the same as
 amf run --help, and amf help pr merge the same as amf pr merge --help.
-
-See also: amf help agents, amf help env, amf help flags
-`
+` + "\nExamples:\n" + helpExamples["help"] + "\nSee also: amf help agents, amf help env, amf help flags\n"
 
 const agentsHelp = `Choosing the agent
 
@@ -378,6 +374,11 @@ var helpArgs = map[string][]string{
 	"auth login": {"auth", "login"}, "auth status": {"auth", "status"}, "auth logout": {"auth", "logout"}, "auth token": {"auth", "token"},
 	"memory sync": {"memory", "sync"}, "memory similar": {"memory", "similar"}, "memory show": {"memory", "show"},
 	"pr close": {"pr", "close"}, "pr reopen": {"pr", "reopen"}, "pr ready": {"pr", "ready"}, "pr draft": {"pr", "draft"},
+}
+
+func init() {
+	helpExamples["completion"] = "  amf completion bash\n  amf completion zsh\n  amf completion fish\n"
+	helpExamples["man"] = "  amf man > amf.1\n"
 }
 
 // isHelpArgs reports whether args ask for help: exactly -h or --help.

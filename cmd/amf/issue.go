@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const issueUsage = `usage: amf issue <command>
+var issueUsage = `usage: amf issue <command>
 
 Commands:
   create "Title" [--body text | --file path] [--label name] [--no-label]  create an issue (the body may also come from stdin)
@@ -27,9 +27,7 @@ and --unlabeled. Supply an issue number or selectors, not both.
 
 amf issue "Title" … is a shortcut for amf issue create "Title" …
 Run amf help issue <command> or amf issue <command> --help for its flags.
-
-See also: amf help run, amf help watch, amf help pr
-`
+` + "\nExamples:\n" + helpExamples["issue"] + "\nSee also: amf help run, amf help watch, amf help pr\n"
 
 var issueSubcommands = []string{"create", "list", "label", "unlabel", "close", "reopen", "view", "run", "watch", "help"}
 

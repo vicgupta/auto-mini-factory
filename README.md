@@ -101,6 +101,48 @@ amf init                 # creates any missing amf labels once configured
 amf doctor               # check the setup
 amf issue "Add dark mode" --body "Use CSS variables for the palette"
 amf run 42               # replace 42 with the issue number in the URL printed above
+
+amf version                      # show the installed version
+amf doctor --dir ~/work           # check the setup in another directory
+amf pipeline                     # inspect this checkout's pipeline
+amf pipeline --fetch             # also check remote skills
+
+amf issue "Fix login bug" --file bug.md
+echo "details" | amf issue "Title"     # body from stdin
+amf issue "Just a note" --no-label     # won't be picked up by watch
+
+amf issue list                    # open issues, newest first, with their amf labels
+amf issue list --state all        # include closed issues
+amf issue list --label amf:failed # just the ones that failed
+amf issue list --limit 5          # just the 5 newest
+amf issue list --json --label amf:failed | jq -r '.[].url'  # as JSON: number, title, state, url, labels
+
+amf run 42                  # process one issue now
+amf watch --interval 60s    # process issues labeled `amf:ready`, one at a time
+amf watch --agent codex     # without a pipeline, use Codex only, no fallback
+amf watch --exclude-label blocked --exclude-label needs-human  # ...leaving issues with either label alone until it's removed
+amf run 42 --draft          # open the PR as a draft
+amf watch --draft           # ...opening each new PR as a draft
+amf run 42 --merge          # ...and merge its PR with a merge commit
+amf watch --merge=squash    # squash and merge each PR (or --merge=rebase)
+amf auto "Add a dark mode toggle"  # plan issues, merge the first PR, then ask before the rest
+amf auto "Add a dark mode toggle" --checkpoint-after 2 --wait-for-checks # review CI after two merges
+amf auto "Add a dark mode toggle" --approve # approve the checkpoint without a terminal
+amf auto "Add a dark mode toggle" --no-checkpoint # merge all issues without pausing
+amf auto --continue        # approve the checkpoint and resume
+amf auto status            # inspect saved progress
+amf auto --abort           # forget the saved run, leaving GitHub issues and PRs unchanged
+amf run 42 --dry-run        # make the change locally and show the PR, touching nothing on GitHub
+
+amf pr reopen 57            # reopen a closed, unmerged PR
+amf pr ready 57             # mark an open draft PR ready for review
+amf pr draft 57             # convert an open PR to a draft
+
+amf memory sync             # backfill the repo's memory from GitHub (then only what changed)
+amf memory similar 42       # past issues, PRs and runs like issue 42
+amf memory similar "flaky login test" --json
+amf memory show 42          # issue 42's PRs and every run
+amf watch --memory-backend markdown --memory-dir ~/amf-notes  # keep memory as Markdown files elsewhere
 ```
 
 Or run `amf watch` to process open issues labeled `amf:ready`, oldest first.
