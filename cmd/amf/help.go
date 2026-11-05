@@ -179,7 +179,7 @@ change doctor makes).
 const updateHelp = `Usage:
   amf update [flags]
 
-Replaces this amf binary with the latest (or given) release (also amf --update).
+Replaces this amf binary with the latest (or given) release (also amf --update or amf -u).
 
 Release notes (changes in each version):
 https://github.com/vicgupta/auto-mini-factory/releases

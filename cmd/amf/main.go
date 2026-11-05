@@ -132,10 +132,10 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return cmdPipeline(ctx, rest, stdout, stderr)
 	case "doctor":
 		return cmdDoctor(ctx, rest, stdout, stderr)
-	case "update":
-		return cmdUpdate(ctx, rest, stdout, stderr)
-	case "--update":
-		// A compatibility alias of amf update, like amf --version for version.
+	case "update", "--update", "-u":
+		// --update and -u are compatibility aliases of amf update
+		// (like amf --version for version). Root -u is free: pr merge's
+		// -u/--update-branch is command-local only.
 		return cmdUpdate(ctx, rest, stdout, stderr)
 	case "completion":
 		return cmdCompletion(rest, stdout, stderr)

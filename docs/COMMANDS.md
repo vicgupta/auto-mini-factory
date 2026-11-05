@@ -1048,8 +1048,9 @@ Generated from each command's `--help`; `amf init`,
 | `-c, --check` | only report whether an update is available |
 | `-V, --version <tag>` | release to install, e.g. v0.0.7 (default: latest) |
 
-`amf --update` is the same command as `amf update`, with the same flags. It
-has no `-u` short form because `-u` is `--update-branch` on `amf pr merge`.
+`amf --update` and `amf -u` are the same command as `amf update`, with the
+same flags. Root `-u` is only this alias; on `amf pr merge`, `-u` remains
+`--update-branch`.
 
 ## Run and watch
 

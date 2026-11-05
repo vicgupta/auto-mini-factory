@@ -42,7 +42,7 @@ func cmdCompletion(args []string, stdout, stderr io.Writer) error {
 // same lists as help and flag parsing.
 func completionOptions() map[string][]string {
 	options := map[string][]string{
-		"":            append(slices.Clone(topCommands), "--version", "--update"),
+		"":            append(slices.Clone(topCommands), "--version", "--update", "-u"),
 		"completion":  {"bash", "zsh", "fish"},
 		"auto":        {"status"},
 		"auto status": {},
