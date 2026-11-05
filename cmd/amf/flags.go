@@ -214,15 +214,21 @@ func flagLines(fs *flag.FlagSet) [][2]string {
 // command's help.
 var pathFlags = map[string]bool{"dir": true, "env-file": true, "clone-dir": true}
 
-// printGlobalFlags lists the flags every command takes.
-func printGlobalFlags(w io.Writer) {
+// globalFlagSet is the flags every command takes. Help and completion both
+// list it, so a new global flag appears in both.
+func globalFlagSet() *flag.FlagSet {
 	fs := flag.NewFlagSet("global", flag.ContinueOnError)
 	fs.Bool("quiet", false, "suppress progress; keep warnings, errors and the final summary")
 	fs.String("color", "auto", "color status output: auto, always or never (auto honors NO_COLOR)")
 	fs.String("dir", "", "work as if amf were started in this `folder` (default: the current directory)")
 	fs.String("env-file", "", "read only this .env `file` (default: ./.env, then the checkout's top-level .env)")
 	fs.String("clone-dir", "", "use, or clone GITHUB_REPO into, this `folder` (default: the enclosing checkout, else ./<repo name>)")
-	rows := flagLines(fs)
+	return fs
+}
+
+// printGlobalFlags lists the flags every command takes.
+func printGlobalFlags(w io.Writer) {
+	rows := flagLines(globalFlagSet())
 	printRows(w, rows[:len(rows)-1]) // without -h, --help
 }
 

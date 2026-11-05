@@ -43,7 +43,7 @@ func completionOptions() map[string][]string {
 	const run = "agent-timeout= eval-rounds= agent= draft merge wait-for-checks dry-run force log-level= log-file= " + memory
 	const watch = "agent-timeout= interval= label= exclude-label= eval-rounds= agent= draft merge wait-for-checks stale-timeout= log-level= log-file= " + memory
 	flags := map[string]string{
-		"init": "", "version": "", "completion": "",
+		"init": "", "version": "", "completion": "", "man": "",
 		"run": run, "issue run": run, "watch": watch, "issue watch": watch,
 		"auto":          "agent-timeout= eval-rounds= agent= max-issues= merge continue no-checkpoint checkpoint-after= approve wait-for-checks abort close-issues dry-run log-level= log-file= " + memory,
 		"issue create":  "body= file= label= no-label",
@@ -76,6 +76,9 @@ func completionOptions() map[string][]string {
 	// memory accepts only these three subcommands (its help is a topic).
 	options["memory"] = []string{"sync", "similar", "show"}
 	for key, names := range flags {
+		if _, ok := options[key]; !ok {
+			options[key] = nil // commands without flags still get a case
+		}
 		for _, name := range strings.Fields(names) {
 			options[key] = append(options[key], "--"+name)
 			long := strings.TrimSuffix(name, "=")
@@ -84,7 +87,32 @@ func completionOptions() map[string][]string {
 			}
 		}
 	}
+	global := completionGlobalFlags()
+	for key := range options {
+		options[key] = append(options[key], global...)
+	}
 	return options
+}
+
+// completionGlobalFlags lists the flags every command's completion offers,
+// from the same FlagSet help prints.
+func completionGlobalFlags() []string {
+	fs := globalFlagSet()
+	var words []string
+	fs.VisitAll(func(f *flag.Flag) {
+		if hiddenFlags[f.Name] {
+			return
+		}
+		suffix := ""
+		if bf, ok := f.Value.(interface{ IsBoolFlag() bool }); !ok || !bf.IsBoolFlag() {
+			suffix = "="
+		}
+		words = append(words, "--"+f.Name+suffix)
+		if short := shortFor(fs, f.Name); short != "" {
+			words = append(words, "-"+short+suffix)
+		}
+	})
+	return append(words, "--help", "-h")
 }
 
 func completionScriptFor(shell string) string {
@@ -101,9 +129,9 @@ func completionScriptFor(shell string) string {
 	} else {
 		b.WriteString("_amf_options() {\n    case \"$1\" in\n")
 	}
-	const global = " --quiet -q --color= -O= --dir= --env-file= --clone-dir= --help -h"
+	global := strings.Join(completionGlobalFlags(), " ")
 	for _, key := range keys {
-		words := strings.Join(options[key], " ") + global
+		words := strings.Join(options[key], " ")
 		if shell == "fish" {
 			fmt.Fprintf(&b, "        case '%s'\n            echo '%s'\n", key, words)
 		} else {

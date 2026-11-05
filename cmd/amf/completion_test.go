@@ -37,15 +37,17 @@ func TestCompletionUsage(t *testing.T) {
 }
 
 // Keep the hand-written completion table aligned with actual command help,
-// including flag arity and short forms, as commands acquire new flags.
+// including global flags, flag arity and short forms, as commands acquire
+// new flags.
 func TestCompletionFlagsMatchHelp(t *testing.T) {
 	options := completionOptions()
 	for _, cmd := range helpCommands {
 		key := strings.Join(cmd, " ")
+		help := commandHelpOutput(t, cmd)
 		var want []string
-		for _, f := range helpFlags(commandHelpOutput(t, cmd)) {
+		for _, f := range append(helpFlags(help), helpGlobalFlags(help)...) {
 			if f.long == "help" {
-				continue // help and path flags are added to every generated case
+				continue // help is added to every generated case
 			}
 			suffix := ""
 			if strings.Contains(f.line, "--"+f.long+" <") {
@@ -56,6 +58,7 @@ func TestCompletionFlagsMatchHelp(t *testing.T) {
 				want = append(want, "-"+f.short+suffix)
 			}
 		}
+		want = append(want, "--help", "-h")
 		var got []string
 		for _, word := range options[key] {
 			if strings.HasPrefix(word, "-") {
@@ -68,6 +71,18 @@ func TestCompletionFlagsMatchHelp(t *testing.T) {
 			t.Errorf("%s flags = %v, want %v", key, got, want)
 		}
 	}
+}
+
+func helpGlobalFlags(help string) []helpFlag {
+	_, section, _ := strings.Cut(help, "\nGlobal flags (any command, before --):\n")
+	section, _, _ = strings.Cut(section, "\n\n")
+	var out []helpFlag
+	for _, line := range strings.Split(section, "\n") {
+		if m := flagLine.FindStringSubmatch(line); m != nil {
+			out = append(out, helpFlag{m[1], m[2], line})
+		}
+	}
+	return out
 }
 
 func TestCompletionWriteError(t *testing.T) {

@@ -64,8 +64,8 @@ of the running one. It needs write access to the folder `amf` is in.
 ### Shell completion
 
 `amf completion bash|zsh|fish` prints a script that completes commands,
-subcommands and their long and short flags, including global path flags.
-It needs no `.env` or GitHub access.
+subcommands and their long and short flags, including the global `--quiet`,
+`--color` and path flags. It needs no `.env` or GitHub access.
 
 For Bash, add this to `~/.bashrc`:
 
