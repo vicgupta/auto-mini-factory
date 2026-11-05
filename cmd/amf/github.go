@@ -443,6 +443,10 @@ func (g *GitHub) CloseIssue(ctx context.Context, n int) error {
 	return g.do(ctx, "PATCH", g.repoPath("/issues/%d", n), map[string]any{"state": "closed"}, nil)
 }
 
+func (g *GitHub) ReopenIssue(ctx context.Context, n int) error {
+	return g.do(ctx, "PATCH", g.repoPath("/issues/%d", n), map[string]any{"state": "open"}, nil)
+}
+
 // ListIssues returns every issue (not pull request) in the given state
 // (open, closed or all) carrying label, or any label if label is empty,
 // following GitHub's pagination. Issues are oldest first if asc, else newest first.

@@ -4,7 +4,7 @@ The details behind the [README](../README.md)'s overview: what each command
 does, its flags, logs and labels. `amf help <command>` (or `amf <command> --help`,
 `-h` for short) prints the same in the terminal; [Flag conventions](#flag-conventions)
 explains the long and short forms. Every setting is in
-[Configuration (.env)](../README.md#configuration-env) and `amf help env`.
+[Configuration (.env)](CONFIGURATION.md#configuration-env) and `amf help env`.
 
 For complete command sequences, see the [examples cookbook](EXAMPLES.md).
 For common failures and fixes, see the [troubleshooting guide](TROUBLESHOOTING.md).
@@ -15,7 +15,7 @@ For common failures and fixes, see the [troubleshooting guide](TROUBLESHOOTING.m
 |---|---|
 | `amf init` | write `.env` and create amf's labels |
 | `amf auth` | get a GitHub token: login, status, logout, token |
-| `amf issue` | manage issues: `create`, `list`, `label`, `run`, `watch` |
+| `amf issue` | manage issues: `create`, `list`, `label`, `unlabel`, `close`, `reopen`, `view`, `run`, `watch` |
 | `amf pr` | manage pull requests: `list`, `merge`, `sweep`, `view`, `diff`, `close`, `reopen`, `ready`, `draft` |
 | `amf run` | process one issue into a PR (alias of `issue run`) |
 | `amf watch` | process `amf:ready` issues as they arrive (alias of `issue watch`) |
@@ -25,6 +25,7 @@ For common failures and fixes, see the [troubleshooting guide](TROUBLESHOOTING.m
 | `amf doctor` | check the setup here, changing nothing |
 | `amf update` | replace this amf binary with the latest (or given) release |
 | `amf completion` | print a shell completion script for bash, zsh or fish |
+| `amf man` | generate a man page from amf's help text |
 | `amf version` | print amf's version |
 | `amf help` | show help for a command or topic |
 
@@ -34,13 +35,56 @@ to stdout, without reading configuration or contacting GitHub. See
 `amf completion --help` and `amf help completion` explain how to source it.
 A missing or unsupported shell, or extra arguments, is a usage error (exit 2).
 
+## Man page
+
+Generate a section 1 man page from the installed binary's help text, including
+command flags, examples and configuration settings:
+
+```sh
+amf man > amf.1
+man ./amf.1
+```
+
+From a source checkout, use `go run ./cmd/amf man > amf.1` instead.
+Generation needs no configuration, GitHub access or external tools.
+
+On macOS or Linux, install it in your local manual directory (use `sudo` for
+the `install` commands if needed):
+
+```sh
+install -d /usr/local/share/man/man1
+install -m 644 amf.1 /usr/local/share/man/man1/amf.1
+man amf
+```
+
+For an installation without root, use `~/.local/share/man/man1` instead and
+set `MANPATH="$HOME/.local/share/man:${MANPATH:-}"` if your system doesn't
+search it automatically. Regenerate and reinstall after updating amf.
+The binary installer and `amf update` do not install the man page.
+
+## Exit status
+
+- `0` — success.
+- `1` — a command failed (for example, a GitHub error, agent failure, or refused merge).
+- `2` — a usage error (for example, no command, an unknown command or flag, or missing arguments).
+
+`amf --help` and `amf help <command>` exit `0`; unknown commands exit `2`.
+Some commands currently return `2` for `amf <command> --help` (or `-h`),
+including `amf run --help`. Use `amf help <command>` when scripts need help
+to exit successfully. Command-specific value validation can return `1`,
+such as `amf run 0`.
+
 ## issue commands
 
 | Command | What it does |
 |---|---|
 | `amf issue create "Title" [--body text \| --file path] [--label name] [--no-label]` | create an issue (the body may also come from stdin) |
 | `amf issue list [--state open\|closed\|all] [--label name] [--search text] [--limit n] [--json]` | list issues, newest first, with their amf labels |
-| `amf issue label <N> [--add name]... [--remove name]...` | add or remove an issue's labels |
+| `amf issue label [<N>] [label...] [--add name]... [--remove name]... [selectors]` | add or remove labels on an issue or filtered set |
+| `amf issue unlabel [<N>] [label...] [selectors]` | remove labels from an issue or filtered set |
+| `amf issue close <N> [--comment text] [--delete-branch]` | close an issue |
+| `amf issue reopen <N>` | reopen an issue |
+| `amf issue view <N> [--json]` | show an issue |
 | `amf issue run <N> [flags]` | process one issue into a PR: see amf help run |
 | `amf issue watch [flags]` | process amf:ready issues as they arrive: see amf help watch |
 
@@ -121,21 +165,134 @@ With `--json`:
 ### amf issue label
 
 ```text
-amf issue label <N> [--add L]... [--remove L]...
+amf issue label <N> [label...] [--add L]... [--remove L]...
+amf issue label <selectors> [label...] [--add L]... [--remove L]...
 ```
 
-Adds and removes labels on one issue (not a pull request). --add and
---remove repeat, or take comma-separated names; at least one is required,
-and a label can't be in both. Labels already present, or already absent,
-cost no API call. Adding an amf status label (amf:in-progress, amf:pr-open,
+Adds the positional labels to one open or closed issue (not a pull request).
+--add and --remove also add and remove labels and may repeat. Names may be
+comma-separated; at least one nonblank label is required, with no default,
+and a label can't be in both add and remove. Labels already present, or
+already absent, cost no API call. Adding an amf status label (amf:in-progress, amf:pr-open,
 amf:done or amf:failed) also removes the issue's other status label;
 adding two fails. Prints #N: added ...; removed ..., or #N unchanged.
 There is no --json flag.
+
+For a set of issues, replace the issue number with one or more selectors:
+`--state open|closed|all`, `--label NAME`, or `--unlabeled`. State defaults to
+open. `--label` selects issues already carrying that label; `--unlabeled`
+selects issues with no labels at all. Selectors combine, but `--label` and
+`--unlabeled` conflict, and a blank `--label` is rejected. State ignores case
+and surrounding whitespace; label names have surrounding whitespace trimmed.
+Supply an issue number or selectors, not both. A first positional label that
+parses as an issue number is rejected with selectors; use `--add` for such
+label names with `issue label`.
+
+Bulk operations fetch every page and exclude pull requests before changing
+anything, then apply the same label rules to each match, newest first.
+They print one result per issue and stop at the first API or output error
+(exit 1), leaving earlier changes in place. An API error during an issue's
+updates can leave some of its labels changed. An update error names that
+issue. No matches prints `No matching issues in owner/name.` and exits 0.
 
 Example output:
 
 ```text
 #42: added amf:done; removed amf:failed
+```
+
+### amf issue unlabel
+
+```text
+amf issue unlabel <N> [label...]
+amf issue unlabel <selectors> [label...]
+```
+
+Removes the given labels from an open or closed issue (not a pull request),
+leaving other labels unchanged. Names may be comma-separated; at least one
+nonblank label is required, with no default. Duplicate names are removed
+once, and absent labels cost no write. Prints #N: removed A, B, or #N unchanged.
+Accepts the same bulk selectors and follows the same ordering and error
+handling as `issue label`.
+Both label commands accept `42` or `#42`, need no git checkout, and support
+`amf help issue <command>`, `-h` and `--help`. Use `--` before label names
+beginning with `-` to stop flag parsing.
+
+```sh
+amf issue label 42 amf:ready "needs review"
+amf issue unlabel 42 amf:ready bug
+amf issue label --state open --unlabeled amf:ready
+amf issue unlabel --state closed --label amf:ready amf:ready
+```
+
+### amf issue close
+
+```text
+amf issue close <N> [--comment text] [--delete-branch]
+```
+
+Closes an issue, leaving its labels unchanged. --comment posts its text
+before closing, with configured secrets redacted; a comment failure prevents
+closing. --delete-branch deletes the remote amf/issue-N branch in the
+configured repository after closing. Local branches and worktrees are
+unchanged. A deletion failure (including a missing branch) exits 1 after
+printing the success line; the issue stays closed.
+An already closed issue succeeds without commenting or deleting.
+Accepts `42` or `#42`, rejects pull requests, and needs no git checkout.
+
+```sh
+amf issue close 42 --comment "Superseded by #43"
+amf issue close 42 --delete-branch
+```
+
+Prints `Closed #42 https://github.com/owner/repo/issues/42`, or
+`#42 is already closed`.
+
+### amf issue reopen
+
+```text
+amf issue reopen <N>
+```
+
+Reopens a closed issue, leaving its labels unchanged. An already open issue
+succeeds without a write. Accepts `42` or `#42`, rejects pull requests, and
+needs no git checkout. No command-specific flags.
+
+```sh
+amf issue reopen 42
+```
+
+Prints `Reopened #42 https://github.com/owner/repo/issues/42`, or
+`#42 is already open`.
+
+### amf issue view
+
+```text
+amf issue view <N> [--json]
+```
+
+Shows the title, state, author, all labels, URL and body of an open or closed
+issue. Labels are comma-separated in GitHub's order, or - when empty.
+--json prints one object with number, title, state, url, labels, author and
+body. Labels is an array of names ([] when empty); body is preserved as
+returned by GitHub. Accepts `42` or `#42`, rejects pull requests, and needs
+no git checkout.
+
+```sh
+amf issue view 42
+amf issue view 42 --json
+```
+
+Example output:
+
+```text
+#42 Fix login
+state:     open
+author:    owner
+labels:    bug, amf:ready
+url:       https://github.com/owner/repo/issues/42
+
+Users cannot sign in.
 ```
 
 ### amf pr list
@@ -432,9 +589,9 @@ the same letter. `amf help flags` prints this table; `amf <command> --help`
 | `-B` | `--no-browser` | auth login |
 | `-C` | `--client-id` | auth login |
 | `-c` | `--check` | update |
-| `-c` | `--comment` | pr close |
+| `-c` | `--comment` | issue close, pr close |
 | `-c` | `--continue` | auto |
-| `-d` | `--delete-branch` | pr merge, pr close |
+| `-d` | `--delete-branch` | issue close, pr merge, pr close |
 | `-e` | `--eval-rounds` | run, watch, auto |
 | `-f` | `--file` | issue create |
 | `-f` | `--force` | run, auth token |
@@ -442,15 +599,15 @@ the same letter. `amf help flags` prints this table; `amf <command> --help`
 | `-H` | `--host` | auth login, auth status, auth logout, auth token |
 | `-i` | `--interval` | watch |
 | `-i` | `--issue` | pr list |
-| `-j` | `--json` | issue list, pr list, pr sweep, pr view, memory |
-| `-l` | `--label` | issue create, issue list, watch |
+| `-j` | `--json` | issue list, issue view, pr list, pr sweep, pr view, memory |
+| `-l` | `--label` | issue create, issue list, issue label, issue unlabel, watch |
 | `-L` | `--limit` | issue list, pr list, memory |
 | `-m` | `--merge` | run, watch, auto, pr sweep |
 | `-n` | `--dry-run` | run, auto, pr sweep |
 | `-o` | `--scopes` | auth login |
 | `-r` | `--rebase` | pr merge |
 | `-s` | `--squash` | pr merge |
-| `-s` | `--state` | issue list, pr list |
+| `-s` | `--state` | issue list, issue label, issue unlabel, pr list |
 | `-S` | `--search` | issue list |
 | `-t` | `--agent-timeout` | run, watch, auto |
 | `-u` | `--update-branch` | pr merge |
@@ -594,12 +751,36 @@ Generated from each command's `--help`; `amf init`,
 | `-S, --search <text>` | only issues whose title contains this text, ignoring case |
 | `-s, --state <state>` | open, closed or all (default open) |
 
+### amf issue close
+
+| Flag | What it does |
+|---|---|
+| `-c, --comment <text>` | post a comment on the issue before closing |
+| `-d, --delete-branch` | delete this repository's amf/issue-N branch after closing |
+
+### amf issue view
+
+| Flag | What it does |
+|---|---|
+| `-j, --json` | print one JSON object |
+
 ### amf issue label
 
 | Flag | What it does |
 |---|---|
 | `--add <value>` | add this label (repeatable, or comma-separated) |
+| `-l, --label <name>` | select issues with this label (bulk mode) |
 | `--remove <value>` | remove this label (repeatable, or comma-separated) |
+| `-s, --state <state>` | select issues by state: open, closed or all (bulk mode) (default open) |
+| `--unlabeled` | select only issues with no labels (bulk mode) |
+
+### amf issue unlabel
+
+| Flag | What it does |
+|---|---|
+| `-l, --label <name>` | select issues with this label (bulk mode) |
+| `-s, --state <state>` | select issues by state: open, closed or all (bulk mode) (default open) |
+| `--unlabeled` | select only issues with no labels (bulk mode) |
 
 ### amf doctor
 
@@ -873,7 +1054,7 @@ with an error, times out, or makes no change), amf runs the secondary,
 the default branch, and the PR and issue comment say which agent made the
 change. If both fail, the error names both. Set `AMF_SECONDARY_AGENT=none`
 for no fallback. Either takes `claudecode` (or `claude`), `codex` or
-`opencode`; [Configuration (.env)](../README.md#configuration-env) lists both.
+`opencode`; [Configuration (.env)](CONFIGURATION.md#configuration-env) lists both.
 
 **Changed:** amf used to try claude first; the default order is now codex,
 then claude. Set `AMF_PRIMARY_AGENT=claudecode` and
@@ -929,7 +1110,7 @@ Without a pipeline (see below), amf runs one agent once. With Claude Code:
    `.amf/logs/issue-N.log` as it works, one JSON message per line
    (`tail -f` it to follow along). Each agent run may take at most 60 minutes
    (`--agent-timeout`; amf then kills the agent and everything it spawned, or
-   `AMF_AGENT_TIMEOUT` sets it without a flag; see [Configuration (.env)](../README.md#configuration-env)).
+   `AMF_AGENT_TIMEOUT` sets it without a flag; see [Configuration (.env)](CONFIGURATION.md#configuration-env)).
    Codex and opencode run the same way, with the commands in
    [docs/SPECS.md](SPECS.md#agents).
 4. Commits the changes (`Fix #N: <title>`), fails if there are none, and runs
@@ -1062,7 +1243,7 @@ After each issue, and when amf exits (Ctrl-C included), it writes
 git calls, agent time per stage and errors. It prints the same as the last
 line, `amf: summary: 3 issues (2 done, 1 failed, 0 skipped); 41 GitHub calls; log …`.
 
-- `--log-level debug|info|warn|error` (or `AMF_LOG_LEVEL`, see [Configuration (.env)](../README.md#configuration-env)) sets what the
+- `--log-level debug|info|warn|error` (or `AMF_LOG_LEVEL`, see [Configuration (.env)](CONFIGURATION.md#configuration-env)) sets what the
   terminal and the log show. By default the terminal shows `info` and the
   log keeps `debug`.
 - `--log-file PATH` writes the log somewhere else, and `--log-file off`
