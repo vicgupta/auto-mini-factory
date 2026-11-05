@@ -174,6 +174,24 @@ amf memory show 42 | less
 - [Development](docs/DEVELOPMENT.md): offline and live tests
 - [Release notes](https://github.com/vicgupta/auto-mini-factory/releases): changes by version
 
+### Signals
+
+Ctrl-C (`SIGINT`) and `SIGTERM` request a graceful stop for `amf run`,
+`amf watch` and `amf auto`: amf cancels the current step, cleans up and
+releases `.amf/watch.lock` before exiting. `watch` stops polling and starts
+no further issues. An interrupted issue normally becomes `amf:failed`;
+an existing open or merged PR keeps its corresponding status.
+
+On Unix, a running agent's whole process group receives `SIGTERM`, then
+`SIGKILL` if it is still there after 15 seconds. On Windows, amf ends the
+whole agent process tree with `taskkill /T /F`, without a grace period.
+
+Once `auto` has saved a plan, partial progress is kept in
+`.amf/auto/state.json`. Inspect it with `amf auto status`, then resume with
+`amf auto --continue` (which also approves any pending checkpoint), or
+discard the saved run with `amf auto --abort`. Interrupting the initial
+planning step leaves no saved plan to resume.
+
 ## Security
 
 Agents run with all permission checks off, so an issue body is effectively

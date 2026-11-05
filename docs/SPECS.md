@@ -317,9 +317,8 @@ command-specific `--help` and `-h` paths, including `amf run --help`,
 currently exit 2. Scripts needing help to exit successfully should use
 `amf help <command>`. Command-specific value validation can exit 1, such as
 `amf run 0`. Errors print as `amf: <error>` on
-stderr. SIGINT and
-SIGTERM cancel the current step, with the run's process group killed as on
-expiry; the issue is still marked failed.
+stderr. For SIGINT/SIGTERM handling in `run`, `watch` and `auto`, including
+lock release and saved auto progress, see [Signals](../README.md#signals).
 
 ### Output
 
