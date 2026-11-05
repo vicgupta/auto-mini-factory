@@ -86,6 +86,9 @@ type Runner struct {
 	// logins: agents run an issue's text with every permission check off.
 	Trusted []string
 	Timeout time.Duration // per agent run
+	// IdleTimeout is how long an agent may produce no output before amf
+	// stops it. 0 disables it.
+	IdleTimeout time.Duration
 	// KillGrace is how long an agent gets to exit after SIGTERM before amf
 	// SIGKILLs its process group, in tests small. 0 means agentKillGrace.
 	KillGrace time.Duration

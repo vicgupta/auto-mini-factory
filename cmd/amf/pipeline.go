@@ -18,6 +18,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unicode/utf8"
@@ -638,8 +639,9 @@ func (r *Runner) runAgent(ctx context.Context, agent, stage, model, wt, prompt, 
 	}
 	outLog, errLog := redacted(), redacted()
 	var stderrBytes countWriter
-	cmd.Stdout = io.MultiWriter(&stdout, outLog)
-	cmd.Stderr = io.MultiWriter(&stderrBytes, errLog)
+	activity := make(chan struct{}, 1)
+	cmd.Stdout = io.MultiWriter(&stdout, outLog, activityWriter(activity))
+	cmd.Stderr = io.MultiWriter(&stderrBytes, errLog, activityWriter(activity))
 
 	// The agent runs in its own process group, so a deadline or Ctrl-C can
 	// stop it and everything it spawned, not just the direct child. The kill
@@ -666,6 +668,7 @@ func (r *Runner) runAgent(ctx context.Context, agent, stage, model, wt, prompt, 
 	if name == "" {
 		name = "claude"
 	}
+	idleHit, stopIdle := watchIdle(r.IdleTimeout, activity, cancel)
 	added, removed := envDiff(os.Environ(), cmd.Env)
 	sum := sha256.Sum256([]byte(prompt))
 	callEvent(ctx, "agent.start", fmt.Sprintf("%s: starting %s", stageName(stage), agentName(agent)),
@@ -673,8 +676,14 @@ func (r *Runner) runAgent(ctx context.Context, agent, stage, model, wt, prompt, 
 		"dir", wt, "timeout", r.Timeout.String(), "stdin_bytes", len(prompt), "stdin_sha256", hex.EncodeToString(sum[:]),
 		"env_added", added, "env_removed", removed)
 	defer func() {
+		timedOut := errors.Is(ctx.Err(), context.DeadlineExceeded)
+		select {
+		case <-idleHit:
+			timedOut = true
+		default:
+		}
 		attrs := []any{"agent", agentName(agent), "stage", stageName(stage), "duration_ms", ms(time.Since(begin)),
-			"timed_out", errors.Is(ctx.Err(), context.DeadlineExceeded), "stdout_bytes", stdout.Len(), "stderr_bytes", stderrBytes.n}
+			"timed_out", timedOut, "stdout_bytes", stdout.Len(), "stderr_bytes", stderrBytes.n}
 		code := -1
 		if ps := cmd.ProcessState; ps != nil {
 			code = ps.ExitCode()
@@ -697,6 +706,7 @@ func (r *Runner) runAgent(ctx context.Context, agent, stage, model, wt, prompt, 
 	}()
 	runErr := cmd.Run()
 	close(exited)
+	stopIdle()
 	outLog.Flush()
 	errLog.Flush()
 	// However the run ended, nothing the agent spawned outlives it: the
@@ -704,7 +714,33 @@ func (r *Runner) runAgent(ctx context.Context, agent, stage, model, wt, prompt, 
 	if cmd.Process != nil && groupOutlivesLeader {
 		_ = killGroup(cmd.Process, syscall.SIGKILL)
 	}
-	if runErr != nil || ctx.Err() != nil {
+	idleStopped := false
+	select {
+	case <-idleHit:
+		idleStopped = true
+	default:
+	}
+	if idleStopped && runErr == nil {
+		// The agent finished just as the idle limit expired; keep its result.
+	} else if idleStopped {
+		elapsed := time.Since(begin).Round(10 * time.Millisecond)
+		fmt.Fprintf(logOut, "amf: killed after %s: %s produced no output for %s; stopped it (SIGTERM, then SIGKILL after %s)\n",
+			elapsed, name, r.IdleTimeout, grace)
+		r.event(slog.LevelWarn, "agent.timeout", logIssue(logPath), fmt.Sprintf("agent.timeout: agent=%s stage=%s issue=%d limit=%s elapsed=%s grace=%s pgid=%d bytes=%d log=%s idle=true",
+			agentName(agent), stageName(stage), logIssue(logPath), r.IdleTimeout, elapsed, grace, cmd.Process.Pid, stdout.Len(), logPath),
+			"agent", agentName(agent), "stage", stageName(stage), "limit", r.IdleTimeout.String(), "elapsed", elapsed.String(),
+			"grace", grace.String(), "pgid", cmd.Process.Pid, "bytes", stdout.Len(), "log", logPath, "idle", true)
+		partial := keepPartial(logPath, outPath, r.Redact)
+		return "", &agentTimeoutError{
+			Agent:   agentName(agent),
+			Stage:   stage,
+			Limit:   r.IdleTimeout,
+			Elapsed: elapsed,
+			LogPath: logPath,
+			Partial: partial,
+			Idle:    true,
+		}
+	} else if runErr != nil || ctx.Err() != nil {
 		// An untrappable SIGKILL can't fail to end the process group, so
 		// Wait has returned by now; record why the agent was stopped.
 		// Whatever the reason, record how long the run got before it was
@@ -765,6 +801,68 @@ type countWriter struct{ n int }
 func (c *countWriter) Write(p []byte) (int, error) {
 	c.n += len(p)
 	return len(p), nil
+}
+
+// activityWriter reports each write to the idle watcher.
+type activityWriter chan struct{}
+
+func (a activityWriter) Write(p []byte) (int, error) {
+	select {
+	case a <- struct{}{}:
+	default:
+	}
+	return len(p), nil
+}
+
+// watchIdle closes the returned channel and calls stop when nothing is
+// written to activity for limit. The returned func ends the watch; it is
+// safe to call after the channel closed.
+func watchIdle(limit time.Duration, activity <-chan struct{}, stop func()) (<-chan struct{}, func()) {
+	fired := make(chan struct{})
+	if limit <= 0 {
+		return fired, func() {}
+	}
+	done := make(chan struct{})
+	var mu sync.Mutex
+	stopped := false
+	end := func() {
+		mu.Lock()
+		if !stopped {
+			stopped = true
+			close(done)
+		}
+		mu.Unlock()
+	}
+	go func() {
+		timer := time.NewTimer(limit)
+		defer timer.Stop()
+		for {
+			select {
+			case <-timer.C:
+				mu.Lock()
+				if stopped {
+					mu.Unlock()
+					return
+				}
+				stopped = true
+				close(fired)
+				mu.Unlock()
+				stop()
+				return
+			case <-activity:
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				timer.Reset(limit)
+			case <-done:
+				return
+			}
+		}
+	}()
+	return fired, end
 }
 
 // envDiff is the names of the variables env adds to base or changes, and
@@ -836,20 +934,27 @@ func killAfter(d time.Duration, done <-chan struct{}, kill func()) {
 	}()
 }
 
-// agentTimeoutError is a run that hit the agent timeout: amf killed the
-// agent's whole process group. Such a run has no branch worth pushing, so no
-// push is made and no PR is opened or updated, and the worktree is removed.
+// agentTimeoutError is a run that hit the agent timeout, or produced no
+// output for its idle timeout: amf killed the agent's whole process group.
+// Such a run has no branch worth pushing, so no push is made and no PR is
+// opened or updated, and the worktree is removed.
 type agentTimeoutError struct {
 	Agent, Stage   string
 	Limit, Elapsed time.Duration
 	LogPath        string
 	Partial        string // where the agent's final message so far is kept, or ""
+	// Idle says amf stopped the run because it produced no output for Limit,
+	// not because the run took longer than the agent timeout.
+	Idle bool
 	// Before is how the agents amf tried first failed, when this one was
 	// the fallback; "" otherwise.
 	Before string
 }
 
 func (e *agentTimeoutError) Error() string {
+	if e.Idle {
+		return fmt.Sprintf("%s produced no output for %s; stopped it (log: %s)", e.Agent, e.Limit, e.LogPath)
+	}
 	return fmt.Sprintf("%s timed out after %s (log: %s)", e.Agent, e.Limit, e.LogPath)
 }
 
@@ -859,6 +964,12 @@ func (e *agentTimeoutError) comment(root string) string {
 	if e.Stage == "" { // without a pipeline there is one agent run, not a plan/code/eval one
 		when = fmt.Sprintf("after **%s** (limit %s)", e.Elapsed, e.Limit)
 	}
+	if e.Idle {
+		when = fmt.Sprintf("after **%s** with no output for **%s**", e.Elapsed, e.Limit)
+		if e.Stage != "" {
+			when = fmt.Sprintf("during the **%s** stage after **%s** with no output for **%s**", stageName(e.Stage), e.Elapsed, e.Limit)
+		}
+	}
 	kept := fmt.Sprintf("Partial output: `%s`", relLog(root, e.LogPath))
 	if e.Partial != "" {
 		kept += fmt.Sprintf(" (its final message so far: `%s`)", relLog(root, e.Partial))
@@ -867,9 +978,14 @@ func (e *agentTimeoutError) comment(root string) string {
 	if e.Before != "" {
 		before = fmt.Sprintf("First %s; amf fell back to **%s**. ", e.Before, e.Agent)
 	}
-	return fmt.Sprintf("%samf stopped **%s** %s and opened no pull request. %s. "+
-		"To retry with more time, set `AMF_AGENT_TIMEOUT` or `--agent-timeout` and re-add the `%s` label.",
-		before, e.Agent, when, kept, labelReady)
+	retry := "To retry with more time, set `AMF_AGENT_TIMEOUT` or `--agent-timeout` and re-add the `" + labelReady + "` label."
+	if e.Idle {
+		retry = "To allow more time without output, set `AMF_AGENT_IDLE_TIMEOUT` (or `off` to disable it) and re-add the `" + labelReady + "` label."
+		return fmt.Sprintf("%samf stopped **%s** %s and opened no pull request: `%s produced no output for %s; stopped it`. %s. %s",
+			before, e.Agent, when, e.Agent, e.Limit, kept, retry)
+	}
+	return fmt.Sprintf("%samf stopped **%s** %s and opened no pull request. %s. %s",
+		before, e.Agent, when, kept, retry)
 }
 
 // relLog is a log path relative to the checkout, as one would type it.
