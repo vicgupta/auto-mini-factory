@@ -169,6 +169,39 @@ func TestFallbackBothFail(t *testing.T) {
 	}
 }
 
+func TestFallbackMessageNamesEverySkippedAgent(t *testing.T) {
+	root, _ := setupRepo(t)
+	gh, srv := newFakeGitHub(t)
+	gh.issues[1] = readyIssue(1, "Add feature file")
+	r, log := newTestRunner(t, srv, root, filepath.Join(t.TempDir(), "no-claude"))
+	r.Codex = filepath.Join(t.TempDir(), "no-codex")
+	r.Opencode = fakeAgent(t, "opencode", fakeDefaultOpencode)
+	r.AnthropicKey, r.OpenAIKey = "", ""
+	r.Primary, r.Secondary = agentCodex, agentClaude
+	var events bytes.Buffer
+	r.Events = newEventLogger(r.Log, slog.LevelInfo, &events, slog.LevelDebug, nil, "run")
+	if err := r.Run(context.Background(), 1); err != nil {
+		t.Fatalf("Run: %v\nlog:\n%s", err, log)
+	}
+	got := eventsByName(eventLines(t, events.String()))["agent.fallback"]
+	if len(got) != 1 {
+		t.Fatalf("fallback events = %v, want one", got)
+	}
+	e := got[0]
+	if e["from"] != "codex" || e["to"] != "opencode" {
+		t.Errorf("fallback from/to = %v/%v, want codex/opencode", e["from"], e["to"])
+	}
+	msg, _ := e["msg"].(string)
+	for _, want := range []string{"codex is not installed", "claude is not installed", "falling back to opencode"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("fallback message %q lacks %q", msg, want)
+		}
+	}
+	if strings.Contains(msg, "claude failed") {
+		t.Errorf("fallback message %q repeats the agent in 'failed'", msg)
+	}
+}
+
 func TestPrimarySuccessNoFallback(t *testing.T) {
 	gh, events, err, log, _ := fallbackRun(t, fakeDefaultCodex, "echo claude must not run >&2; exit 9")
 	if err != nil {

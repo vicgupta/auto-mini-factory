@@ -547,9 +547,14 @@ func (r *Runner) buildFallback(ctx context.Context, issue Issue, base string, pl
 	var failed []string // how each agent that ran failed, in order
 	// An agent passed over as not usable is a fallback too, but one decided
 	// before anything ran, so only the event records it, not the PR body.
+	// Name every skipped agent, so the message says which one was tried
+	// first and why it didn't run.
 	if len(plan.Skipped) > 0 {
-		s := plan.Skipped[len(plan.Skipped)-1]
-		r.fallbackEvent(n, s.Agent, plan.Agents[0], "unusable", s.Reason)
+		reasons := make([]string, len(plan.Skipped))
+		for i, s := range plan.Skipped {
+			reasons[i] = s.Reason
+		}
+		r.fallbackEvent(n, plan.Skipped[0].Agent, plan.Agents[0], "unusable", strings.Join(reasons, "; "))
 	}
 	for i, agent := range plan.Agents {
 		log := filepath.Join(r.Root, ".amf", "logs", fmt.Sprintf("issue-%d.log", n))
@@ -596,7 +601,14 @@ func (r *Runner) buildFallback(ctx context.Context, issue Issue, base string, pl
 
 // fallbackEvent records that amf moves on from one agent to the next.
 func (r *Runner) fallbackEvent(n int, from, to, reason, detail string) {
-	r.event(slog.LevelWarn, "agent.fallback", n, fmt.Sprintf("#%d: %s failed (%s); falling back to %s", n, agentName(from), detail, agentName(to)),
+	text := fmt.Sprintf("#%d: %s failed (%s); falling back to %s", n, agentName(from), detail, agentName(to))
+	// detail already names the agent and the reason for these, so saying
+	// "failed" again is noise: "codex is not installed; falling back to
+	// opencode" is clearer.
+	if reason == "unusable" || reason == "agent_timeout" {
+		text = fmt.Sprintf("#%d: %s; falling back to %s", n, detail, agentName(to))
+	}
+	r.event(slog.LevelWarn, "agent.fallback", n, text,
 		"from", agentName(from), "to", agentName(to), "reason", reason, "error", detail)
 }
 

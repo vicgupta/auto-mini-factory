@@ -275,9 +275,13 @@ label commands also return stdout write failures. No git checkout is needed.
     reset to `origin/<default>`, so nothing the primary left is kept. Its
     output goes to `.amf/logs/issue-N-<agent>.log`. amf logs an
     `agent.fallback` event (`from`, `to`, `reason`: `unusable`, `error` or
-    `agent_timeout`, `error`). When the secondary made the change after the
-    primary ran and failed, the PR body and the issue comment say
-    `<agent> made the change, after amf fell back from <agent> failed: <error>.`
+    `agent_timeout`, `error`). Its message names the agent that didn't run or
+    failed, why, and the agent used next: every skipped agent's reason, then
+    `falling back to <agent>` (for example `codex is not installed; falling
+    back to opencode`), or `<agent> failed (<error>); falling back to
+    <agent>`. When the secondary made the change after the primary ran and
+    failed, the PR body and the issue comment say `<agent> made the change,
+    after amf fell back from <agent> failed: <error>.`
   - **Both failing** fails the issue as one agent failing would, with the
     error `every agent failed: <primary> failed: ..., then <secondary> failed: ...`.
   - **Precedence:** a pipeline's per-stage agent always wins; `--agent` runs
