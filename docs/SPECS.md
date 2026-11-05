@@ -481,6 +481,17 @@ by number descending so the highest number is first even when creation times tie
   errors leave stdout empty, including errors on later pages. A failure to
   write stdout is returned as an error.
 
+`amf pr sweep` updates, merges and labels the open amf PRs, and `amf watch
+--merge` runs the same sweep each poll. A PR whose head is behind its base is
+updated with GitHub's Update branch, then its checks decide whether it waits,
+blocks or, with `--merge`, merges; a PR that can't merge is `blocked` and gets
+one status comment per head and reason, suggesting `amf run N --force` for a
+conflict. `--dry-run` only reads from GitHub: it reports a conflicting PR
+(GitHub's `mergeable` false or `mergeable_state` `dirty`) as `blocked` with
+that suggestion, not `would-update`; non-conflicting PRs get the read-only
+actions (`would-update`, `would-merge`, `waiting`, `ready` or `blocked`). See
+`amf help pr sweep` for the text and JSON output.
+
 ### `amf pr merge`
 
 Reads `.env` and the environment and checks repository access, as `amf issue list`

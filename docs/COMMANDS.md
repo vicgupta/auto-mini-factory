@@ -416,10 +416,13 @@ suggests `amf run N --force`, which has an agent resolve it.
 
 In a git checkout the sweep holds the [repo lock](#the-repo-lock), so it
 fails while `amf watch`, `amf run` or `amf auto` works there. `--dry-run`
-only reads from GitHub and reports `would-update` or `would-merge`. It costs
-two list calls, then a few reads per PR; writes only when there is something
-to do. `amf watch --merge` runs the same sweep each poll, without waiting
-for checks.
+only reads from GitHub: it reports `would-update` or `would-merge` where a
+real sweep would update or merge, `waiting`, `ready` or `blocked` as it would
+otherwise, and a conflicting PR (GitHub's `mergeable` false or
+`mergeable_state` `dirty`) as `blocked` with the same `amf run N --force`
+suggestion. It costs two list calls, then a few reads per PR; writes only
+when there is something to do. `amf watch --merge` runs the same sweep each
+poll, without waiting for checks.
 
 Prints one line per PR, `#N (issue #M) <action>[: reason] <url>`, or
 `No open amf pull requests to sweep.` `--json` prints an array of `number`,

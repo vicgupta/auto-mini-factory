@@ -107,6 +107,11 @@ func sweepOne(ctx context.Context, gh *GitHub, repo string, n, issue int, opt sw
 	}
 	if behind > 0 {
 		if opt.DryRun {
+			if pr.MergeableState == "dirty" || (pr.Mergeable != nil && !*pr.Mergeable) {
+				res.Action, res.Reason = "blocked", fmt.Sprintf("conflict: %s is %d %s behind %s; run amf run %d --force to have an agent resolve the conflicts",
+					issueBranch(issue), behind, plural(behind, "commit", "commits"), pr.Base.Ref, issue)
+				return res
+			}
 			res.Action, res.Reason = "would-update", fmt.Sprintf("%d %s behind %s", behind, plural(behind, "commit", "commits"), pr.Base.Ref)
 			return res
 		}

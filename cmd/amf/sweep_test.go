@@ -27,7 +27,7 @@ type sweepFake struct {
 
 func newSweepFake(t *testing.T) (*sweepFake, *httptest.Server) {
 	f := &sweepFake{t: t, comments: map[int][]string{}, merged: map[int]bool{},
-		heads: map[int]string{201: "sha201", 202: "sha202", 203: "sha203", 204: "sha204", 208: "sha208"}}
+		heads: map[int]string{201: "sha201", 202: "sha202", 203: "sha203", 204: "sha204", 208: "sha208", 209: "sha209"}}
 	srv := httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(srv.Close)
 	return f, srv
@@ -43,11 +43,17 @@ func (f *sweepFake) serve(w http.ResponseWriter, r *http.Request) {
 		f.writes = append(f.writes, r.Method+" "+p)
 	}
 	pr := func(n int, ref string, draft bool) map[string]any {
-		return map[string]any{"number": n, "html_url": fmt.Sprintf("https://github.com/vic/demo/pull/%d", n), "state": "open", "draft": draft,
+		p := map[string]any{"number": n, "html_url": fmt.Sprintf("https://github.com/vic/demo/pull/%d", n), "state": "open", "draft": draft,
 			"merged": f.merged[n], "base": map[string]any{"ref": "main"},
 			"head": map[string]any{"ref": ref, "sha": f.heads[n], "repo": map[string]string{"full_name": "vic/demo"}}}
+		if n == 209 {
+			p["mergeable"], p["mergeable_state"] = false, "dirty"
+		} else {
+			p["mergeable"], p["mergeable_state"] = true, "clean"
+		}
+		return p
 	}
-	refs := map[int]string{201: "amf/issue-1", 202: "amf/issue-2", 203: "amf/issue-3", 204: "amf/issue-4", 205: "feature/x", 206: "amf/issue-6", 207: "amf/issue-7", 208: "amf/issue-8"}
+	refs := map[int]string{201: "amf/issue-1", 202: "amf/issue-2", 203: "amf/issue-3", 204: "amf/issue-4", 205: "feature/x", 206: "amf/issue-6", 207: "amf/issue-7", 208: "amf/issue-8", 209: "amf/issue-9"}
 	switch {
 	case p == "/repos/vic/demo":
 		writeJSON(w, 200, map[string]any{"default_branch": "main", "permissions": map[string]bool{"push": true}})
@@ -56,19 +62,19 @@ func (f *sweepFake) serve(w http.ResponseWriter, r *http.Request) {
 			f.t.Errorf("issues query %v", r.URL.RawQuery)
 		}
 		var out []map[string]any
-		for _, n := range []int{1, 2, 3, 4, 6, 8} {
+		for _, n := range []int{1, 2, 3, 4, 6, 8, 9} {
 			out = append(out, map[string]any{"number": n, "state": "open", "labels": []map[string]string{{"name": labelPROpen}}})
 		}
 		writeJSON(w, 200, out)
 	case p == "/repos/vic/demo/pulls" && r.Method == "GET":
 		var out []map[string]any
-		for n := 208; n >= 201; n-- {
+		for n := 209; n >= 201; n-- {
 			out = append(out, pr(n, refs[n], n == 206))
 		}
 		writeJSON(w, 200, out)
 	case strings.HasPrefix(p, "/repos/vic/demo/compare/"):
 		behind := 0
-		if strings.HasSuffix(p, "...sha202") {
+		if strings.HasSuffix(p, "...sha202") || strings.HasSuffix(p, "...sha209") {
 			behind = 3
 		}
 		writeJSON(w, 200, map[string]int{"ahead_by": 1, "behind_by": behind})
@@ -118,6 +124,10 @@ func (f *sweepFake) serve(w http.ResponseWriter, r *http.Request) {
 			}
 			writeJSON(w, 200, files)
 		case "/update-branch":
+			if n == 209 {
+				writeJSON(w, 422, map[string]string{"message": "merge conflict between base and head"})
+				return
+			}
 			f.heads[n] = "sha202b"
 			writeJSON(w, 202, map[string]string{"message": "Updating pull request branch."})
 		case "/merge":
@@ -152,7 +162,7 @@ func TestPRSweep(t *testing.T) {
 	for _, s := range res {
 		got[s.Number] = s.Action
 	}
-	want := map[int]string{201: "merged", 202: "updated", 203: "blocked", 204: "waiting", 208: "blocked"}
+	want := map[int]string{201: "merged", 202: "updated", 203: "blocked", 204: "waiting", 208: "blocked", 209: "blocked"}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("actions = %v, want %v (%s)", got, want, out.String())
 	}
@@ -161,6 +171,9 @@ func TestPRSweep(t *testing.T) {
 	}
 	if len(f.comments[203]) != 1 || !strings.Contains(f.comments[203][0], "checks failed") || len(f.comments[208]) != 1 {
 		t.Errorf("comments = %v", f.comments)
+	}
+	if len(f.comments[209]) != 1 || !strings.Contains(f.comments[209][0], "amf run 9 --force") {
+		t.Errorf("conflict comment = %v", f.comments[209])
 	}
 	if len(f.comments[201])+len(f.comments[202])+len(f.comments[204]) != 0 {
 		t.Errorf("unexpected comments = %v", f.comments)
@@ -174,7 +187,7 @@ func TestPRSweep(t *testing.T) {
 	if err := run(context.Background(), []string{"pr", "sweep", "--merge=squash"}, strings.NewReader(""), &out, &stderr); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.comments[203]) != 1 || len(f.comments[208]) != 1 {
+	if len(f.comments[203]) != 1 || len(f.comments[208]) != 1 || len(f.comments[209]) != 1 {
 		t.Errorf("comments repeated: %v", f.comments)
 	}
 	if !strings.Contains(out.String(), "#204 (issue #4) waiting: checks pending") {
@@ -193,6 +206,23 @@ func TestPRSweepDryRunWrites(t *testing.T) {
 		t.Fatalf("dry run wrote: %v", f.writes)
 	}
 	for _, s := range []string{"#201 (issue #1) would-merge", "#202 (issue #2) would-update: 3 commits behind main", "#203 (issue #3) blocked: checks failed"} {
+		if !strings.Contains(out.String(), s) {
+			t.Errorf("missing %q in %s", s, out.String())
+		}
+	}
+}
+
+func TestPRSweepDryRunConflict(t *testing.T) {
+	f, srv := newSweepFake(t)
+	listJSONEnv(t, srv)
+	var out, stderr bytes.Buffer
+	if err := run(context.Background(), []string{"pr", "sweep", "-n"}, strings.NewReader(""), &out, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.writes) != 0 {
+		t.Fatalf("dry run wrote: %v", f.writes)
+	}
+	for _, s := range []string{"#209 (issue #9) blocked: conflict", "amf run 9 --force"} {
 		if !strings.Contains(out.String(), s) {
 			t.Errorf("missing %q in %s", s, out.String())
 		}
