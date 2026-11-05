@@ -71,21 +71,37 @@ func cmdIssueGroup(ctx context.Context, args []string, stdin io.Reader, stdout, 
 	}
 }
 
+type issueStateFlags struct {
+	comment      *string
+	deleteBranch *bool
+}
+
+func addIssueStateFlags(fs *flag.FlagSet, command string) issueStateFlags {
+	var f issueStateFlags
+	if command == "close" {
+		f.comment = fs.String("comment", "", "post a comment on the issue before closing")
+		f.deleteBranch = fs.Bool("delete-branch", false, "delete this repository's amf/issue-N branch after closing")
+	}
+	return f
+}
+
 // cmdIssueState closes or reopens an issue without changing its labels.
 func cmdIssueState(ctx context.Context, command string, args []string, stdout, stderr io.Writer) error {
 	fs := newCommandFlags("issue "+command, stderr)
-	var comment string
-	var deleteBranch bool
-	if command == "close" {
-		fs.StringVar(&comment, "comment", "", "post a comment on the issue before closing")
-		fs.BoolVar(&deleteBranch, "delete-branch", false, "delete this repository's amf/issue-N branch after closing")
-	}
+	f := addIssueStateFlags(fs, command)
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		if err == flag.ErrHelp {
 			return nil
 		}
 		return errUsage
+	}
+	comment, deleteBranch := "", false
+	if f.comment != nil {
+		comment = *f.comment
+	}
+	if f.deleteBranch != nil {
+		deleteBranch = *f.deleteBranch
 	}
 	if len(pos) != 1 {
 		fs.Usage()
@@ -150,9 +166,13 @@ type viewedIssue struct {
 	Body   string `json:"body"`
 }
 
+func addIssueViewFlags(fs *flag.FlagSet) *bool {
+	return fs.Bool("json", false, "print one JSON object")
+}
+
 func cmdIssueView(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := newCommandFlags("issue view", stderr)
-	asJSON := fs.Bool("json", false, "print one JSON object")
+	asJSON := addIssueViewFlags(fs)
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		if err == flag.ErrHelp {

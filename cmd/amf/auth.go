@@ -494,6 +494,27 @@ func init() {
 	helpExamples["auth token"] = "  GH_TOKEN=$(amf auth token) gh pr list\n"
 }
 
+type authFlags struct {
+	host      *string
+	clientID  *string
+	scopes    *string
+	noBrowser *bool
+	force     *bool
+}
+
+func addAuthFlags(fs *flag.FlagSet, sub string) authFlags {
+	f := authFlags{host: fs.String("host", "", "the GitHub `host` (default: AMF_API_URL's, github.com)")}
+	switch sub {
+	case "login":
+		f.clientID = fs.String("client-id", "", "the OAuth app's client `id` (default: AMF_GITHUB_CLIENT_ID)")
+		f.scopes = fs.String("scopes", defaultScopes, "the OAuth `scopes` to ask for, separated by spaces or commas")
+		f.noBrowser = fs.Bool("no-browser", false, "don't open the browser; just print the link")
+	case "token":
+		f.force = fs.Bool("force", false, "print the token even to a terminal")
+	}
+	return f
+}
+
 func cmdAuth(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 || isHelpArgs(args) {
 		w := stdout
@@ -520,17 +541,7 @@ func cmdAuth(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		return errUsage
 	}
 	fs := newCommandFlags("auth "+sub, stderr)
-	host := fs.String("host", "", "the GitHub `host` (default: AMF_API_URL's, github.com)")
-	var clientID, scopes *string
-	var noBrowser, force *bool
-	switch sub {
-	case "login":
-		clientID = fs.String("client-id", "", "the OAuth app's client `id` (default: AMF_GITHUB_CLIENT_ID)")
-		scopes = fs.String("scopes", defaultScopes, "the OAuth `scopes` to ask for, separated by spaces or commas")
-		noBrowser = fs.Bool("no-browser", false, "don't open the browser; just print the link")
-	case "token":
-		force = fs.Bool("force", false, "print the token even to a terminal")
-	}
+	f := addAuthFlags(fs, sub)
 	pos, err := parseArgs(fs, rest)
 	if err != nil {
 		if err == flag.ErrHelp {
@@ -544,29 +555,29 @@ func cmdAuth(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	}
 	ep := envPaths(ctx)
 	apiURL := configuredAPIURL(ep)
-	if h := strings.ToLower(strings.TrimSpace(*host)); h != "" && h != authHost(apiURL) {
-		*host, apiURL = h, apiURLForHost(h)
+	if h := strings.ToLower(strings.TrimSpace(*f.host)); h != "" && h != authHost(apiURL) {
+		*f.host, apiURL = h, apiURLForHost(h)
 	} else {
-		*host = authHost(apiURL)
+		*f.host = authHost(apiURL)
 	}
 	switch sub {
 	case "login":
-		return authLogin(ctx, *host, apiURL, *clientID, *scopes, !*noBrowser, stdout)
+		return authLogin(ctx, *f.host, apiURL, *f.clientID, *f.scopes, !*f.noBrowser, stdout)
 	case "logout":
-		return authLogout(*host, stdout)
+		return authLogout(*f.host, stdout)
 	}
-	tok, src, err := currentToken(ep, *host, apiURL)
+	tok, src, err := currentToken(ep, *f.host, apiURL)
 	if err != nil {
 		return err
 	}
 	if sub == "token" {
-		if writerIsTerminal(stdout) && !*force {
+		if writerIsTerminal(stdout) && !*f.force {
 			return errors.New("refusing to print the token to a terminal; pipe it, or pass --force")
 		}
 		_, err := fmt.Fprintln(stdout, tok)
 		return err
 	}
-	return authStatus(ctx, *host, apiURL, tok, src, stdout)
+	return authStatus(ctx, *f.host, apiURL, tok, src, stdout)
 }
 
 // currentToken is the token amf would use for host. GITHUB_TOKEN and

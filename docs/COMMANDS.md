@@ -56,7 +56,8 @@ amf help pr merge                # show a subcommand's flags and examples
 
 `amf completion <bash|zsh|fish>` prints a self-contained completion script
 to stdout, without reading configuration or contacting GitHub. It completes
-each command's flags plus the global `--quiet`, `--color` and path flags. See
+each command's flags plus the global `--quiet`, `--color` and path flags,
+all generated from the same FlagSets as help. See
 [Shell completion](../README.md#shell-completion) for shell startup snippets.
 `amf completion --help` and `amf help completion` explain how to source it.
 A missing or unsupported shell, or extra arguments, is a usage error (exit 2).

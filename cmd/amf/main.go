@@ -198,12 +198,25 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 }
 
+type issueCreateFlags struct {
+	body    *string
+	file    *string
+	label   *string
+	noLabel *bool
+}
+
+func addIssueCreateFlags(fs *flag.FlagSet) issueCreateFlags {
+	return issueCreateFlags{
+		body:    fs.String("body", "", "`text` of the issue body"),
+		file:    fs.String("file", "", "read the issue body from the file at `path` (- for stdin)"),
+		label:   fs.String("label", labelReady, "label that marks the issue for amf"),
+		noLabel: fs.Bool("no-label", false, "don't label the issue for amf"),
+	}
+}
+
 func cmdIssueCreate(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	fs := newCommandFlags("issue create", stderr)
-	body := fs.String("body", "", "`text` of the issue body")
-	file := fs.String("file", "", "read the issue body from the file at `path` (- for stdin)")
-	label := fs.String("label", labelReady, "label that marks the issue for amf")
-	noLabel := fs.Bool("no-label", false, "don't label the issue for amf")
+	f := addIssueCreateFlags(fs)
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		if err == flag.ErrHelp {
@@ -229,22 +242,22 @@ func cmdIssueCreate(ctx context.Context, args []string, stdin io.Reader, stdout,
 			labelSet = true
 		}
 	})
-	if *noLabel && labelSet {
+	if *f.noLabel && labelSet {
 		return errors.New("--label and --no-label can't be used together")
 	}
-	if !*noLabel && strings.TrimSpace(*label) == "" {
+	if !*f.noLabel && strings.TrimSpace(*f.label) == "" {
 		return errors.New("--label can't be empty")
 	}
 
-	text := *body
+	text := *f.body
 	switch {
-	case bodySet && *file != "":
+	case bodySet && *f.file != "":
 		return errors.New("use --body or --file, not both")
-	case *file == "-":
+	case *f.file == "-":
 		text, err = readAll(stdin)
-	case *file != "":
+	case *f.file != "":
 		var b []byte
-		b, err = os.ReadFile(*file)
+		b, err = os.ReadFile(*f.file)
 		text = string(b)
 	case !bodySet && !isTerminal(stdin):
 		text, err = readAll(stdin)
@@ -258,8 +271,8 @@ func cmdIssueCreate(ctx context.Context, args []string, stdin io.Reader, stdout,
 		return err
 	}
 	var labels []string
-	if !*noLabel {
-		labels = []string{strings.TrimSpace(*label)}
+	if !*f.noLabel {
+		labels = []string{strings.TrimSpace(*f.label)}
 	}
 	is, err := newGitHub(cfg).CreateIssue(ctx, strings.TrimSpace(pos[0]), text, labels)
 	if err != nil {
@@ -269,35 +282,55 @@ func cmdIssueCreate(ctx context.Context, args []string, stdin io.Reader, stdout,
 	return nil
 }
 
+type runFlags struct {
+	timeout    *time.Duration
+	alias      *time.Duration
+	evalRounds *int
+	agent      *string
+	draft      *bool
+	merge      *mergeFlag
+	waitChecks *bool
+	dryRun     *bool
+	force      *bool
+	log        *logOptions
+	memory     *memoryOptions
+}
+
+func addRunFlags(fs *flag.FlagSet) runFlags {
+	var f runFlags
+	f.timeout, f.alias = addTimeoutFlags(fs)
+	f.evalRounds = fs.Int("eval-rounds", 2, "how many times a pipeline's eval stage may send the change back to code")
+	f.agent = fs.String("agent", "", agentFlagHelp)
+	f.draft = fs.Bool("draft", false, draftFlagHelp)
+	f.merge = addMergeFlag(fs)
+	f.waitChecks = fs.Bool("wait-for-checks", true, waitChecksFlagHelp)
+	f.dryRun = fs.Bool("dry-run", false, "make the change on the local branch only: no label, comment, push, PR or merge")
+	f.force = fs.Bool("force", false, "run even if the issue already has an open PR or an amf/issue-N branch, updating that PR; this replaces the branch, first saving any commits it would drop to amf/backup/issue-N-<sha>-<time>")
+	f.log = addLogFlags(fs)
+	f.memory = addMemoryFlags(fs)
+	return f
+}
+
 func cmdRun(ctx context.Context, args []string, stderr io.Writer) (err error) {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	withHelp(fs, stderr, "run")
-	at, alias := addTimeoutFlags(fs)
-	evalRounds := fs.Int("eval-rounds", 2, "how many times a pipeline's eval stage may send the change back to code")
-	agent := fs.String("agent", "", agentFlagHelp)
-	draft := fs.Bool("draft", false, draftFlagHelp)
-	merge := addMergeFlag(fs)
-	waitChecks := fs.Bool("wait-for-checks", true, waitChecksFlagHelp)
-	dryRun := fs.Bool("dry-run", false, "make the change on the local branch only: no label, comment, push, PR or merge")
-	force := fs.Bool("force", false, "run even if the issue already has an open PR or an amf/issue-N branch, updating that PR; this replaces the branch, first saving any commits it would drop to amf/backup/issue-N-<sha>-<time>")
-	lo := addLogFlags(fs)
-	mo := addMemoryFlags(fs)
+	f := addRunFlags(fs)
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return errUsage
 	}
-	if err := merge.check(pos); err != nil {
+	if err := f.merge.check(pos); err != nil {
 		return err
 	}
-	if *draft && merge.value != "" {
+	if *f.draft && f.merge.value != "" {
 		return errDraftMerge
 	}
 	if len(pos) != 1 {
 		fmt.Fprintln(stderr, "usage: amf run <issue-number> [flags] (amf run --help lists them)")
 		return errUsage
 	}
-	timeout, err := timeoutFlag(fs, at, alias)
+	timeout, err := timeoutFlag(fs, f.timeout, f.alias)
 	if err != nil {
 		return err
 	}
@@ -305,10 +338,10 @@ func cmdRun(ctx context.Context, args []string, stderr io.Writer) (err error) {
 	if err != nil || n <= 0 {
 		return fmt.Errorf("invalid issue number %q; use a positive number such as 42 or #42", pos[0])
 	}
-	if err := lo.check(); err != nil {
+	if err := f.log.check(); err != nil {
 		return err
 	}
-	if err := mo.check(); err != nil {
+	if err := f.memory.check(); err != nil {
 		return err
 	}
 	defer func() {
@@ -316,45 +349,66 @@ func cmdRun(ctx context.Context, args []string, stderr io.Writer) (err error) {
 			fmt.Fprintln(stderr, "amf: troubleshooting:", troubleshootingURL)
 		}
 	}()
-	r, err := newRunner(ctx, timeout, *evalRounds, *agent, *lo, stderr)
+	r, err := newRunner(ctx, timeout, *f.evalRounds, *f.agent, *f.log, stderr)
 	if err != nil {
 		return err
 	}
 	defer r.Close()
-	r.Draft = *draft
-	r.Merge = merge.value
-	r.MergeSkipChecks = !*waitChecks
-	r.DryRun = *dryRun
-	r.Force = *force
+	r.Draft = *f.draft
+	r.Merge = f.merge.value
+	r.MergeSkipChecks = !*f.waitChecks
+	r.DryRun = *f.dryRun
+	r.Force = *f.force
 	if err := r.lockRepo("run"); err != nil {
 		return err
 	}
 	r.Command = "run"
-	if !*dryRun {
-		r.openMemory(*mo)
+	if !*f.dryRun {
+		r.openMemory(*f.memory)
 	}
 	err = redactErr(r.Redact, r.Run(ctx, n))
 	r.DB.logError(err)
 	return err
 }
 
+type watchFlags struct {
+	interval   *time.Duration
+	label      *string
+	exclude    labelsFlag
+	timeout    *time.Duration
+	alias      *time.Duration
+	evalRounds *int
+	agent      *string
+	draft      *bool
+	merge      *mergeFlag
+	waitChecks *bool
+	stale      *string
+	log        *logOptions
+	memory     *memoryOptions
+}
+
+func addWatchFlags(fs *flag.FlagSet) *watchFlags {
+	f := &watchFlags{}
+	f.interval = fs.Duration("interval", 60*time.Second, "how often to poll GitHub (Go duration, e.g. 30s or 5m)")
+	f.label = fs.String("label", labelReady, "process open issues with this label")
+	fs.Var(&f.exclude, "exclude-label", "skip issues with this `label`, leaving them as they are (repeatable: any of them skips)")
+	f.timeout, f.alias = addTimeoutFlags(fs)
+	f.evalRounds = fs.Int("eval-rounds", 2, "how many times a pipeline's eval stage may send the change back to code")
+	f.agent = fs.String("agent", "", agentFlagHelp)
+	f.draft = fs.Bool("draft", false, draftFlagHelp)
+	f.merge = addMergeFlag(fs)
+	f.waitChecks = fs.Bool("wait-for-checks", true, waitChecksFlagHelp)
+	f.stale = fs.String("stale-timeout", "", "put amf:in-progress issues no amf works on back to amf:ready after this long, as a Go duration (default AMF_STALE_TIMEOUT, else max(2x agent timeout, 2h); off disables)")
+	f.log = addLogFlags(fs)
+	f.memory = addMemoryFlags(fs)
+	return f
+}
+
 func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 	fs := flag.NewFlagSet("watch", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	withHelp(fs, stderr, "watch")
-	interval := fs.Duration("interval", 60*time.Second, "how often to poll GitHub (Go duration, e.g. 30s or 5m)")
-	label := fs.String("label", labelReady, "process open issues with this label")
-	var exclude labelsFlag
-	fs.Var(&exclude, "exclude-label", "skip issues with this `label`, leaving them as they are (repeatable: any of them skips)")
-	at, alias := addTimeoutFlags(fs)
-	evalRounds := fs.Int("eval-rounds", 2, "how many times a pipeline's eval stage may send the change back to code")
-	agent := fs.String("agent", "", agentFlagHelp)
-	draft := fs.Bool("draft", false, draftFlagHelp)
-	merge := addMergeFlag(fs)
-	waitChecks := fs.Bool("wait-for-checks", true, waitChecksFlagHelp)
-	staleFlag := fs.String("stale-timeout", "", "put amf:in-progress issues no amf works on back to amf:ready after this long, as a Go duration (default AMF_STALE_TIMEOUT, else max(2x agent timeout, 2h); off disables)")
-	lo := addLogFlags(fs)
-	mo := addMemoryFlags(fs)
+	f := addWatchFlags(fs)
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		if err == flag.ErrHelp {
@@ -362,60 +416,60 @@ func cmdWatch(ctx context.Context, args []string, stderr io.Writer) error {
 		}
 		return errUsage
 	}
-	if err := merge.check(pos); err != nil {
+	if err := f.merge.check(pos); err != nil {
 		return err
 	}
-	if *draft && merge.value != "" {
+	if *f.draft && f.merge.value != "" {
 		return errDraftMerge
 	}
 	if len(pos) != 0 {
 		fmt.Fprintln(stderr, "usage: amf watch [flags] (amf watch --help lists them)")
 		return errUsage
 	}
-	if *interval <= 0 {
+	if *f.interval <= 0 {
 		return errors.New("--interval must be positive")
 	}
-	if slices.Contains(exclude, "") {
+	if slices.Contains(f.exclude, "") {
 		return errors.New("--exclude-label can't be empty")
 	}
-	for _, x := range exclude {
-		if strings.EqualFold(x, strings.TrimSpace(*label)) {
+	for _, x := range f.exclude {
+		if strings.EqualFold(x, strings.TrimSpace(*f.label)) {
 			return fmt.Errorf("--exclude-label %q is the label watch is processing, so every issue would be skipped", x)
 		}
 	}
-	if *label == "" {
+	if *f.label == "" {
 		return errors.New("--label must not be empty")
 	}
-	timeout, err := timeoutFlag(fs, at, alias)
+	timeout, err := timeoutFlag(fs, f.timeout, f.alias)
 	if err != nil {
 		return err
 	}
-	if err := lo.check(); err != nil {
+	if err := f.log.check(); err != nil {
 		return err
 	}
-	if err := mo.check(); err != nil {
+	if err := f.memory.check(); err != nil {
 		return err
 	}
-	r, err := newRunner(ctx, timeout, *evalRounds, *agent, *lo, stderr)
+	r, err := newRunner(ctx, timeout, *f.evalRounds, *f.agent, *f.log, stderr)
 	if err != nil {
 		return err
 	}
 	defer r.Close()
 	r.Command = "watch"
-	r.openMemory(*mo)
-	r.Draft = *draft
-	r.ExcludeLabels = exclude
-	r.Merge = merge.value
-	r.MergeSkipChecks = !*waitChecks
-	if *staleFlag != "" {
-		if r.StaleTimeout, err = parseStaleTimeout(*staleFlag, "--stale-timeout", r.Timeout); err != nil {
+	r.openMemory(*f.memory)
+	r.Draft = *f.draft
+	r.ExcludeLabels = f.exclude
+	r.Merge = f.merge.value
+	r.MergeSkipChecks = !*f.waitChecks
+	if *f.stale != "" {
+		if r.StaleTimeout, err = parseStaleTimeout(*f.stale, "--stale-timeout", r.Timeout); err != nil {
 			return err
 		}
 	}
 	if err := r.lockRepo("watch"); err != nil {
 		return err
 	}
-	err = redactErr(r.Redact, r.Watch(ctx, *label, *interval))
+	err = redactErr(r.Redact, r.Watch(ctx, *f.label, *f.interval))
 	r.DB.logError(err)
 	return err
 }

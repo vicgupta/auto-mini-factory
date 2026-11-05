@@ -178,6 +178,22 @@ Each repo (host/owner/name from GITHUB_REPO) has its own folder and store,
 and a store that records another repo refuses to open.
 ` + "\nExamples:\n" + helpExamples["memory"] + "\nSee also: amf help run, amf help watch, amf help auto\n"
 
+type memoryCommandFlags struct {
+	memory *memoryOptions
+	asJSON *bool
+	limit  *int
+	full   *bool
+}
+
+func addMemoryCommandFlags(fs *flag.FlagSet) memoryCommandFlags {
+	return memoryCommandFlags{
+		memory: addMemoryFlags(fs),
+		asJSON: fs.Bool("json", false, "print JSON"),
+		limit:  fs.Int("limit", 5, "how many results similar prints"),
+		full:   fs.Bool("full", false, "with sync, reread every issue and PR instead of only what changed"),
+	}
+}
+
 func cmdMemory(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 || isHelpArgs(args) {
 		w := stdout
@@ -196,10 +212,7 @@ func cmdMemory(ctx context.Context, args []string, stdout, stderr io.Writer) err
 		return errUsage
 	}
 	fs := newCommandFlags("memory "+sub, stderr)
-	mo := addMemoryFlags(fs)
-	asJSON := fs.Bool("json", false, "print JSON")
-	limit := fs.Int("limit", 5, "how many results similar prints")
-	full := fs.Bool("full", false, "with sync, reread every issue and PR instead of only what changed")
+	f := addMemoryCommandFlags(fs)
 	pos, err := parseArgs(fs, rest)
 	if err != nil {
 		if err == flag.ErrHelp {
@@ -207,7 +220,7 @@ func cmdMemory(ctx context.Context, args []string, stdout, stderr io.Writer) err
 		}
 		return errUsage
 	}
-	if err := mo.check(); err != nil {
+	if err := f.memory.check(); err != nil {
 		return err
 	}
 	switch sub {
@@ -221,7 +234,7 @@ func cmdMemory(ctx context.Context, args []string, stdout, stderr io.Writer) err
 			return errUsage
 		}
 	}
-	if *limit < 1 {
+	if *f.limit < 1 {
 		return errors.New("--limit must be at least 1")
 	}
 	cfg, err := loadConfig(envPaths(ctx)...)
@@ -233,13 +246,13 @@ func cmdMemory(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	if !inGit {
 		root, _ = os.Getwd()
 	}
-	store, err := openMemory(*mo, repoKey(cfg.APIURL, cfg.Repo, root))
+	store, err := openMemory(*f.memory, repoKey(cfg.APIURL, cfg.Repo, root))
 	if err != nil {
 		return err
 	}
 	defer store.Close()
 	if inGit {
-		if err := excludeMemory(root, *mo); err != nil {
+		if err := excludeMemory(root, *f.memory); err != nil {
 			fmt.Fprintf(stderr, "amf: warning: could not update .git/info/exclude: %v\n", err)
 		}
 	}
@@ -247,15 +260,15 @@ func cmdMemory(ctx context.Context, args []string, stdout, stderr io.Writer) err
 
 	switch sub {
 	case "sync":
-		res, err := syncMemory(ctx, gh, store, *full)
+		res, err := syncMemory(ctx, gh, store, *f.full)
 		if err != nil {
 			return err
 		}
-		if *asJSON {
+		if *f.asJSON {
 			return writeJSONOut(stdout, res)
 		}
 		fmt.Fprintf(stdout, "synced %d %s and %d pull %s (%d linked to issues) into %s memory for %s\n",
-			res.Issues, plural(res.Issues, "issue", "issues"), res.PRs, plural(res.PRs, "request", "requests"), res.Linked, mo.Backend, store.Key())
+			res.Issues, plural(res.Issues, "issue", "issues"), res.PRs, plural(res.PRs, "request", "requests"), res.Linked, f.memory.Backend, store.Key())
 		return nil
 	case "show":
 		n, err := issueArg(pos)
@@ -266,7 +279,7 @@ func cmdMemory(ctx context.Context, args []string, stdout, stderr io.Writer) err
 		if err != nil {
 			return err
 		}
-		if *asJSON {
+		if *f.asJSON {
 			return writeJSONOut(stdout, h)
 		}
 		printHistory(stdout, n, h)
@@ -289,11 +302,11 @@ func cmdMemory(ctx context.Context, args []string, stdout, stderr io.Writer) err
 		}
 		text = h.Issue.Title + "\n" + h.Issue.Body
 	}
-	hits, err := similar(store, text, exclude, *limit)
+	hits, err := similar(store, text, exclude, *f.limit)
 	if err != nil {
 		return err
 	}
-	if *asJSON {
+	if *f.asJSON {
 		if hits == nil {
 			hits = []Hit{}
 		}

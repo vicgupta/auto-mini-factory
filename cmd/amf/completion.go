@@ -36,33 +36,11 @@ func cmdCompletion(args []string, stdout, stderr io.Writer) error {
 }
 
 // completionOptions lists visible flags; a trailing = marks a required value
-// so words used as flag values are never mistaken for subcommands. Short forms
-// and command groups come from the same lists as help and flag parsing.
+// so words used as flag values are never mistaken for subcommands. Command
+// flags come from the same FlagSets that help and parsing use, so a new flag
+// needs no completion change. Short forms and command groups come from the
+// same lists as help and flag parsing.
 func completionOptions() map[string][]string {
-	const memory = "memory-backend= memory-dir="
-	const run = "agent-timeout= eval-rounds= agent= draft merge wait-for-checks dry-run force log-level= log-file= " + memory
-	const watch = "agent-timeout= interval= label= exclude-label= eval-rounds= agent= draft merge wait-for-checks stale-timeout= log-level= log-file= " + memory
-	flags := map[string]string{
-		"init": "", "version": "", "completion": "", "man": "",
-		"run": run, "issue run": run, "watch": watch, "issue watch": watch,
-		"auto":          "agent-timeout= eval-rounds= agent= max-issues= merge continue no-checkpoint checkpoint-after= approve wait-for-checks abort close-issues dry-run log-level= log-file= " + memory,
-		"issue create":  "body= file= label= no-label",
-		"issue list":    "state= label= search= limit= json",
-		"list":          "state= label= search= limit= json",
-		"issue label":   "add= remove= state= label= unlabeled",
-		"issue unlabel": "state= label= unlabeled",
-		"issue close":   "comment= delete-branch", "issue reopen": "", "issue view": "json",
-		"pr list":  "state= limit= issue= json",
-		"pr merge": "squash rebase delete-branch update-branch wait-for-checks",
-		"pr sweep": "merge wait-for-checks dry-run json",
-		"pr view":  "json", "pr diff": "name-only",
-		"pr comment": "body= file=",
-		"pr close":   "comment= delete-branch", "pr reopen": "", "pr ready": "", "pr draft": "",
-		"auth login":  "host= client-id= scopes= no-browser",
-		"auth status": "host=", "auth logout": "host=", "auth token": "host= force",
-		"memory sync": memory + " json limit= full", "memory similar": memory + " json limit= full", "memory show": memory + " json limit= full",
-		"pipeline": "fetch", "doctor": "fix-labels", "update": "version= check",
-	}
 	options := map[string][]string{
 		"":            append(slices.Clone(topCommands), "--version"),
 		"completion":  {"bash", "zsh", "fish"},
@@ -76,23 +54,90 @@ func completionOptions() map[string][]string {
 	}
 	// memory accepts only these three subcommands (its help is a topic).
 	options["memory"] = []string{"sync", "similar", "show"}
-	for key, names := range flags {
+	for key := range helpArgs {
 		if _, ok := options[key]; !ok {
 			options[key] = nil // commands without flags still get a case
 		}
-		for _, name := range strings.Fields(names) {
-			options[key] = append(options[key], "--"+name)
-			long := strings.TrimSuffix(name, "=")
-			if short := shortFlags[long]; short != "" {
-				options[key] = append(options[key], "-"+short+strings.TrimPrefix(name, long))
-			}
-		}
+		options[key] = append(options[key], completionCommandFlags(completionCommandFlagSet(key))...)
 	}
 	global := completionGlobalFlags()
 	for key := range options {
 		options[key] = append(options[key], global...)
 	}
 	return options
+}
+
+// completionCommandFlags lists fs's visible flags, from the same FlagSet help
+// prints. Path flags are global, so they are added once per command by
+// completionGlobalFlags.
+func completionCommandFlags(fs *flag.FlagSet) []string {
+	var words []string
+	fs.VisitAll(func(f *flag.Flag) {
+		if hiddenFlags[f.Name] || pathFlags[f.Name] {
+			return
+		}
+		suffix := ""
+		if bf, ok := f.Value.(interface{ IsBoolFlag() bool }); !ok || !bf.IsBoolFlag() {
+			suffix = "="
+		}
+		words = append(words, "--"+f.Name+suffix)
+		if short := shortFor(fs, f.Name); short != "" {
+			words = append(words, "-"+short+suffix)
+		}
+	})
+	return words
+}
+
+// completionCommandFlagSet builds a command's own FlagSet without running it.
+func completionCommandFlagSet(key string) *flag.FlagSet {
+	fs := newCommandFlags(key, io.Discard)
+	switch key {
+	case "run", "issue run":
+		addRunFlags(fs)
+	case "watch", "issue watch":
+		addWatchFlags(fs)
+	case "auto":
+		addAutoFlags(fs)
+	case "issue create":
+		addIssueCreateFlags(fs)
+	case "issue list", "list":
+		addListFlags(fs)
+	case "issue label":
+		addIssueLabelFlags(fs, "label")
+	case "issue unlabel":
+		addIssueLabelFlags(fs, "unlabel")
+	case "issue close":
+		addIssueStateFlags(fs, "close")
+	case "issue reopen":
+		addIssueStateFlags(fs, "reopen")
+	case "issue view":
+		addIssueViewFlags(fs)
+	case "pr list":
+		addPRListFlags(fs)
+	case "pr merge":
+		addPRMergeFlags(fs)
+	case "pr sweep":
+		addPRSweepFlags(fs)
+	case "pr view":
+		addPRViewFlags(fs)
+	case "pr diff":
+		addPRDiffFlags(fs)
+	case "pr comment":
+		addPRCommentFlags(fs)
+	case "pr close":
+		addPRCloseFlags(fs)
+	case "auth login", "auth status", "auth logout", "auth token":
+		addAuthFlags(fs, strings.TrimPrefix(key, "auth "))
+	case "memory sync", "memory similar", "memory show":
+		addMemoryCommandFlags(fs)
+	case "pipeline":
+		addPipelineFlags(fs)
+	case "doctor":
+		addDoctorFlags(fs)
+	case "update":
+		addUpdateFlags(fs)
+	}
+	return fs
 }
 
 // completionGlobalFlags lists the flags every command's completion offers,

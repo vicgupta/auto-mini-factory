@@ -222,17 +222,30 @@ func (g *GitHub) CommentBodies(ctx context.Context, n int) ([]string, error) {
 	return bodies, nil
 }
 
+type prSweepFlags struct {
+	merge  *mergeFlag
+	wait   *bool
+	dryRun *bool
+	asJSON *bool
+}
+
+func addPRSweepFlags(fs *flag.FlagSet) prSweepFlags {
+	var f prSweepFlags
+	f.merge = addSweepMergeFlag(fs)
+	f.wait = fs.Bool("wait-for-checks", false, "wait for pending checks on each PR (up to 30 minutes) instead of leaving it for the next sweep")
+	f.dryRun = fs.Bool("dry-run", false, "only read from GitHub and print what the sweep would do")
+	f.asJSON = fs.Bool("json", false, "print a JSON array of number, issue, url, action, reason and commit")
+	return f
+}
+
 func cmdPRSweep(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := newCommandFlags("pr sweep", stderr)
-	merge := addSweepMergeFlag(fs)
-	wait := fs.Bool("wait-for-checks", false, "wait for pending checks on each PR (up to 30 minutes) instead of leaving it for the next sweep")
-	dryRun := fs.Bool("dry-run", false, "only read from GitHub and print what the sweep would do")
-	asJSON := fs.Bool("json", false, "print a JSON array of number, issue, url, action, reason and commit")
+	f := addPRSweepFlags(fs)
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return errUsage
 	}
-	if err := merge.check(pos); err != nil {
+	if err := f.merge.check(pos); err != nil {
 		return err
 	}
 	if len(pos) != 0 {
@@ -247,7 +260,7 @@ func cmdPRSweep(ctx context.Context, args []string, stdout, stderr io.Writer) er
 	if err := checkRepo(ctx, gh, cfg.Repo); err != nil {
 		return err
 	}
-	if !*dryRun {
+	if !*f.dryRun {
 		// In a checkout, hold the repo lock so a running watch, run or auto
 		// and this sweep don't both work on one PR.
 		if root, err := git(ctx, ".", "rev-parse", "--show-toplevel"); err == nil {
@@ -258,11 +271,11 @@ func cmdPRSweep(ctx context.Context, args []string, stdout, stderr io.Writer) er
 			defer l.release()
 		}
 	}
-	res, err := sweepPRs(ctx, gh, cfg.Repo, sweepOptions{Method: merge.value, Wait: *wait, DryRun: *dryRun}, stdout, stderr)
+	res, err := sweepPRs(ctx, gh, cfg.Repo, sweepOptions{Method: f.merge.value, Wait: *f.wait, DryRun: *f.dryRun}, stdout, stderr)
 	if err != nil {
 		return err
 	}
-	if *asJSON {
+	if *f.asJSON {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(res); err != nil {
