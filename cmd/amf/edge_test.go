@@ -34,6 +34,205 @@ import (
 	"unicode/utf8"
 )
 
+func TestIssueActionsAPIFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name, command, method, path, state string
+		flags                              []string
+		wantState                          string
+		wantWrites                         int
+	}{
+		{"repo", "close", "GET", "/repos/vic/demo", "open", nil, "open", 0},
+		{"read", "view", "GET", "/repos/vic/demo/issues/7", "open", []string{"--json"}, "open", 0},
+		{"comment", "close", "POST", "/repos/vic/demo/issues/7/comments", "open", []string{"--comment", "Reason", "--delete-branch"}, "open", 0},
+		{"close", "close", "PATCH", "/repos/vic/demo/issues/7", "open", []string{"--comment", "Reason", "--delete-branch"}, "open", 1},
+		{"reopen", "reopen", "PATCH", "/repos/vic/demo/issues/7", "closed", nil, "closed", 0},
+		{"delete", "close", "DELETE", "/repos/vic/demo/git/refs/heads/amf/issue-7", "open", []string{"--delete-branch"}, "closed", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gh, srv := newFakeGitHub(t)
+			listJSONEnv(t, srv)
+			gh.issues[7] = &Issue{Number: 7, State: tc.state, HTMLURL: "https://github.com/vic/demo/issues/7"}
+			flaky := failingGitHub(t, srv, func(r *http.Request) bool {
+				return r.Method == tc.method && r.URL.Path == tc.path
+			})
+			t.Setenv("AMF_API_URL", flaky.URL)
+			var out bytes.Buffer
+			err := run(context.Background(), append([]string{"issue", tc.command, "7"}, tc.flags...), nil, &out, io.Discard)
+			if err == nil || !strings.Contains(err.Error(), "Bad Gateway") || gh.issues[7].State != tc.wantState || len(gh.writes) != tc.wantWrites {
+				t.Fatalf("err=%v state=%s writes=%v", err, gh.issues[7].State, gh.writes)
+			}
+			if tc.name == "delete" {
+				if !strings.Contains(err.Error(), "closed #7 but could not delete amf/issue-7") || !strings.HasPrefix(out.String(), "Closed #7 ") {
+					t.Fatalf("err=%v out=%q", err, &out)
+				}
+			} else if out.Len() != 0 {
+				t.Fatalf("unexpected stdout: %q", &out)
+			}
+		})
+	}
+}
+
+func TestIssueActionsWriteErrors(t *testing.T) {
+	gh, srv := newFakeGitHub(t)
+	listJSONEnv(t, srv)
+	for _, args := range [][]string{{"close", "7"}, {"reopen", "7"}, {"view", "7"}, {"view", "7", "--json"}} {
+		gh.issues[7] = &Issue{Number: 7, State: "open", Body: "Details"}
+		if err := run(context.Background(), append([]string{"issue"}, args...), nil, failWriter{}, io.Discard); err == nil || !strings.Contains(err.Error(), "disk full") {
+			t.Errorf("%v: %v", args, err)
+		}
+	}
+}
+
+func TestIssueLabelUnlabelBadArgs(t *testing.T) {
+	t.Chdir(t.TempDir())
+	for _, command := range []string{"label", "unlabel"} {
+		for _, args := range [][]string{
+			nil, {"7"}, {"7", ""}, {"7", " , "}, {"0", "bug"},
+			{"nope", "bug"}, {"7", "bug", "--unknown"},
+		} {
+			var out, stderr bytes.Buffer
+			err := run(context.Background(), append([]string{"issue", command}, args...), nil, &out, &stderr)
+			if err == nil || strings.Contains(err.Error(), "GITHUB_TOKEN") || out.Len() != 0 {
+				t.Errorf("%s %v: err=%v stdout=%q stderr=%q", command, args, err, &out, &stderr)
+			}
+		}
+		for _, flag := range []string{"-h", "--help"} {
+			var out, stderr bytes.Buffer
+			if err := run(context.Background(), []string{"issue", command, "7", flag}, nil, &out, &stderr); err != nil || out.Len() != 0 || !strings.Contains(stderr.String(), "amf issue "+command) {
+				t.Errorf("%s %s: err=%v stdout=%q stderr=%q", command, flag, err, &out, &stderr)
+			}
+		}
+	}
+}
+
+func TestIssueLabelUnlabelFailures(t *testing.T) {
+	for _, command := range []string{"label", "unlabel"} {
+		for _, scenario := range []string{"pull request", "missing issue", "write fails"} {
+			t.Run(command+"/"+scenario, func(t *testing.T) {
+				gh, srv := newFakeGitHub(t)
+				listJSONEnv(t, srv)
+				gh.issues[7] = &Issue{Number: 7, State: "open", Labels: []Label{{Name: "bug"}}}
+				label, wantErr := "docs", "pull request, not an issue"
+				switch scenario {
+				case "pull request":
+					gh.issues[7].PullRequest = &struct{}{}
+				case "missing issue":
+					delete(gh.issues, 7)
+					wantErr = "404"
+				case "write fails":
+					label, wantErr = "bug", "Bad Gateway"
+					if command == "label" {
+						label = "docs"
+					}
+					flaky := failingGitHub(t, srv, func(r *http.Request) bool { return r.Method != "GET" })
+					t.Setenv("AMF_API_URL", flaky.URL)
+				}
+				var out bytes.Buffer
+				err := run(context.Background(), []string{"issue", command, "7", label}, nil, &out, io.Discard)
+				if err == nil || !strings.Contains(err.Error(), wantErr) || out.Len() != 0 || len(gh.writes) != 0 {
+					t.Fatalf("err=%v, want %q; stdout=%q writes=%v", err, wantErr, &out, gh.writes)
+				}
+			})
+		}
+	}
+}
+
+func TestIssueBulkLabelBadArgs(t *testing.T) {
+	t.Chdir(t.TempDir())
+	for _, command := range []string{"label", "unlabel"} {
+		for _, args := range [][]string{
+			{"--state", "open"}, {"--unlabeled", " , "},
+			{"--state", "invalid", "bug"}, {"--label", " ", "bug"},
+			{"--label", "bug", "--unlabeled", "docs"},
+			{"7", "--state", "open", "bug"}, {"#7", "--unlabeled", "bug"},
+			{"--unlabeled=false", "bug"},
+		} {
+			var out bytes.Buffer
+			err := run(context.Background(), append([]string{"issue", command}, args...), nil, &out, io.Discard)
+			if err == nil || strings.Contains(err.Error(), "GITHUB_TOKEN") || out.Len() != 0 {
+				t.Errorf("%s %v: err=%v stdout=%q", command, args, err, &out)
+			}
+		}
+		var out, stderr bytes.Buffer
+		if err := run(context.Background(), []string{"issue", command, "--unlabeled", "--help"}, nil, &out, &stderr); err != nil || out.Len() != 0 || !strings.Contains(stderr.String(), "--unlabeled") {
+			t.Errorf("%s help: err=%v out=%q stderr=%q", command, err, &out, &stderr)
+		}
+	}
+	for _, args := range [][]string{
+		{"--state", "all", "--add", "bug", "--remove", "bug"},
+		{"--state", "all", labelDone, labelFailed},
+	} {
+		if err := run(context.Background(), append([]string{"issue", "label"}, args...), nil, io.Discard, io.Discard); err == nil || strings.Contains(err.Error(), "GITHUB_TOKEN") {
+			t.Errorf("%v: err=%v", args, err)
+		}
+	}
+}
+
+func TestIssueBulkLabelFailures(t *testing.T) {
+	for _, scenario := range []string{"listing", "later page", "add", "remove"} {
+		t.Run(scenario, func(t *testing.T) {
+			gh, srv := newFakeGitHub(t)
+			listJSONEnv(t, srv)
+			count := 3
+			if scenario == "later page" {
+				count = 101
+			}
+			for n := 1; n <= count; n++ {
+				gh.issues[n] = &Issue{Number: n, State: "open", Labels: []Label{{Name: "bug"}}}
+			}
+			flaky := failingGitHub(t, srv, func(r *http.Request) bool {
+				switch scenario {
+				case "listing":
+					return r.URL.Path == "/repos/vic/demo/issues"
+				case "later page":
+					return r.URL.Query().Get("page") == "2"
+				default:
+					return r.Method != "GET" && strings.HasPrefix(r.URL.Path, "/repos/vic/demo/issues/2/")
+				}
+			})
+			t.Setenv("AMF_API_URL", flaky.URL)
+			command, label := "label", "docs"
+			if scenario == "remove" {
+				command, label = "unlabel", "bug"
+			}
+			var out bytes.Buffer
+			err := run(context.Background(), []string{"issue", command, "--state", "open", label}, nil, &out, io.Discard)
+			if err == nil || !strings.Contains(err.Error(), "Bad Gateway") {
+				t.Fatalf("err=%v", err)
+			}
+			if scenario == "listing" || scenario == "later page" {
+				if out.Len() != 0 || len(gh.writes) != 0 {
+					t.Fatalf("stdout=%q writes=%v", &out, gh.writes)
+				}
+			} else if !strings.Contains(err.Error(), "#2:") || !strings.HasPrefix(out.String(), "#3:") || strings.Count(out.String(), "\n") != 1 || len(gh.writes) != 1 || !reflect.DeepEqual(labelNames(*gh.issues[1]), []string{"bug"}) {
+				t.Fatalf("err=%v stdout=%q writes=%v", err, &out, gh.writes)
+			}
+		})
+	}
+}
+
+func TestIssueBulkLabelWriteErrors(t *testing.T) {
+	for _, scenario := range []string{"changed", "unchanged", "no matches"} {
+		t.Run(scenario, func(t *testing.T) {
+			gh, srv := newFakeGitHub(t)
+			listJSONEnv(t, srv)
+			label := "docs"
+			if scenario == "unchanged" {
+				label = "bug"
+			}
+			if scenario != "no matches" {
+				for n := 1; n <= 2; n++ {
+					gh.issues[n] = &Issue{Number: n, State: "open", Labels: []Label{{Name: "bug"}}}
+				}
+			}
+			err := run(context.Background(), []string{"issue", "label", "--state", "open", label}, nil, failWriter{}, io.Discard)
+			if err == nil || !strings.Contains(err.Error(), "disk full") || len(gh.writes) > 1 {
+				t.Fatalf("err=%v writes=%v", err, gh.writes)
+			}
+		})
+	}
+}
+
 func TestRunTroubleshooting(t *testing.T) {
 	for _, scenario := range []string{"configuration", "agent unavailable", "merge refused", "success", "help"} {
 		t.Run(scenario, func(t *testing.T) {
@@ -1104,6 +1303,12 @@ func TestIssueGroupHelp(t *testing.T) {
 
 func TestIssueGroupHelpWriteError(t *testing.T) {
 	if err := run(context.Background(), []string{"issue"}, nil, failWriter{}, io.Discard); err == nil || !strings.Contains(err.Error(), "disk full") {
+		t.Fatalf("error = %v, want stdout write error", err)
+	}
+}
+
+func TestManWriteError(t *testing.T) {
+	if err := run(context.Background(), []string{"man"}, nil, failWriter{}, io.Discard); err == nil || !strings.Contains(err.Error(), "disk full") {
 		t.Fatalf("error = %v, want stdout write error", err)
 	}
 }
@@ -3530,6 +3735,46 @@ func TestHelpTopicPrintsGroupUsage(t *testing.T) {
 	}
 }
 
+func TestHelpSeeAlsoFooters(t *testing.T) {
+	topics := append(topicNames(), "", "list") // overview and hidden alias
+	for group, commands := range helpSubcommands {
+		for _, command := range commands {
+			topics = append(topics, group+" "+command)
+		}
+	}
+	for _, topic := range topics {
+		t.Run(topic, func(t *testing.T) {
+			var out, stderr bytes.Buffer
+			args := append([]string{"help"}, strings.Fields(topic)...)
+			if err := run(context.Background(), args, nil, &out, &stderr); err != nil || stderr.Len() != 0 {
+				t.Fatalf("help: %v, stderr %q", err, &stderr)
+			}
+			_, related, ok := strings.Cut(out.String(), "\n\nSee also: ")
+			if !ok || strings.Count(out.String(), "See also:") != 1 || !strings.HasSuffix(related, "\n") || strings.Contains(strings.TrimSuffix(related, "\n"), "\n") {
+				t.Fatalf("help must end with one See also line:\n%s", &out)
+			}
+			for _, link := range strings.Split(strings.TrimSuffix(related, "\n"), ", ") {
+				target, ok := strings.CutPrefix(link, "amf help ")
+				if !ok || target == "" {
+					t.Fatalf("invalid help link %q", link)
+				}
+				if err := run(context.Background(), append([]string{"help"}, strings.Fields(target)...), nil, io.Discard, io.Discard); err != nil {
+					t.Errorf("%s: %v", link, err)
+				}
+			}
+		})
+	}
+	for _, command := range []string{"run", "issue run"} {
+		var out bytes.Buffer
+		if err := run(context.Background(), append([]string{"help"}, strings.Fields(command)...), nil, &out, io.Discard); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasSuffix(out.String(), "\n\nSee also: amf help agents, amf help env, amf help memory\n") {
+			t.Errorf("%s help must link to agents, env and memory:\n%s", command, &out)
+		}
+	}
+}
+
 func TestHelpUnknownTopic(t *testing.T) {
 	var out, errb bytes.Buffer
 	err := run(context.Background(), []string{"help", "isue"}, nil, &out, &errb)
@@ -3561,6 +3806,24 @@ func TestUsageListMentionsJSON(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "-j, --json") {
 		t.Errorf("amf help issue list omits --json:\n%s", out.String())
+	}
+}
+
+func TestUsageDocumentationPointers(t *testing.T) {
+	for _, args := range [][]string{nil, {"help"}, {"-h"}, {"--help"}} {
+		var out bytes.Buffer
+		var wantErr error
+		if len(args) == 0 {
+			wantErr = errUsage
+		}
+		if err := run(context.Background(), args, nil, &out, &out); !errors.Is(err, wantErr) {
+			t.Fatalf("amf %v: %v, want %v", args, err, wantErr)
+		}
+		for _, want := range []string{"Examples: docs/EXAMPLES.md", "troubleshooting: docs/TROUBLESHOOTING.md"} {
+			if !strings.Contains(out.String(), want) {
+				t.Errorf("amf %v: overview omits %q", args, want)
+			}
+		}
 	}
 }
 

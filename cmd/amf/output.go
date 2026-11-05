@@ -91,9 +91,10 @@ func flagNeedsValue(name, command, subcommand string) bool {
 		case "f": // --file on issue creation, --force elsewhere
 			return command == "issue" && (subcommand == "create" || !slices.Contains(issueSubcommands, subcommand))
 		case "c": // --comment, --check or --continue
-			return command == "pr" && subcommand == "close"
+			return (command == "issue" || command == "pr") && subcommand == "close"
 		case "s": // --state or --squash
-			return command == "list" || subcommand == "list"
+			return command == "list" || subcommand == "list" ||
+				command == "issue" && (subcommand == "label" || subcommand == "unlabel")
 		}
 		for long, short := range shortFlags {
 			if short == name {

@@ -176,6 +176,8 @@ Markdown and log files are written only when that backend is chosen.
 
 Each repo (host/owner/name from GITHUB_REPO) has its own folder and store,
 and a store that records another repo refuses to open.
+
+See also: amf help run, amf help watch, amf help auto
 `
 
 func cmdMemory(ctx context.Context, args []string, stdout, stderr io.Writer) error {

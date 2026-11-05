@@ -18,7 +18,7 @@ Usage:
 Commands:
   init       write .env and create amf's labels
   auth       get a GitHub token: login, status, logout, token
-  issue      manage issues: create, list, label, run, watch
+  issue      manage issues: create, list, label, unlabel, close, reopen, view, run, watch
   pr         manage pull requests: list, merge, sweep, view, diff, close, reopen, ready, draft
   run        process one issue into a PR (alias of issue run)
   watch      process amf:ready issues as they arrive (alias of issue watch)
@@ -27,6 +27,8 @@ Commands:
   pipeline   check the plan/code/eval pipeline in this checkout's AGENTS.md
   doctor     check the setup here, changing nothing
   update     replace this amf binary with the latest (or given) release
+  completion  print a shell completion script for bash, zsh or fish
+  man        generate a man page from amf's help text
   version    print amf's version
   help       show help for a command or topic
 
@@ -40,6 +42,7 @@ every command takes.
 
 Run amf help <command> or amf <command> -h for details.
 Every flag has a long form and common ones a short one: see amf help flags.
+Examples: docs/EXAMPLES.md; troubleshooting: docs/TROUBLESHOOTING.md.
 
 Exit status:
   0  success
@@ -48,6 +51,8 @@ Exit status:
 amf help <command> exits 0; unknown commands exit 2.
 Some commands return 2 for -h; use amf help <command> in scripts.
 Command-specific value validation can return 1 (for example, amf run 0).
+
+See also: amf help agents, amf help env, amf help flags
 `
 
 const runHelp = `Usage:
@@ -99,8 +104,6 @@ values resolve against it:
   --clone-dir DIR   use (or clone into) DIR instead of the checkout or ./<name>
   --log-file FILE   event log (default .amf/runs/<run_id>/events.jsonl, or off)
 amf keeps its state under <checkout>/.amf/, excluded from git.
-
-amf help agents says which agent runs; amf help env lists the settings.
 `
 
 const watchHelp = `Usage:
@@ -120,8 +123,6 @@ checks passed and labels its issue amf:done, and comments once on a PR
 that can't merge. It doesn't wait for pending checks.
 See merge methods at:
 https://github.com/vicgupta/auto-mini-factory/blob/main/docs/COMMANDS.md#merge-methods
-
-amf help agents says which agent runs; amf help env lists the settings.
 `
 
 const listHelp = `Usage:
@@ -134,7 +135,6 @@ const initHelp = `Usage:
   amf init [flags]
 
 Writes .env (backing up an existing one) and creates amf's labels.
-amf help env lists every setting .env can hold.
 `
 
 const pipelineHelp = `Usage:
@@ -178,6 +178,8 @@ const helpHelp = `Usage:
 Without an argument, prints the overview of commands and topics. With one,
 prints that command's or topic's details: amf help run prints the same as
 amf run --help, and amf help pr merge the same as amf pr merge --help.
+
+See also: amf help agents, amf help env, amf help flags
 `
 
 const agentsHelp = `Choosing the agent
@@ -192,7 +194,9 @@ OPENCODE_MODEL. If neither configured agent can run, amf picks the first of
 claude, codex and opencode that can. amf watch shows what it found for each.
 
 A pipeline in AGENTS.md names each stage's agent, and wins over --agent and
-both settings: see amf help pipeline. amf help env lists the settings.
+both settings.
+
+See also: amf help pipeline, amf help env, amf help run
 `
 
 const envHelp = `Configuration is read from .env (or the environment; environment variables win).
@@ -267,6 +271,8 @@ Special environment variables (environment only, not .env settings):
   TERM
     dumb disables automatic color. Otherwise auto colors status output only
     when its destination is a terminal.
+
+See also: amf help init, amf help doctor, amf help auth, amf help agents
 `
 
 // helpTopics maps each amf help <topic> to its text: every command, plus
@@ -274,7 +280,8 @@ Special environment variables (environment only, not .env settings):
 var helpTopics = map[string]string{
 	"issue": issueUsage, "auth": authUsage, "pr": prUsage, "list": listHelp, "run": runHelp, "watch": watchHelp, "auto": autoHelp, "memory": memoryUsage,
 	"init": initHelp, "pipeline": pipelineHelp, "doctor": doctorHelp, "update": updateHelp,
-	"version": versionHelp, "help": helpHelp, "agents": agentsHelp, "env": envHelp, "flags": flagsHelp,
+	"version": versionHelp, "man": manHelp, "help": helpHelp, "agents": agentsHelp, "env": envHelp, "flags": flagsHelp,
+	"completion": completionHelp,
 }
 
 // topicNames is every help topic, for typo suggestions.
@@ -290,8 +297,8 @@ func topicNames() []string {
 }
 
 // withHelp makes -h and --help on fs print the help for key: its topic
-// text, its flags in one aligned column, and examples. amf help <key> prints
-// the same, by running the command with --help.
+// text, its flags in one aligned column, examples and related topics.
+// amf help <key> prints the same, by running the command with --help.
 func withHelp(fs *flag.FlagSet, w io.Writer, key string) {
 	// run strips the path flags before the command parses its own, so these
 	// are only listed here; see paths.go.
@@ -313,6 +320,9 @@ func commandHelp(fs *flag.FlagSet, key string) string {
 	printGlobalFlags(&b)
 	if ex := helpExamples[key]; ex != "" {
 		b.WriteString("\nExamples:\n" + ex)
+	}
+	if related := helpSeeAlso[key]; len(related) != 0 {
+		b.WriteString("\nSee also: amf help " + strings.Join(related, ", amf help ") + "\n")
 	}
 	return b.String()
 }
@@ -346,8 +356,10 @@ var helpSubcommands = map[string][]string{
 // arguments that run it, so amf help run prints what amf run --help does.
 var helpArgs = map[string][]string{
 	"init": {"init"}, "run": {"run"}, "watch": {"watch"}, "auto": {"auto"}, "list": {"issue", "list"},
-	"pipeline": {"pipeline"}, "doctor": {"doctor"}, "update": {"update"}, "version": {"version"},
-	"issue create": {"issue", "create"}, "issue list": {"issue", "list"}, "issue label": {"issue", "label"}, "issue run": {"run"}, "issue watch": {"watch"},
+	"pipeline": {"pipeline"}, "doctor": {"doctor"}, "update": {"update"}, "man": {"man"}, "version": {"version"},
+	"completion":   {"completion"},
+	"issue create": {"issue", "create"}, "issue list": {"issue", "list"}, "issue label": {"issue", "label"}, "issue unlabel": {"issue", "unlabel"}, "issue run": {"run"}, "issue watch": {"watch"},
+	"issue close": {"issue", "close"}, "issue reopen": {"issue", "reopen"}, "issue view": {"issue", "view"},
 	"pr list": {"pr", "list"}, "pr merge": {"pr", "merge"}, "pr sweep": {"pr", "sweep"}, "pr view": {"pr", "view"}, "pr diff": {"pr", "diff"},
 	"auth login": {"auth", "login"}, "auth status": {"auth", "status"}, "auth logout": {"auth", "logout"}, "auth token": {"auth", "token"},
 	"memory sync": {"memory", "sync"}, "memory similar": {"memory", "similar"}, "memory show": {"memory", "show"},
