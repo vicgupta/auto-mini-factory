@@ -101,7 +101,7 @@ func completionScriptFor(shell string) string {
 	} else {
 		b.WriteString("_amf_options() {\n    case \"$1\" in\n")
 	}
-	const global = " --dir= --env-file= --clone-dir= --help -h"
+	const global = " --quiet -q --color= -O= --dir= --env-file= --clone-dir= --help -h"
 	for _, key := range keys {
 		words := strings.Join(options[key], " ") + global
 		if shell == "fish" {

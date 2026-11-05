@@ -51,7 +51,7 @@ func extractOutputFlags(args []string, o *outputOptions) ([]string, error) {
 				}
 				o.Quiet = v
 			}
-		case "color":
+		case "color", "O":
 			if !hasValue {
 				if i+1 >= len(args) {
 					return nil, fmt.Errorf("flag needs an argument: --color")
@@ -81,7 +81,7 @@ func extractOutputFlags(args []string, o *outputOptions) ([]string, error) {
 // requiredFlagValues lets global extraction skip command flag values without
 // parsing them. TestGlobalFlagValueMetadata checks it against command help.
 var requiredFlagValues = strings.Fields(`add agent agent-timeout body checkpoint-after
-client-id clone-dir comment dir env-file eval-rounds exclude-label file host interval
+client-id clone-dir color comment dir env-file eval-rounds exclude-label file host interval
 issue label limit log-file log-level max-issues memory-backend memory-dir remove
 scopes search stale-timeout state timeout version`)
 

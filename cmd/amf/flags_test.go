@@ -171,8 +171,8 @@ func TestShortAndLongFormsParse(t *testing.T) {
 			{"run", "42", "--timeout", "10s"}, {"run", "42", "-agent-timeout", "10s"}, {"run", "42", "--t", "10s"},
 			{"watch", "-t", "10s"}, {"issue", "run", "42", "-t", "10s"}}},
 		{errDraftMerge.Error(), [][]string{
-			{"run", "42", "--draft", "--merge"}, {"run", "42", "--draft", "-m"}, {"run", "42", "--draft", "-m", "squash"},
-			{"watch", "--draft", "-m=rebase"}, {"watch", "--draft", "--merge", "squash"}}},
+			{"run", "42", "--draft", "--merge"}, {"run", "42", "-D", "--merge"}, {"run", "42", "--draft", "-m"},
+			{"watch", "--draft", "-m=rebase"}, {"watch", "-D", "-m=rebase"}, {"watch", "-D", "--merge", "squash"}}},
 		{"--approve can't be used together", [][]string{
 			{"auto", "--abort", "--approve"}, {"auto", "--abort", "-y"}, {"auto", "status", "-y"}}},
 		{"--continue resumes the saved run", [][]string{
@@ -205,6 +205,8 @@ func TestExpandShortFlags(t *testing.T) {
 	fs := flag.NewFlagSet("t", flag.ContinueOnError)
 	fs.String("agent", "", "")
 	fs.String("body", "", "")
+	fs.Bool("draft", false, "")
+	fs.String("color", "", "")
 	fs.Bool("dry-run", false, "")
 	addMergeFlag(fs)
 	for _, tc := range []struct{ in, want string }{
@@ -212,6 +214,8 @@ func TestExpandShortFlags(t *testing.T) {
 		{"--a=codex", "--agent=codex"},
 		{"-agent codex", "--agent codex"},
 		{"-b -a", "--body -a"}, // a value that looks like a flag stays a value
+		{"-D 42", "--draft 42"},
+		{"-O never 42", "--color never 42"},
 		{"-n 42", "--dry-run 42"},
 		{"-m squash 42", "--merge=squash 42"},
 		{"-m 42", "--merge 42"},

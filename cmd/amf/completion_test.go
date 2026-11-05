@@ -112,6 +112,8 @@ func TestCompletionShells(t *testing.T) {
 				{"amf pr merge 42 --", "--squash", "--agent"},
 				{"amf issue run 42 --", "--agent", "--squash"},
 				{"amf run 42 -", "-a", "--squash"},
+				{"amf run 42 -", "-D", "--squash"},
+				{"amf version -", "-O", "--agent"},
 				{"amf completion ", "fish", "run"},
 				{"amf auto ", "status", "--squash"},
 				{"amf auto status --", "--dir", "--agent"},

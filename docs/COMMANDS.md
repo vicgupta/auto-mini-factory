@@ -646,6 +646,7 @@ Durations are Go durations: `30s`, `5m`, `1h30m`, `2h`.
 | `-c` | `--comment` | issue close, pr close |
 | `-c` | `--continue` | auto |
 | `-d` | `--delete-branch` | issue close, pr merge, pr close |
+| `-D` | `--draft` | run, watch |
 | `-e` | `--eval-rounds` | run, watch, auto |
 | `-f` | `--file` | issue create |
 | `-f` | `--force` | run, auth token |
@@ -659,6 +660,7 @@ Durations are Go durations: `30s`, `5m`, `1h30m`, `2h`.
 | `-m` | `--merge` | run, watch, auto, pr sweep |
 | `-n` | `--dry-run` | run, auto, pr sweep |
 | `-o` | `--scopes` | auth login |
+| `-O` | `--color` | every command |
 | `-q` | `--quiet` | every command |
 | `-r` | `--rebase` | pr merge |
 | `-s` | `--squash` | pr merge |
@@ -682,7 +684,7 @@ How values are written:
 - Short forms can't be bundled: write `-n -f`, not `-nf`.
 
 Flags with no short form are the rarer ones, spelled out to stay clear:
-`--draft`, `--log-level`, `--log-file`, `--stale-timeout`, `--max-issues`,
+`--log-level`, `--log-file`, `--stale-timeout`, `--max-issues`,
 `--checkpoint-after`, `--no-checkpoint`, `--abort`, `--close-issues`,
 `--no-label`, `--name-only`, `--fetch`, `--full`, `--memory-backend`,
 `--memory-dir` and `amf update --version` (whose letter would read as
@@ -700,7 +702,7 @@ The output flags are global too, before or after the command, before `--`:
   announcements. Warnings, errors, command results, help and the final run
   summary remain visible. It overrides verbose terminal logging without
   changing the event log's level or the summary file.
-- `--color <mode>` takes `auto` (default), `always` or `never`. It colors
+- `-O, --color <mode>` takes `auto` (default), `always` or `never`. It colors
   `amf:` progress/summary prefixes and doctor's status labels. Auto colors
   only when the destination is a terminal, `TERM` is not `dumb` and
   `NO_COLOR` is empty or unset. Any nonempty `NO_COLOR` value disables
@@ -866,7 +868,7 @@ Generated from each command's `--help`; `amf init`,
 |---|---|
 | `-a, --agent <name>` | agent for issues without a pipeline: claudecode, codex or opencode with no fallback (default: AMF_PRIMARY_AGENT, codex, then AMF_SECONDARY_AGENT, claudecode, if it fails) |
 | `-t, --agent-timeout <duration>` | maximum time each agent run may take (Go duration, e.g. 90m or 1h30m) (default 1h) |
-| `--draft` | open new pull requests as drafts (a retry leaves an open PR a draft or ready for review as it was) |
+| `-D, --draft` | open new pull requests as drafts (a retry leaves an open PR a draft or ready for review as it was) |
 | `-n, --dry-run` | make the change on the local branch only: no label, comment, push, PR or merge |
 | `-e, --eval-rounds <n>` | how many times a pipeline's eval stage may send the change back to code (default 2) |
 | `-f, --force` | run even if the issue already has an open PR or an amf/issue-N branch, updating that PR; this replaces the branch, first saving any commits it would drop to amf/backup/issue-N-<sha>-<time> |
@@ -883,7 +885,7 @@ Generated from each command's `--help`; `amf init`,
 |---|---|
 | `-a, --agent <name>` | agent for issues without a pipeline: claudecode, codex or opencode with no fallback (default: AMF_PRIMARY_AGENT, codex, then AMF_SECONDARY_AGENT, claudecode, if it fails) |
 | `-t, --agent-timeout <duration>` | maximum time each agent run may take (Go duration, e.g. 90m or 1h30m) (default 1h) |
-| `--draft` | open new pull requests as drafts (a retry leaves an open PR a draft or ready for review as it was) |
+| `-D, --draft` | open new pull requests as drafts (a retry leaves an open PR a draft or ready for review as it was) |
 | `-e, --eval-rounds <n>` | how many times a pipeline's eval stage may send the change back to code (default 2) |
 | `-x, --exclude-label <name>` | skip issues with this label, leaving them as they are (repeatable: any of them skips) |
 | `-i, --interval <duration>` | how often to poll GitHub (Go duration, e.g. 30s or 5m) (default 1m) |
