@@ -13,7 +13,8 @@ stdout to capture results while keeping diagnostics visible. Use `--json`
 where available for machine-readable results. Workflow commands such as
 `init`, `auto`, `pr merge`, `pr sweep --wait-for-checks` and `update` also
 print status messages or prompts to stdout, so their output is not always
-a data-only stream. `amf help output` describes the same contract.
+a data-only stream. `amf help output` describes the same contract. See
+[JSON output](docs/JSON.md) for every `--json` command and its schema.
 
 ## Install
 
@@ -168,6 +169,7 @@ amf memory show 42 | less
 `amf help <command>` prints a command's details. See:
 
 - [Command reference](docs/COMMANDS.md): commands, flags, exit status, paths and logs
+- [JSON output](docs/JSON.md): every `--json` command and its schema
 - [Man page](docs/COMMANDS.md#man-page): generate and install with `amf man`
 - [Shell completion](#shell-completion): enable completion in bash, zsh or fish
 - [Configuration](docs/CONFIGURATION.md): `.env`, authentication and `amf doctor`
