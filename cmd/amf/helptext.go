@@ -179,6 +179,14 @@ Shows a pull request's diff, or one changed path per line.
 --name-only prints one changed path per line, fetching every page of
 changed files.
 `,
+	"pr comment": `Usage:
+  amf pr comment <number> (--body text | --file path) [flags]
+
+Posts a comment on a pull request. Exactly one of --body or --file is
+required; --file reads a file, or stdin for --file -. An empty or
+whitespace-only comment is rejected. Configured secrets are redacted.
+Prints the comment's URL.
+`,
 	"pr close": `Usage:
   amf pr close <number> [flags]
 
@@ -241,6 +249,7 @@ var helpSeeAlso = map[string][]string{
 	"pr sweep":       {"pr merge", "watch"},
 	"pr view":        {"pr diff", "pr merge"},
 	"pr diff":        {"pr view"},
+	"pr comment":     {"pr view", "pr list"},
 	"pr close":       {"pr reopen", "issue label"},
 	"pr reopen":      {"pr close", "pr view"},
 	"pr ready":       {"pr draft", "pr merge"},
@@ -293,17 +302,18 @@ var helpExamples = map[string]string{
   amf auto status
   amf auto --abort
 `,
-	"pipeline":  "  amf pipeline\n  amf pipeline --fetch\n",
-	"update":    "  amf update --check\n  amf update --version v0.0.7\n",
-	"pr list":   "  amf pr list --state merged --limit 5\n  amf pr list --issue 42 --json\n",
-	"pr merge":  "  amf pr merge 57 --squash --delete-branch\n  amf pr merge 57 -u -w --squash\n",
-	"pr sweep":  "  amf pr sweep --dry-run\n  amf pr sweep --merge=squash --wait-for-checks\n",
-	"pr view":   "  amf pr view 57 --json\n",
-	"pr diff":   "  amf pr diff 57 --name-only\n",
-	"pr close":  "  amf pr close 57 --comment \"Superseded by #58\" --delete-branch\n",
-	"pr reopen": "  amf pr reopen 57\n",
-	"pr ready":  "  amf pr ready 57\n",
-	"pr draft":  "  amf pr draft 57\n",
+	"pipeline":   "  amf pipeline\n  amf pipeline --fetch\n",
+	"update":     "  amf update --check\n  amf update --version v0.0.7\n",
+	"pr list":    "  amf pr list --state merged --limit 5\n  amf pr list --issue 42 --json\n",
+	"pr merge":   "  amf pr merge 57 --squash --delete-branch\n  amf pr merge 57 -u -w --squash\n",
+	"pr sweep":   "  amf pr sweep --dry-run\n  amf pr sweep --merge=squash --wait-for-checks\n",
+	"pr view":    "  amf pr view 57 --json\n",
+	"pr diff":    "  amf pr diff 57 --name-only\n",
+	"pr comment": "  amf pr comment 57 --body \"Looks good to me\"\n  amf pr comment 57 --file review.md\n",
+	"pr close":   "  amf pr close 57 --comment \"Superseded by #58\" --delete-branch\n",
+	"pr reopen":  "  amf pr reopen 57\n",
+	"pr ready":   "  amf pr ready 57\n",
+	"pr draft":   "  amf pr draft 57\n",
 }
 
 func init() {
@@ -326,7 +336,7 @@ flags also have a one-letter short form, shown first in each command's help:
 A letter keeps its meaning on every command that has the flag.
 
   -a  --agent            run, watch, auto
-  -b  --body             issue create
+  -b  --body             issue create, pr comment
   -B  --no-browser       auth login
   -C  --client-id        auth login
   -c  --comment          issue close, pr close
@@ -335,7 +345,7 @@ A letter keeps its meaning on every command that has the flag.
   -d  --delete-branch    issue close, pr merge, pr close
   -D  --draft            run, watch
   -e  --eval-rounds      run, watch, auto
-  -f  --file             issue create
+  -f  --file             issue create, pr comment
   -f  --force            run, auth token
   -h  --help             every command
   -H  --host             auth login, auth status, auth logout, auth token

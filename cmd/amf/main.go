@@ -115,7 +115,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	case "auth":
 		return cmdAuth(ctx, rest, stdout, stderr)
 	case "pr":
-		return cmdPR(ctx, rest, stdout, stderr)
+		return cmdPR(ctx, rest, stdin, stdout, stderr)
 	case "list": // undocumented alias of amf issue list, kept for existing scripts
 		return cmdList(ctx, rest, stdout, stderr)
 	case "issue":

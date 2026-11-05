@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -20,6 +22,7 @@ Commands:
   sweep [--merge[=method]] [--wait-for-checks] [--dry-run] [--json]  update, merge and label the open amf pull requests
   view <N> [--json]  show a pull request
   diff <N> [--name-only]  show a pull request's diff, or one changed path per line
+  comment <N> (--body text | --file path)  post a comment on a pull request
   close <N> [--comment text] [--delete-branch]  close a pull request
   reopen <N>  reopen a pull request
   ready <N>  mark a draft pull request ready for review
@@ -28,7 +31,7 @@ Commands:
 Run amf help pr <command> or amf pr <command> --help for its flags.
 ` + "\nExamples:\n" + helpExamples["pr"] + "\nSee also: amf help issue, amf help run, amf help watch\n"
 
-func cmdPR(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+func cmdPR(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
 		_, err := fmt.Fprint(stdout, prUsage)
 		return err
@@ -47,6 +50,8 @@ func cmdPR(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return cmdPRView(ctx, args[1:], stdout, stderr)
 	case "diff":
 		return cmdPRDiff(ctx, args[1:], stdout, stderr)
+	case "comment":
+		return cmdPRComment(ctx, args[1:], stdin, stdout, stderr)
 	case "close":
 		return cmdPRClose(ctx, args[1:], stdout, stderr)
 	case "reopen":
@@ -66,7 +71,7 @@ func cmdPR(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	}
 }
 
-var prSubcommands = []string{"list", "merge", "sweep", "view", "diff", "close", "reopen", "ready", "draft", "help"}
+var prSubcommands = []string{"list", "merge", "sweep", "view", "diff", "comment", "close", "reopen", "ready", "draft", "help"}
 
 // parsePRNumber accepts a pull request number as "42" or "#42", trimming
 // surrounding whitespace.
@@ -595,6 +600,70 @@ func cmdPRDiff(ctx context.Context, args []string, stdout, stderr io.Writer) err
 		return err
 	}
 	_, err = stdout.Write(diff)
+	return err
+}
+
+// cmdPRComment posts a comment on pull request n. The body comes from
+// --body or --file, and --file - reads stdin.
+func cmdPRComment(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	fs := newCommandFlags("pr comment", stderr)
+	body := fs.String("body", "", "`text` of the comment")
+	file := fs.String("file", "", "read the comment from the file at `path` (- for stdin)")
+	pos, err := parseArgs(fs, args)
+	if err != nil {
+		return errUsage
+	}
+	if len(pos) != 1 {
+		fmt.Fprintln(stderr, "usage: amf pr comment <N> (--body text | --file path)")
+		return errUsage
+	}
+	n, err := parsePRNumber(pos[0])
+	if err != nil {
+		return err
+	}
+	var bodySet, fileSet bool
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "body":
+			bodySet = true
+		case "file":
+			fileSet = true
+		}
+	})
+	if bodySet && fileSet {
+		return errors.New("use --body or --file, not both")
+	}
+	if !bodySet && !fileSet {
+		return errors.New("use --body or --file")
+	}
+	text := *body
+	switch {
+	case *file == "-":
+		text, err = readAll(stdin)
+	case *file != "":
+		var b []byte
+		b, err = os.ReadFile(*file)
+		text = string(b)
+	}
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(text) == "" {
+		return errors.New("comment body can't be empty")
+	}
+	cfg, err := loadConfig(envPaths(ctx)...)
+	if err != nil {
+		return err
+	}
+	gh := newGitHub(cfg)
+	if err := checkRepo(ctx, gh, cfg.Repo); err != nil {
+		return err
+	}
+	url, err := gh.CreateComment(ctx, n, configRedactor(cfg).Redact(text))
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(stdout, url)
 	return err
 }
 
