@@ -43,8 +43,10 @@ amf:ready ──▶ amf:in-progress ──▶ amf:pr-open (PR opened, not merged
   `amf:ready` once the label is older than `AMF_STALE_TIMEOUT`.
 - `run`, `watch` and `auto` hold `.amf/watch.lock`; see
   [the repo lock](COMMANDS.md#the-repo-lock).
-- amf removes `amf:ready` when it starts, and an issue has at most one status
-  label at a time.
+- amf removes `amf:ready` when it starts, and keeps an issue to at most one
+  status label at a time. When it changes the status, it adds the new label
+  first and then removes the old ones, so an interrupted change can leave an
+  extra status label but never none.
 - amf owns these five labels and every `amf/issue-<N>` branch.
 
 ## Commands
