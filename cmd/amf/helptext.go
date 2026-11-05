@@ -331,23 +331,33 @@ func init() {
 
 const flagsHelp = `Flag conventions
 
-Every flag has a long form, --full-word, which help and the docs use. Common
-flags also have a one-letter short form, shown first in each command's help:
+Every flag has a long form, --full-word, and a one-letter short form, shown
+first in each command's help:
   -a, --agent <name>
-A letter keeps its meaning on every command that has the flag.
+A letter keeps its meaning on every command that has the flag, and no
+command has two flags with the same letter.
 
+  -a  --add              issue label
   -a  --agent            run, watch, auto
+  -A  --abort            auto
   -b  --body             issue create, pr comment
+  -b  --memory-backend   run, watch, auto, memory
   -B  --no-browser       auth login
-  -C  --client-id        auth login
+  -c  --check            update
   -c  --comment          issue close, pr close
   -c  --continue         auto
-  -c  --check            update
+  -C  --client-id        auth login
   -d  --delete-branch    issue close, pr merge, pr close
   -D  --draft            run, watch
   -e  --eval-rounds      run, watch, auto
+  -E  --env-file         every command
   -f  --file             issue create, pr comment
   -f  --force            run, auth token
+  -F  --fetch            pipeline
+  -F  --fix-labels       doctor
+  -F  --full             memory
+  -g  --dir              every command
+  -G  --clone-dir        every command
   -h  --help             every command
   -H  --host             auth login, auth status, auth logout, auth token
   -i  --interval         watch
@@ -356,18 +366,31 @@ A letter keeps its meaning on every command that has the flag.
   -l  --label            issue create, issue list, issue label, issue unlabel, watch
   -L  --limit            issue list, pr list, memory
   -m  --merge            run, watch, auto, pr sweep
+  -M  --max-issues       auto
   -n  --dry-run          run, auto, pr sweep
+  -N  --name-only        pr diff
+  -N  --no-checkpoint    auto
+  -N  --no-label         issue create
   -o  --scopes           auth login
   -O  --color            every command
+  -p  --memory-dir       run, watch, auto, memory
+  -P  --checkpoint-after auto
   -q  --quiet            every command
   -r  --rebase           pr merge
-  -s  --state            issue list, issue label, issue unlabel, pr list
+  -R  --remove           issue label
   -s  --squash           pr merge
+  -s  --state            issue list, issue label, issue unlabel, pr list
   -S  --search           issue list
   -t  --agent-timeout    run, watch, auto
+  -T  --stale-timeout    watch
   -u  --update-branch    pr merge
+  -U  --unlabeled        issue label, issue unlabel
+  -v  --log-level        run, watch, auto
+  -V  --version          update
   -w  --wait-for-checks  run, watch, auto, pr merge, pr sweep
+  -W  --log-file         run, watch, auto
   -x  --exclude-label    watch
+  -X  --close-issues     auto
   -y  --approve          auto
 
 Values follow the flag as the next word or after =: --agent codex,
@@ -383,9 +406,8 @@ words merge, squash and rebase are taken as its method.
 Go's flag parser also accepts one dash before a long name (-agent) and two
 before a short one (--a), so older spellings such as -b, -f and --timeout
 keep working; --timeout is a hidden, deprecated alias of --agent-timeout.
-Flags without a short form are rarer ones, spelled out to stay clear.
-The global path flags --dir, --env-file and --clone-dir work on any command,
-before --, and have no short form.
+The global path flags -g, --dir, -E, --env-file and -G, --clone-dir work on
+any command, before --.
 --quiet (-q) suppresses progress, keeping warnings, errors and the final
 summary. -O, --color=auto|always|never controls status color (default auto).
 Auto uses color only on terminals, unless NO_COLOR is nonempty or TERM=dumb.

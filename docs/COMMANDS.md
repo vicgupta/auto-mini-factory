@@ -651,30 +651,40 @@ list, just like `amf issue help` and `amf pr help`; they take no flags.
 
 ## Flag conventions
 
-Every flag has a long form, `--full-word` in kebab-case, and that is what the
-examples in these docs use. Common flags also have a one-letter short form,
-shown first in each command's help (`-a, --agent <name>`). A letter keeps its
-meaning on every command that has the flag, and no command has two flags with
-the same letter. `amf help flags` prints this table; `amf <command> --help`
-(or `-h`, or `amf help <command>`) lists each command's flags in one column as
+Every flag has a long form, `--full-word` in kebab-case, and a one-letter
+short form, shown first in each command's help (`-a, --agent <name>`). A
+letter keeps its meaning on every command that has the flag, and no command
+has two flags with the same letter; unrelated commands may reuse a letter
+(`-s` is `--state` on list commands and `--squash` on `amf pr merge`).
+`amf help flags` prints this table; `amf <command> --help` (or `-h`, or
+`amf help <command>`) lists each command's flags in one column as
 `-x, --long <value>  description (default ...)`.
 
 Durations are Go durations: `30s`, `5m`, `1h30m`, `2h`.
 
 | Short | Long | Commands |
 |---|---|---|
+| `-a` | `--add` | issue label |
 | `-a` | `--agent` | run, watch, auto |
+| `-A` | `--abort` | auto |
 | `-b` | `--body` | issue create, pr comment |
+| `-b` | `--memory-backend` | run, watch, auto, memory |
 | `-B` | `--no-browser` | auth login |
-| `-C` | `--client-id` | auth login |
 | `-c` | `--check` | update |
 | `-c` | `--comment` | issue close, pr close |
 | `-c` | `--continue` | auto |
+| `-C` | `--client-id` | auth login |
 | `-d` | `--delete-branch` | issue close, pr merge, pr close |
 | `-D` | `--draft` | run, watch |
 | `-e` | `--eval-rounds` | run, watch, auto |
+| `-E` | `--env-file` | every command |
 | `-f` | `--file` | issue create, pr comment |
 | `-f` | `--force` | run, auth token |
+| `-F` | `--fetch` | pipeline |
+| `-F` | `--fix-labels` | doctor |
+| `-F` | `--full` | memory |
+| `-g` | `--dir` | every command |
+| `-G` | `--clone-dir` | every command |
 | `-h` | `--help` | every command |
 | `-H` | `--host` | auth login, auth status, auth logout, auth token |
 | `-i` | `--interval` | watch |
@@ -683,18 +693,31 @@ Durations are Go durations: `30s`, `5m`, `1h30m`, `2h`.
 | `-l` | `--label` | issue create, issue list, issue label, issue unlabel, watch |
 | `-L` | `--limit` | issue list, pr list, memory |
 | `-m` | `--merge` | run, watch, auto, pr sweep |
+| `-M` | `--max-issues` | auto |
 | `-n` | `--dry-run` | run, auto, pr sweep |
+| `-N` | `--name-only` | pr diff |
+| `-N` | `--no-checkpoint` | auto |
+| `-N` | `--no-label` | issue create |
 | `-o` | `--scopes` | auth login |
 | `-O` | `--color` | every command |
+| `-p` | `--memory-dir` | run, watch, auto, memory |
+| `-P` | `--checkpoint-after` | auto |
 | `-q` | `--quiet` | every command |
 | `-r` | `--rebase` | pr merge |
+| `-R` | `--remove` | issue label |
 | `-s` | `--squash` | pr merge |
 | `-s` | `--state` | issue list, issue label, issue unlabel, pr list |
 | `-S` | `--search` | issue list |
 | `-t` | `--agent-timeout` | run, watch, auto |
+| `-T` | `--stale-timeout` | watch |
 | `-u` | `--update-branch` | pr merge |
+| `-U` | `--unlabeled` | issue label, issue unlabel |
+| `-v` | `--log-level` | run, watch, auto |
+| `-V` | `--version` | update |
 | `-w` | `--wait-for-checks` | run, watch, auto, pr merge, pr sweep |
+| `-W` | `--log-file` | run, watch, auto |
 | `-x` | `--exclude-label` | watch |
+| `-X` | `--close-issues` | auto |
 | `-y` | `--approve` | auto |
 
 How values are written:
@@ -708,18 +731,10 @@ How values are written:
   method, so `amf run -m 42` is a merge commit for issue 42.
 - Short forms can't be bundled: write `-n -f`, not `-nf`.
 
-Flags with no short form are the rarer ones, spelled out to stay clear:
-`--log-level`, `--log-file`, `--stale-timeout`, `--max-issues`,
-`--checkpoint-after`, `--no-checkpoint`, `--abort`, `--close-issues`,
-`--no-label`, `--name-only`, `--fetch`, `--full`, `--memory-backend`,
-`--memory-dir` and `amf update --version` (whose letter would read as
-`amf --version`).
-
-The global path flags `--dir <folder>`, `--env-file <file>` and
-`--clone-dir <folder>` work on any command, anywhere before `--`, and have no
-short form so they never collide with a command's letters (`-d` is
-`--delete-branch`, `-f` is `--file` or `--force`). Each command's help lists
-them under "Global flags".
+The global path flags `-g, --dir <folder>`, `-E, --env-file <file>` and
+`-G, --clone-dir <folder>` work on any command, anywhere before `--`. Their
+letters are global and never name a command-specific flag. Each command's help
+lists them under "Global flags".
 
 The output flags are global too, before or after the command, before `--`:
 
@@ -838,7 +853,7 @@ Generated from each command's `--help`; `amf init`,
 | `-b, --body <text>` | text of the issue body |
 | `-f, --file <path>` | read the issue body from the file at path (- for stdin) |
 | `-l, --label <name>` | label that marks the issue for amf (default amf:ready) |
-| `--no-label` | don't label the issue for amf |
+| `-N, --no-label` | don't label the issue for amf |
 
 ### amf issue list
 
@@ -867,11 +882,11 @@ Generated from each command's `--help`; `amf init`,
 
 | Flag | What it does |
 |---|---|
-| `--add <value>` | add this label (repeatable, or comma-separated) |
+| `-a, --add <value>` | add this label (repeatable, or comma-separated) |
 | `-l, --label <name>` | select issues with this label (bulk mode) |
-| `--remove <value>` | remove this label (repeatable, or comma-separated) |
+| `-R, --remove <value>` | remove this label (repeatable, or comma-separated) |
 | `-s, --state <state>` | select issues by state: open, closed or all (bulk mode) (default open) |
-| `--unlabeled` | select only issues with no labels (bulk mode) |
+| `-U, --unlabeled` | select only issues with no labels (bulk mode) |
 
 ### amf issue unlabel
 
@@ -879,13 +894,13 @@ Generated from each command's `--help`; `amf init`,
 |---|---|
 | `-l, --label <name>` | select issues with this label (bulk mode) |
 | `-s, --state <state>` | select issues by state: open, closed or all (bulk mode) (default open) |
-| `--unlabeled` | select only issues with no labels (bulk mode) |
+| `-U, --unlabeled` | select only issues with no labels (bulk mode) |
 
 ### amf doctor
 
 | Flag | What it does |
 |---|---|
-| `--fix-labels` | relabel issues whose amf status label disagrees with their pull requests |
+| `-F, --fix-labels` | relabel issues whose amf status label disagrees with their pull requests |
 
 ### amf run
 
@@ -897,10 +912,10 @@ Generated from each command's `--help`; `amf init`,
 | `-n, --dry-run` | make the change on the local branch only: no label, comment, push, PR or merge |
 | `-e, --eval-rounds <n>` | how many times a pipeline's eval stage may send the change back to code (default 2) |
 | `-f, --force` | run even if the issue already has an open PR or an amf/issue-N branch, updating that PR; this replaces the branch, first saving any commits it would drop to amf/backup/issue-N-<sha>-<time> |
-| `--log-file <path>` | where the event log goes (default .amf/runs/<run_id>/events.jsonl; "off" for none) |
-| `--log-level <level>` | debug, info, warn or error, for the terminal and the event log (default info, and debug in the event log) |
-| `--memory-backend <backend>` | where amf keeps the repo's memory: sqlite, markdown or logfiles (default sqlite) |
-| `--memory-dir <dir>` | directory the amf-memory folder goes in (default: the current directory) |
+| `-W, --log-file <path>` | where the event log goes (default .amf/runs/<run_id>/events.jsonl; "off" for none) |
+| `-v, --log-level <level>` | debug, info, warn or error, for the terminal and the event log (default info, and debug in the event log) |
+| `-b, --memory-backend <backend>` | where amf keeps the repo's memory: sqlite, markdown or logfiles (default sqlite) |
+| `-p, --memory-dir <dir>` | directory the amf-memory folder goes in (default: the current directory) |
 | `-m, --merge[=<method>]` | merge each PR amf opens or updates: --merge (or -m) alone for a merge commit, or a method after = or as the next word: --merge=squash, -m squash, -m rebase |
 | `-w, --wait-for-checks` | with --merge, wait up to 30 minutes for the PR's checks to pass before merging (a head with no checks after 2 minutes is merged); --wait-for-checks=false merges at once (default true) |
 
@@ -915,65 +930,65 @@ Generated from each command's `--help`; `amf init`,
 | `-x, --exclude-label <name>` | skip issues with this label, leaving them as they are (repeatable: any of them skips) |
 | `-i, --interval <duration>` | how often to poll GitHub (Go duration, e.g. 30s or 5m) (default 1m) |
 | `-l, --label <name>` | process open issues with this label (default amf:ready) |
-| `--log-file <path>` | where the event log goes (default .amf/runs/<run_id>/events.jsonl; "off" for none) |
-| `--log-level <level>` | debug, info, warn or error, for the terminal and the event log (default info, and debug in the event log) |
-| `--memory-backend <backend>` | where amf keeps the repo's memory: sqlite, markdown or logfiles (default sqlite) |
-| `--memory-dir <dir>` | directory the amf-memory folder goes in (default: the current directory) |
+| `-W, --log-file <path>` | where the event log goes (default .amf/runs/<run_id>/events.jsonl; "off" for none) |
+| `-v, --log-level <level>` | debug, info, warn or error, for the terminal and the event log (default info, and debug in the event log) |
+| `-b, --memory-backend <backend>` | where amf keeps the repo's memory: sqlite, markdown or logfiles (default sqlite) |
+| `-p, --memory-dir <dir>` | directory the amf-memory folder goes in (default: the current directory) |
 | `-m, --merge[=<method>]` | merge each PR amf opens or updates: --merge (or -m) alone for a merge commit, or a method after = or as the next word: --merge=squash, -m squash, -m rebase |
-| `--stale-timeout <duration>` | put amf:in-progress issues no amf works on back to amf:ready after this long, as a Go duration (default AMF_STALE_TIMEOUT, else max(2x agent timeout, 2h); off disables) |
+| `-T, --stale-timeout <duration>` | put amf:in-progress issues no amf works on back to amf:ready after this long, as a Go duration (default AMF_STALE_TIMEOUT, else max(2x agent timeout, 2h); off disables) |
 | `-w, --wait-for-checks` | with --merge, wait up to 30 minutes for the PR's checks to pass before merging (a head with no checks after 2 minutes is merged); --wait-for-checks=false merges at once (default true) |
 
 ### amf auto
 
 | Flag | What it does |
 |---|---|
-| `--abort` | abandon the saved run by removing its state |
+| `-A, --abort` | abandon the saved run by removing its state |
 | `-a, --agent <name>` | agent for issues without a pipeline: claudecode, codex or opencode with no fallback (default: AMF_PRIMARY_AGENT, codex, then AMF_SECONDARY_AGENT, claudecode, if it fails) |
 | `-t, --agent-timeout <duration>` | maximum time each agent run may take (Go duration, e.g. 90m or 1h30m) (default 1h) |
 | `-y, --approve` | approve the checkpoint without prompting |
-| `--checkpoint-after <n>` | checkpoint after this many merges (must be positive) (default 1) |
-| `--close-issues` | with --abort, close the created, unmerged issues first |
+| `-P, --checkpoint-after <n>` | checkpoint after this many merges (must be positive) (default 1) |
+| `-X, --close-issues` | with --abort, close the created, unmerged issues first |
 | `-c, --continue` | approve the checkpoint and resume the saved amf auto run |
 | `-n, --dry-run` | plan only: print the issues amf would create, and create nothing |
 | `-e, --eval-rounds <n>` | how many times a pipeline's eval stage may send the change back to code (default 2) |
-| `--log-file <path>` | where the event log goes (default .amf/runs/<run_id>/events.jsonl; "off" for none) |
-| `--log-level <level>` | debug, info, warn or error, for the terminal and the event log (default info, and debug in the event log) |
-| `--max-issues <n>` | plan at most this many issues (1 to 10) (default 5) |
-| `--memory-backend <backend>` | where amf keeps the repo's memory: sqlite, markdown or logfiles (default sqlite) |
-| `--memory-dir <dir>` | directory the amf-memory folder goes in (default: the current directory) |
+| `-W, --log-file <path>` | where the event log goes (default .amf/runs/<run_id>/events.jsonl; "off" for none) |
+| `-v, --log-level <level>` | debug, info, warn or error, for the terminal and the event log (default info, and debug in the event log) |
+| `-M, --max-issues <n>` | plan at most this many issues (1 to 10) (default 5) |
+| `-b, --memory-backend <backend>` | where amf keeps the repo's memory: sqlite, markdown or logfiles (default sqlite) |
+| `-p, --memory-dir <dir>` | directory the amf-memory folder goes in (default: the current directory) |
 | `-m, --merge[=<method>]` | how to merge each PR: a merge commit, or a method after = or as the next word: --merge=squash, -m squash, -m rebase (default merge) |
-| `--no-checkpoint` | merge all issues without a checkpoint or approval |
+| `-N, --no-checkpoint` | merge all issues without a checkpoint or approval |
 | `-w, --wait-for-checks` | wait up to 5 minutes for completed checks before the checkpoint |
 
 ### amf memory sync
 
 | Flag | What it does |
 |---|---|
-| `--full` | with sync, reread every issue and PR instead of only what changed |
+| `-F, --full` | with sync, reread every issue and PR instead of only what changed |
 | `-j, --json` | print JSON |
 | `-L, --limit <n>` | how many results similar prints (default 5) |
-| `--memory-backend <backend>` | where amf keeps the repo's memory: sqlite, markdown or logfiles (default sqlite) |
-| `--memory-dir <dir>` | directory the amf-memory folder goes in (default: the current directory) |
+| `-b, --memory-backend <backend>` | where amf keeps the repo's memory: sqlite, markdown or logfiles (default sqlite) |
+| `-p, --memory-dir <dir>` | directory the amf-memory folder goes in (default: the current directory) |
 
 ### amf memory similar
 
 | Flag | What it does |
 |---|---|
-| `--full` | with sync, reread every issue and PR instead of only what changed |
+| `-F, --full` | with sync, reread every issue and PR instead of only what changed |
 | `-j, --json` | print JSON |
 | `-L, --limit <n>` | how many results similar prints (default 5) |
-| `--memory-backend <backend>` | where amf keeps the repo's memory: sqlite, markdown or logfiles (default sqlite) |
-| `--memory-dir <dir>` | directory the amf-memory folder goes in (default: the current directory) |
+| `-b, --memory-backend <backend>` | where amf keeps the repo's memory: sqlite, markdown or logfiles (default sqlite) |
+| `-p, --memory-dir <dir>` | directory the amf-memory folder goes in (default: the current directory) |
 
 ### amf memory show
 
 | Flag | What it does |
 |---|---|
-| `--full` | with sync, reread every issue and PR instead of only what changed |
+| `-F, --full` | with sync, reread every issue and PR instead of only what changed |
 | `-j, --json` | print JSON |
 | `-L, --limit <n>` | how many results similar prints (default 5) |
-| `--memory-backend <backend>` | where amf keeps the repo's memory: sqlite, markdown or logfiles (default sqlite) |
-| `--memory-dir <dir>` | directory the amf-memory folder goes in (default: the current directory) |
+| `-b, --memory-backend <backend>` | where amf keeps the repo's memory: sqlite, markdown or logfiles (default sqlite) |
+| `-p, --memory-dir <dir>` | directory the amf-memory folder goes in (default: the current directory) |
 
 ### amf pr list
 
@@ -1004,7 +1019,7 @@ Generated from each command's `--help`; `amf init`,
 
 | Flag | What it does |
 |---|---|
-| `--name-only` | print one changed path per line instead of the diff |
+| `-N, --name-only` | print one changed path per line instead of the diff |
 
 ### amf pr comment
 
@@ -1024,14 +1039,14 @@ Generated from each command's `--help`; `amf init`,
 
 | Flag | What it does |
 |---|---|
-| `--fetch` | also download and check each stage's skill |
+| `-F, --fetch` | also download and check each stage's skill |
 
 ### amf update
 
 | Flag | What it does |
 |---|---|
 | `-c, --check` | only report whether an update is available |
-| `--version <tag>` | release to install, e.g. v0.0.7 (default: latest) |
+| `-V, --version <tag>` | release to install, e.g. v0.0.7 (default: latest) |
 
 ## Run and watch
 
@@ -1049,10 +1064,10 @@ command name (`amf --dir ~/work run 42` or `amf run 42 --dir ~/work`):
 
 | Flag | Default | What it sets |
 |---|---|---|
-| `--dir <folder>` | the current directory | where amf works, as if started there: the checkout, `./.env`, `./<name>` and `.amf/` all follow it |
-| `--env-file <file>` | `./.env`, then `.env` at the top of the enclosing checkout | the only `.env` amf reads, and the one `amf init` writes |
-| `--clone-dir <folder>` | the enclosing checkout, else `./<name>` | the checkout run, watch and auto use (cloning `GITHUB_REPO` there if it is missing); it wins over the enclosing checkout |
-| `--log-file <path>` (run, watch, auto) | `<checkout>/.amf/runs/<run_id>/events.jsonl` | the event log; `off` for none |
+| `-g, --dir <folder>` | the current directory | where amf works, as if started there: the checkout, `./.env`, `./<name>` and `.amf/` all follow it |
+| `-E, --env-file <file>` | `./.env`, then `.env` at the top of the enclosing checkout | the only `.env` amf reads, and the one `amf init` writes |
+| `-G, --clone-dir <folder>` | the enclosing checkout, else `./<name>` | the checkout run, watch and auto use (cloning `GITHUB_REPO` there if it is missing); it wins over the enclosing checkout |
+| `-W, --log-file <path>` (run, watch, auto) | `<checkout>/.amf/runs/<run_id>/events.jsonl` | the event log; `off` for none |
 
 Relative flag values resolve against the directory amf was started in, before
 `--dir` changes into its folder. amf's own state stays under `<checkout>/.amf/`

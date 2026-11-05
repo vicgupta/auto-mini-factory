@@ -83,6 +83,7 @@ func TestShortFlagsUnique(t *testing.T) {
 					t.Errorf("description of --%s starts at %d, want %d", f.long, c, col)
 				}
 				if f.short == "" {
+					t.Errorf("--%s has no short form", f.long)
 					continue
 				}
 				if prev, dup := seen[f.short]; dup {
@@ -94,6 +95,17 @@ func TestShortFlagsUnique(t *testing.T) {
 				}
 			}
 		})
+	}
+	// The global flags every command lists also show their short forms.
+	global := helpGlobalFlags(commandHelpOutput(t, []string{"version"}))
+	for _, f := range global {
+		if f.short == "" {
+			t.Errorf("global --%s has no short form", f.long)
+			continue
+		}
+		if f.long != "help" && shortFlags[f.long] != f.short {
+			t.Errorf("global --%s shows -%s, shortFlags says %q", f.long, f.short, shortFlags[f.long])
+		}
 	}
 	// The shared table itself: each letter at most once per meaning.
 	for long, s := range shortFlags {
