@@ -9,6 +9,10 @@ go test -race ./...
 CI runs `gofmt`, `go vet` and these tests on Linux and macOS for every push
 and PR, and builds every release platform.
 
+The documentation tests compare command, help topic and configuration variable
+names in the built-in help with the command reference and configuration guide
+tables, ignoring wording, whitespace and ordering.
+
 Tests use `httptest` for GitHub, real git repos in temp dirs, and shell
 scripts standing in for `claude`, `codex` and `opencode`.
 
