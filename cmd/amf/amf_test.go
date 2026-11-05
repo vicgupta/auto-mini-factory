@@ -223,6 +223,8 @@ type fakeGitHub struct {
 	writes []string
 	// events are GET /issues/{n}/events responses.
 	events map[int][]IssueEvent
+	// timeline is GET /issues/{n}/timeline responses.
+	timeline map[int][]map[string]any
 	// compares are GET /compare/{base}...{head} responses, keyed by
 	// "base...head" as {ahead, behind}; a missing key is 404.
 	compares map[string][2]int
@@ -239,7 +241,7 @@ type fakeError struct {
 }
 
 func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
-	f := &fakeGitHub{t: t, issues: map[int]*Issue{}, comments: map[int][]string{}, repoLabels: map[string]LabelSpec{}, views: map[int]prViewResponse{}, compares: map[string][2]int{}, checkRuns: map[string][]checkRun{}, diffs: map[int]string{}, files: map[int][]prFile{}}
+	f := &fakeGitHub{t: t, issues: map[int]*Issue{}, comments: map[int][]string{}, repoLabels: map[string]LabelSpec{}, views: map[int]prViewResponse{}, compares: map[string][2]int{}, checkRuns: map[string][]checkRun{}, diffs: map[int]string{}, files: map[int][]prFile{}, timeline: map[int][]map[string]any{}}
 	mux := http.NewServeMux()
 	const repo = "/repos/vic/demo"
 	mux.HandleFunc("GET "+repo, func(w http.ResponseWriter, r *http.Request) {
@@ -316,6 +318,12 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		writeJSON(w, 200, append([]IssueEvent{}, f.events[n]...))
+	})
+	mux.HandleFunc("GET "+repo+"/issues/{n}/timeline", func(w http.ResponseWriter, r *http.Request) {
+		n, _ := strconv.Atoi(r.PathValue("n"))
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		writeJSON(w, 200, append([]map[string]any{}, f.timeline[n]...))
 	})
 	mux.HandleFunc("GET "+repo+"/issues/{n}", func(w http.ResponseWriter, r *http.Request) {
 		f.withIssue(w, r, func(is *Issue) { writeJSON(w, 200, is) })
@@ -412,7 +420,7 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
 					mergedAt = "2026-01-01T00:00:00Z"
 				}
 				draft := i < len(f.drafts) && f.drafts[i]
-				out = append(out, map[string]any{"number": n, "html_url": fmt.Sprintf("https://github.com/vic/demo/pull/%d", n), "title": pr["title"], "state": pr["state"], "draft": draft, "merged_at": mergedAt, "head": map[string]any{"ref": pr["head"], "repo": map[string]string{"full_name": repoName}}, "base": map[string]string{"ref": pr["base"]}})
+				out = append(out, map[string]any{"number": n, "html_url": fmt.Sprintf("https://github.com/vic/demo/pull/%d", n), "title": pr["title"], "body": pr["body"], "state": pr["state"], "draft": draft, "merged_at": mergedAt, "head": map[string]any{"ref": pr["head"], "repo": map[string]string{"full_name": repoName}}, "base": map[string]string{"ref": pr["base"]}})
 			}
 		}
 		if q.Get("direction") == "desc" {

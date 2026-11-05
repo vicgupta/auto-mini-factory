@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -216,7 +217,8 @@ type labelFix struct {
 }
 
 // labelProblems compares each issue carrying an amf status label with the
-// pull requests from its amf/issue-N branch in this repository:
+// pull requests in this repository that close it, from its amf/issue-N
+// branch, a closing keyword in a PR body, or a timeline cross-reference:
 //   - a merged PR makes it amf:done (from amf:failed, amf:pr-open, or two
 //     status labels);
 //   - amf:done without a merged PR is amf:pr-open with an open PR, else
@@ -225,7 +227,8 @@ type labelFix struct {
 //
 // amf:in-progress issues are left to watch's stale sweep, and amf:failed
 // with an open PR to watch, which waits for its checks. It costs one paged
-// pull request listing and one paged issue listing per status label.
+// pull request listing, one paged issue listing per status label, and a
+// timeline read for a closed issue that listing doesn't link to a merged PR.
 func labelProblems(ctx context.Context, gh *GitHub) ([]labelFix, int, error) {
 	prs, err := gh.ListPRs(ctx, "all")
 	if err != nil {
@@ -233,15 +236,22 @@ func labelProblems(ctx context.Context, gh *GitHub) ([]labelFix, int, error) {
 	}
 	open, merged := map[int]bool{}, map[int]bool{}
 	for _, pr := range prs {
-		n := issueFromHead(pr.Head.Ref)
-		if n == nil || pr.Head.Repo == nil || !strings.EqualFold(pr.Head.Repo.FullName, gh.repo) {
-			continue
+		var linked []int
+		if n := issueFromHead(pr.Head.Ref); n != nil && pr.Head.Repo != nil && strings.EqualFold(pr.Head.Repo.FullName, gh.repo) {
+			linked = append(linked, *n)
 		}
-		switch {
-		case pr.MergedAt != nil:
-			merged[*n] = true
-		case pr.State == "open":
-			open[*n] = true
+		for _, m := range closesRef.FindAllStringSubmatch(pr.Body, -1) {
+			if n, err := strconv.Atoi(m[1]); err == nil && n > 0 {
+				linked = append(linked, n)
+			}
+		}
+		for _, n := range linked {
+			switch {
+			case pr.MergedAt != nil:
+				merged[n] = true
+			case pr.State == "open":
+				open[n] = true
+			}
 		}
 	}
 	seen := map[int]bool{}
@@ -259,24 +269,31 @@ func labelProblems(ctx context.Context, gh *GitHub) ([]labelFix, int, error) {
 			if is.HasLabel(labelInProgress) {
 				continue
 			}
+			n := is.Number
+			if !merged[n] && is.State == "closed" {
+				m, err := gh.IssueMergedPR(ctx, n, is.ClosedAt)
+				if err != nil {
+					return nil, 0, err
+				}
+				merged[n] = merged[n] || m
+			}
 			var have []string
 			for _, l := range statusLabels {
 				if is.HasLabel(l) {
 					have = append(have, l)
 				}
 			}
-			n, from := is.Number, strings.Join(have, "+")
-			branch := issueBranch(n)
+			from := strings.Join(have, "+")
 			var to, why string
 			switch {
 			case merged[n]:
-				to, why = labelDone, "its PR from "+branch+" is merged"
+				to, why = labelDone, "a merged PR closes it"
 			case is.HasLabel(labelDone) && open[n]:
-				to, why = labelPROpen, "its PR from "+branch+" is open, not merged"
+				to, why = labelPROpen, "an open PR closes it, not merged"
 			case is.HasLabel(labelDone):
-				to, why = labelFailed, "no merged PR from "+branch
+				to, why = labelFailed, "no merged PR closes it"
 			case is.HasLabel(labelPROpen) && !open[n] && !is.HasLabel(labelFailed):
-				to, why = labelFailed, "no open or merged PR from "+branch
+				to, why = labelFailed, "no open or merged PR closes it"
 			case len(have) > 1:
 				to, why = statusOf(is), "it has more than one status label"
 			}

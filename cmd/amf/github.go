@@ -77,6 +77,7 @@ type PullRequest struct {
 type PRDetails struct {
 	Number   int     `json:"number"`
 	Title    string  `json:"title"`
+	Body     string  `json:"body"`
 	State    string  `json:"state"`
 	HTMLURL  string  `json:"html_url"`
 	Draft    bool    `json:"draft"`
@@ -160,6 +161,51 @@ func (g *GitHub) ListPRs(ctx context.Context, state string) ([]PRDetails, error)
 	}
 	slices.SortStableFunc(prs, func(a, b PRDetails) int { return b.Number - a.Number })
 	return prs, nil
+}
+
+// timelineEvent is one entry of an issue's timeline. A cross-referenced
+// event's Source is the issue or pull request that referenced it.
+type timelineEvent struct {
+	Event  string `json:"event"`
+	Source struct {
+		Issue struct {
+			State       string `json:"state"`
+			PullRequest *struct {
+				MergedAt *string `json:"merged_at"`
+			} `json:"pull_request"`
+		} `json:"issue"`
+	} `json:"source"`
+}
+
+// IssueMergedPR reports whether issue n's timeline shows a merged pull
+// request that closed it. A cross-reference counts when its merge time is
+// the issue's close time; without a close time, any merged cross-reference
+// counts. A missing timeline reports false.
+func (g *GitHub) IssueMergedPR(ctx context.Context, n int, closedAt string) (bool, error) {
+	var mergedAt []string
+	for path := g.repoPath("/issues/%d/timeline?per_page=100", n); path != ""; {
+		var page []timelineEvent
+		header, err := g.send(ctx, "GET", path, nil, &page)
+		if isStatus(err, http.StatusNotFound) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		for _, e := range page {
+			if e.Event != "cross-referenced" || e.Source.Issue.PullRequest == nil || e.Source.Issue.PullRequest.MergedAt == nil {
+				continue
+			}
+			mergedAt = append(mergedAt, *e.Source.Issue.PullRequest.MergedAt)
+		}
+		if path, err = g.nextPage(header); err != nil {
+			return false, err
+		}
+	}
+	if closedAt == "" {
+		return len(mergedAt) > 0, nil
+	}
+	return slices.Contains(mergedAt, closedAt), nil
 }
 
 // GetPRView fetches one pull request. GitHub answers 404 both for a number
