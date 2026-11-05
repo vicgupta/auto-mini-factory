@@ -202,6 +202,90 @@ sleep 600
 	}
 }
 
+// TestAgentIdleTimeout stops an agent that prints nothing for the idle limit,
+// and checks that the run fails clearly and the fallback still runs.
+func TestAgentIdleTimeout(t *testing.T) {
+	t.Run("fails the issue and removes the worktree", func(t *testing.T) {
+		root, _ := setupRepo(t)
+		gh, srv := newFakeGitHub(t)
+		gh.issues[1] = readyIssue(1, "Goes quiet")
+		r, log := newTestRunner(t, srv, root, fakeAgent(t, "claude", `
+ echo started
+ exec sleep 600
+ `))
+		r.IdleTimeout = 200 * time.Millisecond
+		r.Timeout = 10 * time.Second
+		r.KillGrace = 100 * time.Millisecond
+		var events bytes.Buffer
+		r.Events = newEventLogger(r.Log, slog.LevelInfo, &events, slog.LevelDebug, nil, "run")
+
+		begin := time.Now()
+		err := r.Run(context.Background(), 1)
+		if time.Since(begin) > 5*time.Second {
+			t.Errorf("the run took %s", time.Since(begin))
+		}
+		var ate *agentTimeoutError
+		if !errors.As(err, &ate) {
+			t.Fatalf("error = %v, want an agentTimeoutError\nlog:\n%s", err, log.String())
+		}
+		if !ate.Idle || ate.Agent != "claude" || ate.Limit != r.IdleTimeout {
+			t.Errorf("agentTimeoutError = %+v", *ate)
+		}
+		want := "claude produced no output for 200ms; stopped it"
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error = %v, want %q", err, want)
+		}
+		ev := eventsByName(eventLines(t, events.String()))
+		wantEvent(t, ev, "agent.timeout", map[string]any{"issue": float64(1), "agent": "claude", "limit": "200ms", "idle": true})
+		wantEvent(t, ev, "agent.exit", map[string]any{"timed_out": true})
+		wantEvent(t, ev, "issue.failed", map[string]any{"reason": "agent_timeout"})
+
+		if got, want := gh.labels(1), []string{"amf:failed"}; !reflect.DeepEqual(got, want) {
+			t.Errorf("labels = %v, want %v", got, want)
+		}
+		if len(gh.prs) != 0 {
+			t.Errorf("PRs = %v", gh.prs)
+		}
+		if c := gh.comments[1]; len(c) != 1 || !strings.Contains(c[0], want) || !strings.Contains(c[0], "AMF_AGENT_IDLE_TIMEOUT") {
+			t.Errorf("comments = %q", c)
+		}
+		if b := mustRead(t, ate.LogPath); !strings.Contains(b, want) {
+			t.Errorf("log missing %q:\n%s", want, b)
+		}
+		if _, err := os.Stat(filepath.Join(root, ".amf", "worktrees", "issue-1")); !os.IsNotExist(err) {
+			t.Errorf("the worktree should be removed after an idle timeout, stat = %v", err)
+		}
+	})
+
+	t.Run("lets the fallback agent run", func(t *testing.T) {
+		root, _ := setupRepo(t)
+		gh, srv := newFakeGitHub(t)
+		gh.issues[1] = readyIssue(1, "Add feature file")
+		r, log := newTestRunner(t, srv, root, fakeAgent(t, "claude", cleanClaude))
+		r.Codex = fakeAgent(t, "codex", "echo started; exec sleep 600")
+		r.OpenAIKey = "sk-openai-test"
+		r.Primary, r.Secondary = agentCodex, agentClaude
+		r.IdleTimeout = 200 * time.Millisecond
+		r.Timeout = 10 * time.Second
+		r.KillGrace = 100 * time.Millisecond
+		var events bytes.Buffer
+		r.Events = newEventLogger(r.Log, slog.LevelInfo, &events, slog.LevelDebug, nil, "run")
+
+		if err := r.Run(context.Background(), 1); err != nil {
+			t.Fatalf("Run: %v\nlog:\n%s", err, log.String())
+		}
+		want := "codex produced no output for 200ms; stopped it"
+		if len(gh.prs) != 1 || !strings.Contains(gh.prs[0]["body"], want) {
+			t.Fatalf("prs = %v, want the fallback's PR naming %q", gh.prs, want)
+		}
+		e := wantEvent(t, eventsByName(eventLines(t, events.String())), "agent.fallback",
+			map[string]any{"from": "codex", "to": "claude", "reason": "agent_timeout"})
+		if e != nil && !strings.Contains(e["error"].(string), want) {
+			t.Errorf("fallback error = %q, want %q", e["error"], want)
+		}
+	})
+}
+
 // TestAgentTimeoutKeepsPartialMessage checks that codex's final message, cut
 // short by the timeout, is kept as <log>.partial.md next to the log.
 func TestAgentTimeoutKeepsPartialMessage(t *testing.T) {
@@ -455,5 +539,31 @@ func TestKillAfter(t *testing.T) {
 	case <-killed:
 		t.Fatal("killed after the agent had exited")
 	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+func TestAgentIdleTimeoutSetting(t *testing.T) {
+	for _, tc := range []struct {
+		val  string
+		want time.Duration
+		bad  string // "" for a valid value
+	}{
+		{"", defaultAgentIdleTimeout, ""},
+		{"off", 0, ""},
+		{"30s", 30 * time.Second, ""},
+		{"5x", 0, `AMF_AGENT_IDLE_TIMEOUT="5x": not a duration`},
+		{"0", 0, "AMF_AGENT_IDLE_TIMEOUT: the idle timeout must be positive"},
+		{"-1m", 0, "AMF_AGENT_IDLE_TIMEOUT: the idle timeout must be positive"},
+	} {
+		got, err := parseAgentIdleTimeout(tc.val)
+		if tc.bad != "" {
+			if err == nil || !strings.Contains(err.Error(), tc.bad) {
+				t.Errorf("parseAgentIdleTimeout(%q) = %v, %v, want %q", tc.val, got, err, tc.bad)
+			}
+			continue
+		}
+		if err != nil || got != tc.want {
+			t.Errorf("parseAgentIdleTimeout(%q) = %v, %v, want %v", tc.val, got, err, tc.want)
+		}
 	}
 }

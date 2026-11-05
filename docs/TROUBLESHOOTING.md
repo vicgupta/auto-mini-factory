@@ -71,6 +71,22 @@ For OpenCode, `opencode auth login` saves a login; check `OPENCODE_MODEL`
 against `opencode models`. A pipeline selects each stage's agent and ignores
 `--agent`, so fix the credentials for the agent named in its table.
 
+## Agent stops producing output
+
+**Symptom:** The failure comment says
+`<agent> produced no output for 15m; stopped it`, or a fallback agent ran
+because the first one went quiet.
+
+**Cause:** The agent wrote nothing to stdout or stderr for
+`AMF_AGENT_IDLE_TIMEOUT` (default `15m`), so amf stopped it and its process
+group instead of waiting for the full `AMF_AGENT_TIMEOUT`.
+
+**Fix:** Check the agent's log in `.amf/logs/` for where it stopped. Rerun
+the issue with more time by setting `AMF_AGENT_IDLE_TIMEOUT=30m` (or another
+Go duration) in `.env` or the environment, then add `amf:ready` again. Set
+`AMF_AGENT_IDLE_TIMEOUT=off` to disable the idle timeout. The regular agent
+timeout still applies.
+
 ## Saved auto state blocks a new run
 
 **Symptom:** A new `amf auto` sentence is refused because

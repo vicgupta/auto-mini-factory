@@ -594,7 +594,9 @@ See [Run and watch](#run-and-watch), [Choosing the agent](#choosing-the-agent),
 Shared flags: `--agent claudecode|codex|opencode` selects one agent with no
 fallback (default uses configured selection); `--agent-timeout` sets a Go
 duration per agent run (default `AMF_AGENT_TIMEOUT` or `60m`, range `1m` to
-`24h`), with deprecated alias `--timeout`. `--eval-rounds` defaults to 2 and accepts nonnegative integers.
+`24h`), with deprecated alias `--timeout`. An agent that produces no output
+for `AMF_AGENT_IDLE_TIMEOUT` (default `15m`; `off` disables it) is stopped and
+the run fails, so the fallback can run. `--eval-rounds` defaults to 2 and accepts nonnegative integers.
 `--draft` defaults off and cannot be combined with `--merge`.
 `--merge[=merge|squash|rebase]` defaults off; bare `--merge` uses a merge
 commit. With `--merge`, `--wait-for-checks` (`-w`, default on) waits up to
@@ -1178,7 +1180,11 @@ Without a pipeline (see below), amf runs one agent once. With Claude Code:
    `.amf/logs/issue-N.log` as it works, one JSON message per line
    (`tail -f` it to follow along). Each agent run may take at most 60 minutes
    (`--agent-timeout`; amf then kills the agent and everything it spawned, or
-   `AMF_AGENT_TIMEOUT` sets it without a flag; see [Configuration (.env)](CONFIGURATION.md#configuration-env)).
+   `AMF_AGENT_TIMEOUT` sets it without a flag), and it must keep printing: no
+   output on stdout or stderr for `AMF_AGENT_IDLE_TIMEOUT` (default `15m`;
+   `off` disables it) also stops it, with the error
+   `<agent> produced no output for <limit>; stopped it`. See
+   [Configuration (.env)](CONFIGURATION.md#configuration-env).
    Codex and opencode run the same way, with the commands in
    [docs/SPECS.md](SPECS.md#agents).
 4. Commits the changes (`Fix #N: <title>`), fails if there are none, and runs
@@ -1233,10 +1239,10 @@ the fallback agent ran and if not why, and the last 40 lines of the agent's
 log, redacted, with the log's path. An issue that already had an open PR
 keeps `amf:pr-open` instead (and one whose PR GitHub shows merged, `amf:done`): a failed retry
 never marks it `amf:failed`.
-The worktree is kept for inspection. A run that hit the agent timeout
-loses only the worktree: amf comments with how to retry with more time and
-keeps the logs and partial output. Re-running `amf run N` starts again from a
-fresh worktree.
+The worktree is kept for inspection. A run that hit the agent timeout or
+idle timeout loses only the worktree: amf comments with how to retry with
+more time and keeps the logs and partial output. Re-running `amf run N`
+starts again from a fresh worktree.
 
 ## Merge methods
 

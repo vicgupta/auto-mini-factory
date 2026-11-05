@@ -68,6 +68,11 @@ type Config struct {
 	// watch, and doctor names it, instead of every command reading .env.
 	AgentTimeout string
 
+	// AgentIdleTimeout is AMF_AGENT_IDLE_TIMEOUT as written: how long an
+	// agent may produce no output before amf stops it. "" means the default,
+	// "off" disables it. newRunner parses it, like AgentTimeout.
+	AgentIdleTimeout string
+
 	// LogLevel is AMF_LOG_LEVEL as written; newRunner parses it, like
 	// AgentTimeout. "" means the defaults.
 	LogLevel string
@@ -136,21 +141,22 @@ func loadConfig(paths ...string) (Config, error) {
 		Codex:    get("AMF_CODEX", "codex"),
 		Opencode: get("AMF_OPENCODE", "opencode"),
 
-		ClaudeToken:    get("CLAUDE_CODE_OAUTH_TOKEN", ""),
-		AnthropicKey:   get("ANTHROPIC_API_KEY", ""),
-		OpenAIKey:      get("OPENAI_API_KEY", ""),
-		OpencodeKey:    get("OPENCODE_API_KEY", ""),
-		OpencodeModel:  get("OPENCODE_MODEL", defaultOpencodeModel),
-		PostgresURL:    get("AMF_POSTGRES_URL", ""),
-		PrimaryAgent:   get("AMF_PRIMARY_AGENT", defaultPrimaryAgent),
-		SecondaryAgent: get("AMF_SECONDARY_AGENT", defaultSecondaryAgent),
-		Trusted:        parseTrusted(get("AMF_TRUSTED", "")),
-		AgentTimeout:   get("AMF_AGENT_TIMEOUT", ""),
-		LogLevel:       get("AMF_LOG_LEVEL", ""),
-		StaleTimeout:   get("AMF_STALE_TIMEOUT", ""),
-		EnvPaths:       paths,
-		EnvFile:        envFile,
-		seen:           seen,
+		ClaudeToken:      get("CLAUDE_CODE_OAUTH_TOKEN", ""),
+		AnthropicKey:     get("ANTHROPIC_API_KEY", ""),
+		OpenAIKey:        get("OPENAI_API_KEY", ""),
+		OpencodeKey:      get("OPENCODE_API_KEY", ""),
+		OpencodeModel:    get("OPENCODE_MODEL", defaultOpencodeModel),
+		PostgresURL:      get("AMF_POSTGRES_URL", ""),
+		PrimaryAgent:     get("AMF_PRIMARY_AGENT", defaultPrimaryAgent),
+		SecondaryAgent:   get("AMF_SECONDARY_AGENT", defaultSecondaryAgent),
+		Trusted:          parseTrusted(get("AMF_TRUSTED", "")),
+		AgentTimeout:     get("AMF_AGENT_TIMEOUT", ""),
+		AgentIdleTimeout: get("AMF_AGENT_IDLE_TIMEOUT", ""),
+		LogLevel:         get("AMF_LOG_LEVEL", ""),
+		StaleTimeout:     get("AMF_STALE_TIMEOUT", ""),
+		EnvPaths:         paths,
+		EnvFile:          envFile,
+		seen:             seen,
 	}
 	cfg.Token, cfg.TokenSource = resolveToken(get, seen, envFile, authHost(cfg.APIURL))
 	if cfg.Token == "" {
@@ -178,6 +184,25 @@ func parseAgentTimeout(v string) (time.Duration, error) {
 	}
 	if err := validateAgentTimeout(d, "AMF_AGENT_TIMEOUT"); err != nil {
 		return 0, err
+	}
+	return d, nil
+}
+
+// parseAgentIdleTimeout reads AMF_AGENT_IDLE_TIMEOUT. An empty value means
+// the default; "off" disables the idle timeout.
+func parseAgentIdleTimeout(v string) (time.Duration, error) {
+	switch v {
+	case "":
+		return defaultAgentIdleTimeout, nil
+	case "off":
+		return 0, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return 0, fmt.Errorf("AMF_AGENT_IDLE_TIMEOUT=%q: not a duration (use e.g. 15m, or off)", v)
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("AMF_AGENT_IDLE_TIMEOUT: the idle timeout must be positive, got %s (use off to disable it)", d)
 	}
 	return d, nil
 }
@@ -242,7 +267,7 @@ func parseDotEnv(r io.Reader) (map[string]string, error) {
 
 // shownConfig are the variables whose values config.load may log; every
 // other one is logged only as set or unset.
-var shownConfig = []string{"GITHUB_REPO", "AMF_API_URL", "OPENCODE_MODEL", "AMF_AGENT_TIMEOUT", "AMF_STALE_TIMEOUT", "AMF_LOG_LEVEL", "AMF_CLAUDE", "AMF_CODEX", "AMF_OPENCODE", "AMF_PRIMARY_AGENT", "AMF_SECONDARY_AGENT"}
+var shownConfig = []string{"GITHUB_REPO", "AMF_API_URL", "OPENCODE_MODEL", "AMF_AGENT_TIMEOUT", "AMF_AGENT_IDLE_TIMEOUT", "AMF_STALE_TIMEOUT", "AMF_LOG_LEVEL", "AMF_CLAUDE", "AMF_CODEX", "AMF_OPENCODE", "AMF_PRIMARY_AGENT", "AMF_SECONDARY_AGENT"}
 
 // configAttrs is, for config.load, each variable loadConfig read with where
 // it came from and its value, or set or unset for those not in shownConfig.

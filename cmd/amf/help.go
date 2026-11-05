@@ -256,6 +256,9 @@ Placeholders ending in ..., and owner/name, count as unset.
   AMF_AGENT_TIMEOUT (default: 60m)
     How long each agent run may take, as a Go duration; --agent-timeout (or its deprecated
     alias --timeout) overrides it. Must be at least 1m and at most 24h
+  AMF_AGENT_IDLE_TIMEOUT (default: 15m)
+    How long an agent may produce no output on stdout or stderr before amf stops it
+    and fails the run, as a Go duration; off disables it
   AMF_STALE_TIMEOUT (default: max(2x agent timeout, 2h))
     How long watch lets an issue stay amf:in-progress with no amf working on it
     before putting it back to amf:ready; off disables it. --stale-timeout overrides it
