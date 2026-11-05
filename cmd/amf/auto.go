@@ -605,6 +605,46 @@ func summarizeCheckRuns(runs []checkRun) string {
 	return fmt.Sprintf("%d %s: %s", len(runs), plural(len(runs), "check", "checks"), strings.Join(parts, ", "))
 }
 
+type autoFlags struct {
+	timeout         *time.Duration
+	alias           *time.Duration
+	evalRounds      *int
+	agent           *string
+	maxIssues       *int
+	merge           *mergeFlag
+	cont            *bool
+	noCheckpoint    *bool
+	checkpointAfter *int
+	approve         *bool
+	waitForChecks   *bool
+	abort           *bool
+	closeIssues     *bool
+	dryRun          *bool
+	log             *logOptions
+	memory          *memoryOptions
+}
+
+func addAutoFlags(fs *flag.FlagSet) autoFlags {
+	var f autoFlags
+	f.timeout, f.alias = addTimeoutFlags(fs)
+	f.evalRounds = fs.Int("eval-rounds", 2, "how many times a pipeline's eval stage may send the change back to code")
+	f.agent = fs.String("agent", "", agentFlagHelp)
+	f.maxIssues = fs.Int("max-issues", defaultAutoMaxIssues, "plan at most this many issues (1 to 10)")
+	f.merge = &mergeFlag{value: "merge"}
+	fs.Var(f.merge, "merge", "how to merge each PR: a merge commit, or a method after = or as the next word: --merge=squash, -m squash, -m rebase")
+	f.cont = fs.Bool("continue", false, "approve the checkpoint and resume the saved amf auto run")
+	f.noCheckpoint = fs.Bool("no-checkpoint", false, "merge all issues without a checkpoint or approval")
+	f.checkpointAfter = fs.Int("checkpoint-after", 1, "checkpoint after this many merges (must be positive)")
+	f.approve = fs.Bool("approve", false, "approve the checkpoint without prompting")
+	f.waitForChecks = fs.Bool("wait-for-checks", false, "wait up to 5 minutes for completed checks before the checkpoint")
+	f.abort = fs.Bool("abort", false, "abandon the saved run by removing its state")
+	f.closeIssues = fs.Bool("close-issues", false, "with --abort, close the created, unmerged issues first")
+	f.dryRun = fs.Bool("dry-run", false, "plan only: print the issues amf would create, and create nothing")
+	f.log = addLogFlags(fs)
+	f.memory = addMemoryFlags(fs)
+	return f
+}
+
 func cmdAuto(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	status := len(args) > 0 && args[0] == "status"
 	if status {
@@ -613,30 +653,15 @@ func cmdAuto(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	fs := flag.NewFlagSet("auto", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	withHelp(fs, stderr, "auto")
-	at, alias := addTimeoutFlags(fs)
-	evalRounds := fs.Int("eval-rounds", 2, "how many times a pipeline's eval stage may send the change back to code")
-	agent := fs.String("agent", "", agentFlagHelp)
-	maxIssues := fs.Int("max-issues", defaultAutoMaxIssues, "plan at most this many issues (1 to 10)")
-	merge := &mergeFlag{value: "merge"}
-	fs.Var(merge, "merge", "how to merge each PR: a merge commit, or a method after = or as the next word: --merge=squash, -m squash, -m rebase")
-	cont := fs.Bool("continue", false, "approve the checkpoint and resume the saved amf auto run")
-	noCheckpoint := fs.Bool("no-checkpoint", false, "merge all issues without a checkpoint or approval")
-	checkpointAfter := fs.Int("checkpoint-after", 1, "checkpoint after this many merges (must be positive)")
-	approve := fs.Bool("approve", false, "approve the checkpoint without prompting")
-	waitForChecks := fs.Bool("wait-for-checks", false, "wait up to 5 minutes for completed checks before the checkpoint")
-	abort := fs.Bool("abort", false, "abandon the saved run by removing its state")
-	closeIssues := fs.Bool("close-issues", false, "with --abort, close the created, unmerged issues first")
-	dryRun := fs.Bool("dry-run", false, "plan only: print the issues amf would create, and create nothing")
-	lo := addLogFlags(fs)
-	mo := addMemoryFlags(fs)
+	f := addAutoFlags(fs)
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return errUsage
 	}
-	if *closeIssues && !*abort {
+	if *f.closeIssues && !*f.abort {
 		return errors.New("--close-issues requires --abort")
 	}
-	if status || *abort {
+	if status || *f.abort {
 		mode := "status"
 		if !status {
 			mode = "--abort"
@@ -653,28 +678,28 @@ func cmdAuto(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 		if err != nil {
 			return err
 		}
-		return cmdAutoState(ctx, status, *closeIssues, stdout)
+		return cmdAutoState(ctx, status, *f.closeIssues, stdout)
 	}
-	if err := merge.check(pos); err != nil {
+	if err := f.merge.check(pos); err != nil {
 		return err
 	}
-	if merge.value == "" {
+	if f.merge.value == "" {
 		return errors.New("amf auto always merges: use --merge, --merge=squash or --merge=rebase")
 	}
 	sentence := strings.Join(strings.Fields(strings.Join(pos, " ")), " ")
 	switch {
-	case *cont && sentence != "":
+	case *f.cont && sentence != "":
 		return errors.New("--continue resumes the saved run; it takes no sentence")
-	case *cont && *dryRun:
+	case *f.cont && *f.dryRun:
 		return errors.New("--continue and --dry-run can't be used together")
-	case !*cont && sentence == "":
+	case !*f.cont && sentence == "":
 		fmt.Fprintln(stderr, `usage: amf auto "<one simple sentence>" [flags] | amf auto --continue | amf auto status | amf auto --abort [--close-issues] (amf auto --help lists the flags)`)
 		return errUsage
 	}
-	if *maxIssues < 1 || *maxIssues > 10 {
+	if *f.maxIssues < 1 || *f.maxIssues > 10 {
 		return errors.New("--max-issues must be between 1 and 10")
 	}
-	if *checkpointAfter < 1 {
+	if *f.checkpointAfter < 1 {
 		return errors.New("--checkpoint-after must be at least 1")
 	}
 	// Zero means preserve the saved threshold when continuing.
@@ -684,20 +709,20 @@ func cmdAuto(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 			checkpointSet = true
 		}
 	})
-	if *cont && !checkpointSet {
-		*checkpointAfter = 0
+	if *f.cont && !checkpointSet {
+		*f.checkpointAfter = 0
 	}
-	timeout, err := timeoutFlag(fs, at, alias)
+	timeout, err := timeoutFlag(fs, f.timeout, f.alias)
 	if err != nil {
 		return err
 	}
-	if err := lo.check(); err != nil {
+	if err := f.log.check(); err != nil {
 		return err
 	}
-	if err := mo.check(); err != nil {
+	if err := f.memory.check(); err != nil {
 		return err
 	}
-	r, err := newRunner(ctx, timeout, *evalRounds, *agent, *lo, stderr)
+	r, err := newRunner(ctx, timeout, *f.evalRounds, *f.agent, *f.log, stderr)
 	if err != nil {
 		return err
 	}
@@ -708,12 +733,12 @@ func cmdAuto(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 		return err
 	}
 	r.Command = "auto"
-	if !*dryRun {
-		r.openMemory(*mo)
+	if !*f.dryRun {
+		r.openMemory(*f.memory)
 	}
 	err = redactErr(r.Redact, r.Auto(ctx, sentence, autoOptions{
-		Continue: *cont, DryRun: *dryRun, MaxIssues: *maxIssues, Merge: merge.value,
-		NoCheckpoint: *noCheckpoint, CheckpointAfter: *checkpointAfter, Approve: *approve, WaitForChecks: *waitForChecks,
+		Continue: *f.cont, DryRun: *f.dryRun, MaxIssues: *f.maxIssues, Merge: f.merge.value,
+		NoCheckpoint: *f.noCheckpoint, CheckpointAfter: *f.checkpointAfter, Approve: *f.approve, WaitForChecks: *f.waitForChecks,
 	}, terminalApprover(stdin, stdout), stdout))
 	r.DB.logError(err)
 	return err

@@ -19,16 +19,30 @@ type listedIssue struct {
 	Labels []string `json:"labels"`
 }
 
+type listFlags struct {
+	state  *string
+	label  *string
+	search *string
+	limit  *int
+	asJSON *bool
+}
+
+func addListFlags(fs *flag.FlagSet) listFlags {
+	return listFlags{
+		state:  fs.String("state", "open", "open, closed or all"),
+		label:  fs.String("label", "", "only issues with this label, e.g. amf:ready"),
+		search: fs.String("search", "", "only issues whose title contains this text, ignoring case"),
+		limit:  fs.Int("limit", 0, "print at most N issues, 0 means no limit"),
+		asJSON: fs.Bool("json", false, "print a JSON array of number, title, state, url and labels"),
+	}
+}
+
 // cmdList prints the repository's issues, newest first, with their amf labels.
 func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("list", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	withHelp(fs, stderr, "list")
-	state := fs.String("state", "open", "open, closed or all")
-	label := fs.String("label", "", "only issues with this label, e.g. amf:ready")
-	search := fs.String("search", "", "only issues whose title contains this text, ignoring case")
-	limit := fs.Int("limit", 0, "print at most N issues, 0 means no limit")
-	asJSON := fs.Bool("json", false, "print a JSON array of number, title, state, url and labels")
+	f := addListFlags(fs)
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		if err == flag.ErrHelp {
@@ -40,17 +54,17 @@ func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		fmt.Fprintln(stderr, "usage: amf issue list [--state open|closed|all] [--label name] [--search text] [--limit n] [--json]")
 		return errUsage
 	}
-	if *limit < 0 {
-		return fmt.Errorf("--limit must be 0 or more, got %d", *limit)
+	if *f.limit < 0 {
+		return fmt.Errorf("--limit must be 0 or more, got %d", *f.limit)
 	}
-	*state = strings.ToLower(strings.TrimSpace(*state))
-	switch *state {
+	*f.state = strings.ToLower(strings.TrimSpace(*f.state))
+	switch *f.state {
 	case "open", "closed", "all":
 	default:
-		return fmt.Errorf("--state must be open, closed or all, got %q", *state)
+		return fmt.Errorf("--state must be open, closed or all, got %q", *f.state)
 	}
-	*label = strings.TrimSpace(*label)
-	*search = strings.TrimSpace(*search)
+	*f.label = strings.TrimSpace(*f.label)
+	*f.search = strings.TrimSpace(*f.search)
 
 	cfg, err := loadConfig(envPaths(ctx)...)
 	if err != nil {
@@ -60,12 +74,12 @@ func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	if err := checkRepo(ctx, gh, cfg.Repo); err != nil {
 		return err
 	}
-	issues, err := gh.ListIssues(ctx, *state, *label, false)
+	issues, err := gh.ListIssues(ctx, *f.state, *f.label, false)
 	if err != nil {
 		return err
 	}
-	if *search != "" {
-		needle := strings.ToLower(*search)
+	if *f.search != "" {
+		needle := strings.ToLower(*f.search)
 		kept := issues[:0]
 		for _, is := range issues {
 			if strings.Contains(strings.ToLower(is.Title), needle) {
@@ -75,11 +89,11 @@ func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error
 		issues = kept
 	}
 	matched := len(issues)
-	if *limit > 0 && len(issues) > *limit {
-		issues = issues[:*limit]
+	if *f.limit > 0 && len(issues) > *f.limit {
+		issues = issues[:*f.limit]
 	}
 
-	if *asJSON {
+	if *f.asJSON {
 		out := make([]listedIssue, 0, len(issues))
 		for _, is := range issues {
 			labels := make([]string, 0, len(is.Labels))
@@ -94,29 +108,29 @@ func cmdList(ctx context.Context, args []string, stdout, stderr io.Writer) error
 	}
 
 	if len(issues) == 0 {
-		which := *state + " issues"
-		if *state == "all" {
+		which := *f.state + " issues"
+		if *f.state == "all" {
 			which = "issues"
 		}
-		if *label != "" {
-			which += " labeled " + *label
+		if *f.label != "" {
+			which += " labeled " + *f.label
 		}
-		if *search != "" {
-			which += fmt.Sprintf(" with %q in the title", *search)
+		if *f.search != "" {
+			which += fmt.Sprintf(" with %q in the title", *f.search)
 		}
 		_, err := fmt.Fprintf(stdout, "No %s in %s.\n", which, cfg.Repo)
 		return err
 	}
 
 	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
-	if *state == "all" {
+	if *f.state == "all" {
 		fmt.Fprintln(tw, "ISSUE\tSTATE\tAMF\tTITLE")
 	} else {
 		fmt.Fprintln(tw, "ISSUE\tAMF\tTITLE")
 	}
 	for _, is := range issues {
 		title := strings.ReplaceAll(is.Title, "\t", " ")
-		if *state == "all" {
+		if *f.state == "all" {
 			fmt.Fprintf(tw, "#%d\t%s\t%s\t%s\n", is.Number, is.State, amfLabelNames(is), title)
 		} else {
 			fmt.Fprintf(tw, "#%d\t%s\t%s\n", is.Number, amfLabelNames(is), title)

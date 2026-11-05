@@ -36,9 +36,10 @@ func TestCompletionUsage(t *testing.T) {
 	}
 }
 
-// Keep the hand-written completion table aligned with actual command help,
-// including global flags, flag arity and short forms, as commands acquire
-// new flags.
+// Keep completion aligned with actual command help, including global flags,
+// flag arity and short forms, as commands acquire new flags. Completion now
+// builds each case from the command's own FlagSet, and this asserts it still
+// matches what help prints for every command.
 func TestCompletionFlagsMatchHelp(t *testing.T) {
 	options := completionOptions()
 	for _, cmd := range helpCommands {

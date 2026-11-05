@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -42,11 +43,15 @@ func (d *doctor) line(status, check, format string, a ...any) {
 	fmt.Fprintf(d.w, "%s\t%s\t%s\n", status, check, fmt.Sprintf(format, a...))
 }
 
+func addDoctorFlags(fs *flag.FlagSet) *bool {
+	return fs.Bool("fix-labels", false, "relabel issues whose amf status label disagrees with their pull requests")
+}
+
 // cmdDoctor checks everything amf needs to run here, without changing
 // anything: no clone, no labels, no push.
 func cmdDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := newCommandFlags("doctor", stderr)
-	fixLabels := fs.Bool("fix-labels", false, "relabel issues whose amf status label disagrees with their pull requests")
+	fixLabels := addDoctorFlags(fs)
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return errUsage

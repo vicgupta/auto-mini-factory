@@ -95,12 +95,25 @@ type listedPR struct {
 	Issue  *int   `json:"issue"`
 }
 
+type prListFlags struct {
+	state  *string
+	limit  *int
+	issue  *int
+	asJSON *bool
+}
+
+func addPRListFlags(fs *flag.FlagSet) prListFlags {
+	return prListFlags{
+		state:  fs.String("state", "open", "open, closed, merged or all"),
+		limit:  fs.Int("limit", 0, "print at most N pull requests, 0 means no limit"),
+		issue:  fs.Int("issue", 0, "only pull requests opened for issue N, 0 means no filter"),
+		asJSON: fs.Bool("json", false, "print a JSON array of number, title, state, draft, url, head, base and issue"),
+	}
+}
+
 func cmdPRList(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := newCommandFlags("pr list", stderr)
-	state := fs.String("state", "open", "open, closed, merged or all")
-	limit := fs.Int("limit", 0, "print at most N pull requests, 0 means no limit")
-	issue := fs.Int("issue", 0, "only pull requests opened for issue N, 0 means no filter")
-	asJSON := fs.Bool("json", false, "print a JSON array of number, title, state, draft, url, head, base and issue")
+	f := addPRListFlags(fs)
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return errUsage
@@ -109,17 +122,17 @@ func cmdPRList(ctx context.Context, args []string, stdout, stderr io.Writer) err
 		fmt.Fprintln(stderr, "usage: amf pr list [--state open|closed|merged|all] [--limit N] [--issue N] [--json]")
 		return errUsage
 	}
-	if *limit < 0 {
-		return fmt.Errorf("--limit must be 0 or more, got %d", *limit)
+	if *f.limit < 0 {
+		return fmt.Errorf("--limit must be 0 or more, got %d", *f.limit)
 	}
-	if *issue < 0 {
-		return fmt.Errorf("--issue must be 0 or more, got %d", *issue)
+	if *f.issue < 0 {
+		return fmt.Errorf("--issue must be 0 or more, got %d", *f.issue)
 	}
-	*state = strings.TrimSpace(*state)
-	switch *state {
+	*f.state = strings.TrimSpace(*f.state)
+	switch *f.state {
 	case "open", "closed", "merged", "all":
 	default:
-		return fmt.Errorf("--state must be open, closed, merged or all, got %q", *state)
+		return fmt.Errorf("--state must be open, closed, merged or all, got %q", *f.state)
 	}
 	cfg, err := loadConfig(envPaths(ctx)...)
 	if err != nil {
@@ -129,7 +142,7 @@ func cmdPRList(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	if err := checkRepo(ctx, gh, cfg.Repo); err != nil {
 		return err
 	}
-	prs, err := gh.ListPRs(ctx, *state)
+	prs, err := gh.ListPRs(ctx, *f.state)
 	if err != nil {
 		return err
 	}
@@ -145,31 +158,31 @@ func cmdPRList(ctx context.Context, args []string, stdout, stderr io.Writer) err
 		}
 		out = append(out, row)
 	}
-	if *issue != 0 {
+	if *f.issue != 0 {
 		kept := out[:0]
 		for _, row := range out {
-			if row.Issue != nil && *row.Issue == *issue {
+			if row.Issue != nil && *row.Issue == *f.issue {
 				kept = append(kept, row)
 			}
 		}
 		out = kept
 	}
 	matched := len(out)
-	if *limit > 0 && len(out) > *limit {
-		out = out[:*limit]
+	if *f.limit > 0 && len(out) > *f.limit {
+		out = out[:*f.limit]
 	}
-	if *asJSON {
+	if *f.asJSON {
 		enc := json.NewEncoder(stdout)
 		enc.SetEscapeHTML(false)
 		return enc.Encode(out)
 	}
 	if len(out) == 0 {
-		which := *state + " pull requests"
-		if *state == "all" {
+		which := *f.state + " pull requests"
+		if *f.state == "all" {
 			which = "pull requests"
 		}
-		if *issue != 0 {
-			_, err := fmt.Fprintf(stdout, "No %s for issue #%d in %s.\n", which, *issue, cfg.Repo)
+		if *f.issue != 0 {
+			_, err := fmt.Fprintf(stdout, "No %s for issue #%d in %s.\n", which, *f.issue, cfg.Repo)
 			return err
 		}
 		_, err := fmt.Fprintf(stdout, "No %s in %s.\n", which, cfg.Repo)
@@ -193,18 +206,32 @@ func cmdPRList(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	return nil
 }
 
+type prMergeFlags struct {
+	squash       *bool
+	rebase       *bool
+	deleteBranch *bool
+	update       *bool
+	waitChecks   *bool
+}
+
+func addPRMergeFlags(fs *flag.FlagSet) prMergeFlags {
+	return prMergeFlags{
+		squash:       fs.Bool("squash", false, "squash and merge"),
+		rebase:       fs.Bool("rebase", false, "rebase and merge"),
+		deleteBranch: fs.Bool("delete-branch", false, "delete the head branch after merging, if it is in this repository"),
+		update:       fs.Bool("update-branch", false, "first merge the base branch into the head if it is behind"),
+		waitChecks:   fs.Bool("wait-for-checks", false, "wait for the head's checks to pass before merging (up to 30 minutes)"),
+	}
+}
+
 func cmdPRMerge(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := newCommandFlags("pr merge", stderr)
-	squash := fs.Bool("squash", false, "squash and merge")
-	rebase := fs.Bool("rebase", false, "rebase and merge")
-	deleteBranch := fs.Bool("delete-branch", false, "delete the head branch after merging, if it is in this repository")
-	update := fs.Bool("update-branch", false, "first merge the base branch into the head if it is behind")
-	waitChecks := fs.Bool("wait-for-checks", false, "wait for the head's checks to pass before merging (up to 30 minutes)")
+	f := addPRMergeFlags(fs)
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return errUsage
 	}
-	if *squash && *rebase {
+	if *f.squash && *f.rebase {
 		return errors.New("--squash and --rebase can't be used together")
 	}
 	if len(pos) != 1 {
@@ -216,10 +243,10 @@ func cmdPRMerge(ctx context.Context, args []string, stdout, stderr io.Writer) er
 		return err
 	}
 	method := "merge"
-	if *squash {
+	if *f.squash {
 		method = "squash"
 	}
-	if *rebase {
+	if *f.rebase {
 		method = "rebase"
 	}
 	cfg, err := loadConfig(envPaths(ctx)...)
@@ -245,12 +272,12 @@ func cmdPRMerge(ctx context.Context, args []string, stdout, stderr io.Writer) er
 	if pr.Head.SHA == "" {
 		return fmt.Errorf("github did not report a head SHA for #%d", n)
 	}
-	if *update {
+	if *f.update {
 		if pr, err = updatePRBranch(ctx, gh, n, pr, stdout); err != nil {
 			return err
 		}
 	}
-	if *waitChecks {
+	if *f.waitChecks {
 		if err := waitPRChecks(ctx, gh, n, pr.Head.SHA, stdout); err != nil {
 			return err
 		}
@@ -261,7 +288,7 @@ func cmdPRMerge(ctx context.Context, args []string, stdout, stderr io.Writer) er
 	verb := mergedVerb[method]
 	fmt.Fprintf(stdout, "%s%s #%d %s\n", strings.ToUpper(verb[:1]), verb[1:], n, pr.HTMLURL)
 	markMergedIssue(ctx, gh, cfg.Repo, pr, stdout, stderr)
-	if *deleteBranch {
+	if *f.deleteBranch {
 		if pr.Head.Repo == nil || !strings.EqualFold(pr.Head.Repo.FullName, cfg.Repo) {
 			fmt.Fprintf(stderr, "Skipping branch deletion for #%d: head repository is a fork or is unavailable.\n", n)
 			return nil
@@ -445,9 +472,13 @@ func textBehind(st prStatus, base string) string {
 	}
 }
 
+func addPRViewFlags(fs *flag.FlagSet) *bool {
+	return fs.Bool("json", false, "print one JSON object")
+}
+
 func cmdPRView(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := newCommandFlags("pr view", stderr)
-	asJSON := fs.Bool("json", false, "print one JSON object")
+	asJSON := addPRViewFlags(fs)
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return errUsage
@@ -559,9 +590,13 @@ func cmdPRView(ctx context.Context, args []string, stdout, stderr io.Writer) err
 
 // cmdPRDiff prints a pull request's unified diff, or one changed path per
 // line with --name-only.
+func addPRDiffFlags(fs *flag.FlagSet) *bool {
+	return fs.Bool("name-only", false, "print one changed path per line instead of the diff")
+}
+
 func cmdPRDiff(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := newCommandFlags("pr diff", stderr)
-	nameOnly := fs.Bool("name-only", false, "print one changed path per line instead of the diff")
+	nameOnly := addPRDiffFlags(fs)
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return errUsage
@@ -605,10 +640,21 @@ func cmdPRDiff(ctx context.Context, args []string, stdout, stderr io.Writer) err
 
 // cmdPRComment posts a comment on pull request n. The body comes from
 // --body or --file, and --file - reads stdin.
+type prCommentFlags struct {
+	body *string
+	file *string
+}
+
+func addPRCommentFlags(fs *flag.FlagSet) prCommentFlags {
+	return prCommentFlags{
+		body: fs.String("body", "", "`text` of the comment"),
+		file: fs.String("file", "", "read the comment from the file at `path` (- for stdin)"),
+	}
+}
+
 func cmdPRComment(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	fs := newCommandFlags("pr comment", stderr)
-	body := fs.String("body", "", "`text` of the comment")
-	file := fs.String("file", "", "read the comment from the file at `path` (- for stdin)")
+	f := addPRCommentFlags(fs)
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return errUsage
@@ -636,13 +682,13 @@ func cmdPRComment(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	if !bodySet && !fileSet {
 		return errors.New("use --body or --file")
 	}
-	text := *body
+	text := *f.body
 	switch {
-	case *file == "-":
+	case *f.file == "-":
 		text, err = readAll(stdin)
-	case *file != "":
+	case *f.file != "":
 		var b []byte
-		b, err = os.ReadFile(*file)
+		b, err = os.ReadFile(*f.file)
 		text = string(b)
 	}
 	if err != nil {
@@ -722,12 +768,23 @@ func textMergeable(pr prViewResponse) string {
 	}
 }
 
+type prCloseFlags struct {
+	comment      *string
+	deleteBranch *bool
+}
+
+func addPRCloseFlags(fs *flag.FlagSet) prCloseFlags {
+	return prCloseFlags{
+		comment:      fs.String("comment", "", "post a comment on the pull request before closing"),
+		deleteBranch: fs.Bool("delete-branch", false, "delete the head branch after closing, if it is in this repository"),
+	}
+}
+
 // cmdPRClose closes pull request n, optionally commenting first and deleting
 // its head branch after. It never touches the linked issue's labels.
 func cmdPRClose(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := newCommandFlags("pr close", stderr)
-	comment := fs.String("comment", "", "post a comment on the pull request before closing")
-	deleteBranch := fs.Bool("delete-branch", false, "delete the head branch after closing, if it is in this repository")
+	f := addPRCloseFlags(fs)
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return errUsage
@@ -759,8 +816,8 @@ func cmdPRClose(ctx context.Context, args []string, stdout, stderr io.Writer) er
 		fmt.Fprintf(stdout, "#%d is already closed\n", n)
 		return nil
 	}
-	if *comment != "" {
-		if err := gh.Comment(ctx, n, configRedactor(cfg).Redact(*comment)); err != nil {
+	if *f.comment != "" {
+		if err := gh.Comment(ctx, n, configRedactor(cfg).Redact(*f.comment)); err != nil {
 			return err
 		}
 	}
@@ -768,7 +825,7 @@ func cmdPRClose(ctx context.Context, args []string, stdout, stderr io.Writer) er
 		return err
 	}
 	fmt.Fprintf(stdout, "Closed #%d %s\n", n, pr.HTMLURL)
-	if *deleteBranch {
+	if *f.deleteBranch {
 		if pr.Head.Repo == nil || !strings.EqualFold(pr.Head.Repo.FullName, cfg.Repo) {
 			fmt.Fprintf(stderr, "Skipping branch deletion for #%d: head repository is a fork or is unavailable.\n", n)
 			return nil

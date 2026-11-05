@@ -23,17 +23,30 @@ func (s *stringList) Set(v string) error {
 	return nil
 }
 
+type issueLabelFlags struct {
+	state     *string
+	label     *string
+	unlabeled *bool
+	add       stringList
+	remove    stringList
+}
+
+func addIssueLabelFlags(fs *flag.FlagSet, command string) *issueLabelFlags {
+	f := &issueLabelFlags{}
+	f.state = fs.String("state", "open", "select issues by state: open, closed or all (bulk mode)")
+	f.label = fs.String("label", "", "select issues with this label (bulk mode)")
+	f.unlabeled = fs.Bool("unlabeled", false, "select only issues with no labels (bulk mode)")
+	if command == "label" {
+		fs.Var(&f.add, "add", "add this label (repeatable, or comma-separated)")
+		fs.Var(&f.remove, "remove", "remove this label (repeatable, or comma-separated)")
+	}
+	return f
+}
+
 // cmdIssueLabel adds and removes labels on one issue or a filtered set.
 func cmdIssueLabel(ctx context.Context, command string, args []string, stdout, stderr io.Writer) error {
 	fs := newCommandFlags("issue "+command, stderr)
-	state := fs.String("state", "open", "select issues by state: open, closed or all (bulk mode)")
-	label := fs.String("label", "", "select issues with this label (bulk mode)")
-	unlabeled := fs.Bool("unlabeled", false, "select only issues with no labels (bulk mode)")
-	var add, remove stringList
-	if command == "label" {
-		fs.Var(&add, "add", "add this label (repeatable, or comma-separated)")
-		fs.Var(&remove, "remove", "remove this label (repeatable, or comma-separated)")
-	}
+	f := addIssueLabelFlags(fs, command)
 	// Keep every label after -- positional; parseArgs otherwise reparses
 	// later names as flags. Skip flag values when looking for the separator.
 	args = expandShortFlags(fs, args)
@@ -55,7 +68,7 @@ func cmdIssueLabel(ctx context.Context, command string, args []string, stdout, s
 		return errUsage
 	}
 	pos = append(pos, tail...)
-	bulk := *unlabeled
+	bulk := *f.unlabeled
 	labelSet := false
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "state" || f.Name == "label" {
@@ -65,17 +78,17 @@ func cmdIssueLabel(ctx context.Context, command string, args []string, stdout, s
 			labelSet = true
 		}
 	})
-	*state = strings.ToLower(strings.TrimSpace(*state))
-	switch *state {
+	*f.state = strings.ToLower(strings.TrimSpace(*f.state))
+	switch *f.state {
 	case "open", "closed", "all":
 	default:
-		return fmt.Errorf("--state must be open, closed or all, got %q", *state)
+		return fmt.Errorf("--state must be open, closed or all, got %q", *f.state)
 	}
-	*label = strings.TrimSpace(*label)
-	if labelSet && *label == "" {
+	*f.label = strings.TrimSpace(*f.label)
+	if labelSet && *f.label == "" {
 		return fmt.Errorf("--label can't be empty")
 	}
-	if *unlabeled && *label != "" {
+	if *f.unlabeled && *f.label != "" {
 		return fmt.Errorf("use --label or --unlabeled, not both")
 	}
 	var n int
@@ -96,22 +109,22 @@ func cmdIssueLabel(ctx context.Context, command string, args []string, stdout, s
 	}
 	for _, l := range pos {
 		if command == "unlabel" {
-			_ = remove.Set(l)
+			_ = f.remove.Set(l)
 		} else {
-			_ = add.Set(l)
+			_ = f.add.Set(l)
 		}
 	}
-	if len(add)+len(remove) == 0 {
+	if len(f.add)+len(f.remove) == 0 {
 		fs.Usage()
 		return errUsage
 	}
-	for _, l := range add {
-		if slices.Contains(remove, l) {
+	for _, l := range f.add {
+		if slices.Contains(f.remove, l) {
 			return fmt.Errorf("%s is both added and removed", l)
 		}
 	}
 	var statuses []string
-	for _, l := range add {
+	for _, l := range f.add {
 		if slices.Contains(statusLabels, l) && !slices.Contains(statuses, l) {
 			statuses = append(statuses, l)
 		}
@@ -129,11 +142,11 @@ func cmdIssueLabel(ctx context.Context, command string, args []string, stdout, s
 	}
 	var issues []Issue
 	if bulk {
-		issues, err = gh.ListIssues(ctx, *state, *label, false)
+		issues, err = gh.ListIssues(ctx, *f.state, *f.label, false)
 		if err != nil {
 			return err
 		}
-		if *unlabeled {
+		if *f.unlabeled {
 			issues = slices.DeleteFunc(issues, func(is Issue) bool { return len(is.Labels) != 0 })
 		}
 		if len(issues) == 0 {
@@ -151,7 +164,7 @@ func cmdIssueLabel(ctx context.Context, command string, args []string, stdout, s
 		issues = []Issue{is}
 	}
 	for _, is := range issues {
-		if err := updateIssueLabels(ctx, gh, is, add, remove, statuses, stdout); err != nil {
+		if err := updateIssueLabels(ctx, gh, is, f.add, f.remove, statuses, stdout); err != nil {
 			return fmt.Errorf("#%d: %w", is.Number, err)
 		}
 	}

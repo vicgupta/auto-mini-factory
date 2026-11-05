@@ -28,13 +28,24 @@ import (
 // environment only, overrides it, for a mirror or tests.
 const releasesURL = "https://github.com/vicgupta/auto-mini-factory"
 
+type updateFlags struct {
+	target *string
+	check  *bool
+}
+
+func addUpdateFlags(fs *flag.FlagSet) updateFlags {
+	return updateFlags{
+		target: fs.String("version", "", "release to install, e.g. v0.0.7 (default: latest)"),
+		check:  fs.Bool("check", false, "only report whether an update is available"),
+	}
+}
+
 // cmdUpdate replaces the running amf binary with a release from GitHub.
 func cmdUpdate(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("update", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	withHelp(fs, stderr, "update")
-	target := fs.String("version", "", "release to install, e.g. v0.0.7 (default: latest)")
-	check := fs.Bool("check", false, "only report whether an update is available")
+	f := addUpdateFlags(fs)
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return errUsage
@@ -43,7 +54,7 @@ func cmdUpdate(ctx context.Context, args []string, stdout, stderr io.Writer) err
 		fmt.Fprintln(stderr, "usage: amf update [--version vX.Y.Z] [--check]")
 		return errUsage
 	}
-	*target = strings.TrimSpace(*target)
+	*f.target = strings.TrimSpace(*f.target)
 	exe, err := os.Executable()
 	if err != nil {
 		return err
@@ -56,7 +67,7 @@ func cmdUpdate(ctx context.Context, args []string, stdout, stderr io.Writer) err
 		base = strings.TrimSuffix(v, "/")
 	}
 	u := &updater{base: base, current: buildVersion(), exe: exe, out: stdout, goos: runtime.GOOS, goarch: runtime.GOARCH}
-	return u.run(ctx, *target, *check)
+	return u.run(ctx, *f.target, *f.check)
 }
 
 type updater struct {

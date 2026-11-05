@@ -14,13 +14,17 @@ import (
 	"text/tabwriter"
 )
 
+func addPipelineFlags(fs *flag.FlagSet) *bool {
+	return fs.Bool("fetch", false, "also download and check each stage's skill")
+}
+
 // cmdPipeline checks the pipeline in the enclosing checkout's AGENTS.md,
 // as it is on disk, so a change can be tested before it's merged.
 func cmdPipeline(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("pipeline", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	withHelp(fs, stderr, "pipeline")
-	fetch := fs.Bool("fetch", false, "also download and check each stage's skill")
+	fetch := addPipelineFlags(fs)
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return errUsage
