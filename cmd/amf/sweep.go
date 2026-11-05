@@ -265,23 +265,45 @@ func cmdPRSweep(ctx context.Context, args []string, stdout, stderr io.Writer) er
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
-		return enc.Encode(res)
+		if err := enc.Encode(res); err != nil {
+			return err
+		}
+	} else if len(res) == 0 {
+		if _, err := fmt.Fprintln(stdout, "No open amf pull requests to sweep."); err != nil {
+			return err
+		}
+	} else {
+		for _, r := range res {
+			line := fmt.Sprintf("#%d (issue #%d) %s", r.Number, r.Issue, r.Action)
+			if r.Commit != "" {
+				line += " " + shortSHA(r.Commit)
+			}
+			if r.Reason != "" {
+				line += ": " + r.Reason
+			}
+			fmt.Fprintf(stdout, "%s %s\n", line, r.URL)
+		}
 	}
-	if len(res) == 0 {
-		_, err := fmt.Fprintln(stdout, "No open amf pull requests to sweep.")
-		return err
-	}
+	return sweepBlockedError(res)
+}
+
+// sweepBlockedError reports a sweep that could only block: at least one PR is
+// blocked and none was merged or updated. A dry run's would-merge and
+// would-update count as progress so --dry-run keeps the same exit status.
+func sweepBlockedError(res []sweptPR) error {
+	blocked := 0
 	for _, r := range res {
-		line := fmt.Sprintf("#%d (issue #%d) %s", r.Number, r.Issue, r.Action)
-		if r.Commit != "" {
-			line += " " + shortSHA(r.Commit)
+		switch r.Action {
+		case "blocked":
+			blocked++
+		case "merged", "updated", "would-merge", "would-update":
+			return nil
 		}
-		if r.Reason != "" {
-			line += ": " + r.Reason
-		}
-		fmt.Fprintf(stdout, "%s %s\n", line, r.URL)
 	}
-	return nil
+	if blocked == 0 {
+		return nil
+	}
+	return fmt.Errorf("%d %s blocked; no pull request was merged or updated", blocked, plural(blocked, "pull request is", "pull requests are"))
 }
 
 // addSweepMergeFlag is --merge for amf pr sweep: the same values as on run
