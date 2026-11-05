@@ -329,3 +329,82 @@ func TestDoctorLabelState(t *testing.T) {
 		t.Fatalf("after fix %s", out)
 	}
 }
+
+func TestDoctorLabelStateClosingPRs(t *testing.T) {
+	gh, srv := newFakeGitHub(t)
+	listJSONEnv(t, srv)
+	gh.prs = []map[string]string{
+		// A merged PR from another branch, closing its issue by keyword.
+		{"head": "fix/1-other-branch", "state": "merged", "body": "Closes #1"},
+		// A PR on an amf/issue-N branch whose body also closes another issue.
+		{"head": "amf/issue-2", "state": "merged", "body": "Fixes #3"},
+	}
+	gh.drafts = make([]bool, len(gh.prs))
+	for _, n := range []int{1, 2, 3} {
+		gh.issues[n] = &Issue{Number: n, State: "closed", Labels: []Label{{Name: labelDone}}}
+	}
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := newGitHub(cfg)
+	check := func(fix bool) string {
+		var b bytes.Buffer
+		d := &doctor{w: tabwriter.NewWriter(&b, 0, 0, 2, ' ', 0)}
+		d.checkLabelState(context.Background(), g, fix)
+		d.w.Flush()
+		return b.String()
+	}
+	for _, fix := range []bool{false, true} {
+		out := check(fix)
+		if !strings.HasPrefix(out, "ok") || !strings.Contains(out, "3 amf issues' labels") {
+			t.Errorf("fix=%t: closing PRs were flagged:\n%s", fix, out)
+		}
+	}
+	if len(gh.writes) != 0 {
+		t.Errorf("closing PRs were relabeled: %v", gh.writes)
+	}
+}
+
+func TestDoctorLabelStateTimelineCrossReference(t *testing.T) {
+	gh, srv := newFakeGitHub(t)
+	listJSONEnv(t, srv)
+	gh.prs = []map[string]string{{"head": "feature/1", "state": "merged"}}
+	gh.drafts = make([]bool, len(gh.prs))
+	cross := func(at string) map[string]any {
+		return map[string]any{"event": "cross-referenced", "source": map[string]any{"issue": map[string]any{
+			"state":        "closed",
+			"pull_request": map[string]any{"merged_at": at},
+		}}}
+	}
+	gh.timeline = map[int][]map[string]any{
+		// Issue 1 was closed when the first of its merged cross-references merged.
+		1: {cross("2026-01-01T00:00:00Z"), cross("2026-01-02T00:00:00Z")},
+		// Issue 2 was closed another time: neither merged cross-reference closed it.
+		2: {cross("2026-01-01T00:00:00Z"), cross("2026-01-02T00:00:00Z")},
+	}
+	gh.issues[1] = &Issue{Number: 1, State: "closed", ClosedAt: "2026-01-01T00:00:00Z", Labels: []Label{{Name: labelDone}}}
+	gh.issues[2] = &Issue{Number: 2, State: "closed", ClosedAt: "2026-03-01T00:00:00Z", Labels: []Label{{Name: labelFailed}}}
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := newGitHub(cfg)
+	check := func(fix bool) string {
+		var b bytes.Buffer
+		d := &doctor{w: tabwriter.NewWriter(&b, 0, 0, 2, ' ', 0)}
+		d.checkLabelState(context.Background(), g, fix)
+		d.w.Flush()
+		return b.String()
+	}
+	for _, fix := range []bool{false, true} {
+		if out := check(fix); !strings.HasPrefix(out, "ok") {
+			t.Errorf("fix=%t: timeline cross-reference was flagged:\n%s", fix, out)
+		}
+	}
+	if len(gh.writes) != 0 {
+		t.Errorf("timeline cross-reference was relabeled: %v", gh.writes)
+	}
+}

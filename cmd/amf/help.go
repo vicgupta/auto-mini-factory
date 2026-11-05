@@ -168,10 +168,12 @@ const doctorHelp = `Usage:
 Checks the setup here, one line per check, changing nothing.
 
 The label state check compares each issue labeled amf:done, amf:failed or
-amf:pr-open with the pull requests from its amf/issue-N branch, and warns
-about any that disagree: amf:done without a merged PR, amf:failed or
-amf:pr-open with a merged PR, amf:pr-open with no open PR, or two status
-labels. --fix-labels relabels them instead (the only change doctor makes).
+amf:pr-open with the pull requests that close it (from its amf/issue-N
+branch, a closing keyword in a PR body, or a timeline cross-reference at
+its close time), and warns about any that disagree: amf:done without a
+merged PR, amf:failed or amf:pr-open with a merged PR, amf:pr-open with no
+open PR, or two status labels. --fix-labels relabels them instead (the only
+change doctor makes).
 `
 
 const updateHelp = `Usage:
