@@ -5,6 +5,16 @@ coding agent (Claude Code, Codex or opencode, whichever you have), or with a
 plan → code → eval pipeline of them. For a solo developer or small team that wants coding agents without
 running a platform.
 
+## Output
+
+Command data (issue/PR numbers and URLs, tables, JSON and diffs) goes to
+stdout; progress logs, warnings and errors go to stderr. Redirect or pipe
+stdout to capture results while keeping diagnostics visible. Use `--json`
+where available for machine-readable results. Workflow commands such as
+`init`, `auto`, `pr merge`, `pr sweep --wait-for-checks` and `update` also
+print status messages or prompts to stdout, so their output is not always
+a data-only stream. `amf help output` describes the same contract.
+
 ## Install
 
 ```sh

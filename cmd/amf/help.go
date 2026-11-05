@@ -36,6 +36,7 @@ Topics:
   agents     which coding agent amf runs, and when it falls back to another
   env        configuration: every .env setting, with its default
   flags      flag conventions: long and short forms, shared letters
+  output     stdout data, stderr diagnostics and workflow status messages
 
 Paths default to the current directory; amf help run lists the global flags
 every command takes.
@@ -53,6 +54,19 @@ Some commands return 2 for -h; use amf help <command> in scripts.
 Command-specific value validation can return 1 (for example, amf run 0).
 
 See also: amf help agents, amf help env, amf help flags
+`
+
+const outputHelp = `Output
+
+Command data (issue/PR numbers and URLs, tables, JSON and diffs) goes to
+stdout; progress logs, warnings and errors go to stderr. Redirect or pipe
+stdout to capture results while keeping diagnostics visible. Use --json
+where available for machine-readable results. Workflow commands such as
+init, auto, pr merge, pr sweep --wait-for-checks and update also
+print status messages or prompts to stdout, so their output is not always
+a data-only stream.
+
+See also: amf help flags, amf help run
 `
 
 const runHelp = `Usage:
@@ -276,12 +290,12 @@ See also: amf help init, amf help doctor, amf help auth, amf help agents
 `
 
 // helpTopics maps each amf help <topic> to its text: every command, plus
-// the agents and env topics.
+// the agents, env, flags and output topics.
 var helpTopics = map[string]string{
 	"issue": issueUsage, "auth": authUsage, "pr": prUsage, "list": listHelp, "run": runHelp, "watch": watchHelp, "auto": autoHelp, "memory": memoryUsage,
 	"init": initHelp, "pipeline": pipelineHelp, "doctor": doctorHelp, "update": updateHelp,
 	"version": versionHelp, "man": manHelp, "help": helpHelp, "agents": agentsHelp, "env": envHelp, "flags": flagsHelp,
-	"completion": completionHelp,
+	"output": outputHelp, "completion": completionHelp,
 }
 
 // topicNames is every help topic, for typo suggestions.
