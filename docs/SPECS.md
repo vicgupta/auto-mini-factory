@@ -32,7 +32,9 @@ amf:ready ──▶ amf:in-progress ──▶ amf:pr-open (PR opened, not merged
 - Before Claim, amf skips an issue with an open PR from `amf/issue-N`
   (relabeling it `amf:pr-open`) or with an `amf/issue-N` branch on origin
   (unless it is `amf:failed`); `amf run N --force`, and `amf auto`, skip
-  that guard. A failure never moves an issue from `amf:pr-open` or
+  that guard. The skip is logged once as `issue.skip`; `amf run` prints
+  that reason once, counts the issue as skipped in its summary, and exits 3.
+  A failure never moves an issue from `amf:pr-open` or
   `amf:done` to `amf:failed`, but `amf:done` is kept only when GitHub lists
   a merged PR from `amf/issue-N`. After `--merge`, amf reads the PR back and
   sets `amf:done` only if it is merged (`amf:pr-open` otherwise).
@@ -318,7 +320,9 @@ label commands also return stdout write failures. No git checkout is needed.
 **Exit codes:** 0 on success, 1 on error, 2 on a usage error (no command,
 an unknown one, a bad flag or the wrong arguments; no command or an unknown
 one also prints the usage to stderr; an unknown command close to a real
-one, such as `lst`, first prints `Did you mean "issue list"?`). The README,
+one, such as `lst`, first prints `Did you mean "issue list"?`), and 3 when
+`amf run` skips an issue because of the pre-start guard (nothing changed;
+`--force` may run it). The README,
 command reference and usage overview document these statuses, and `run`'s
 help repeats them. `amf --help` and `amf help <command>` exit 0; some
 command-specific `--help` and `-h` paths, including `amf run --help`,
@@ -1289,6 +1293,7 @@ event log opens, are not. The fields of each event, besides those:
 | `watch.skip` | debug | `reason`: `pr`, `closed`, `in_progress` or `status_label` (done or failed without `amf:ready`), checked first; or `excluded_label`, with `label`: the first `--exclude-label` value the issue has |
 | `watch.failed` | warn | `error`: an issue that failed (watch goes on) |
 | `watch.stop` | info | `reason` (the context's error, such as `context canceled`), `cycles` |
+| `issue.skip` | info | `reason` (`pr_open` or `branch_exists`), plus `pr` and `url` for `pr_open`, or `branch` for `branch_exists`; the message says how `--force` may run the issue |
 | `issue.picked` | info | `title`, `author`, `labels` |
 | `issue.agent_ignored` | info | `agent`: the `--agent` a pipeline overrides |
 | `issue.author_check` | debug | `author`, `trusted`; an untrusted issue then fails |

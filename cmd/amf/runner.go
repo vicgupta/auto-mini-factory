@@ -942,9 +942,7 @@ func (r *Runner) Watch(ctx context.Context, label string, interval time.Duration
 				r.event(slog.LevelDebug, "watch.skip", is.Number, fmt.Sprintf("#%d: skipped (excluded_label %q)", is.Number, l), "reason", "excluded_label", "label", l)
 				continue
 			}
-			if err := r.Run(ctx, is.Number); errors.As(err, new(*skipError)) {
-				r.event(slog.LevelInfo, "watch.skip", is.Number, fmt.Sprintf("#%d: skipped: %v", is.Number, err), "reason", err.(*skipError).reason)
-			} else if err != nil {
+			if err := r.Run(ctx, is.Number); err != nil && !errors.As(err, new(*skipError)) {
 				r.event(slog.LevelWarn, "watch.failed", is.Number, fmt.Sprintf("#%d failed: %v", is.Number, err), "error", err)
 			}
 		}

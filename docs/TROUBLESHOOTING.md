@@ -182,8 +182,9 @@ is 10 minutes old; or delete `.amf/watch.lock`.
 
 ## Issue skipped: already has a PR or branch
 
-**Symptom:** `watch` logs `#42: skipped: ... already has an open pull
-request` or `branch amf/issue-42 already exists on origin`.
+**Symptom:** `watch` logs `#42 already has an open pull request ...` or
+`#42: branch amf/issue-42 already exists on origin ...`; `amf run 42` prints
+the reason once, reports it as skipped in its summary, and exits 3.
 
 **Cause:** amf won't start an issue it already turned into a PR. An open PR
 relabels the issue `amf:pr-open`.

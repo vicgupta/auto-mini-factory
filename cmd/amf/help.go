@@ -49,6 +49,7 @@ Exit status:
   0  success
   1  command failed (GitHub error, agent failure, refused merge, etc.)
   2  usage error (no command, unknown command or flag, missing arguments)
+  3  amf run skipped the issue (nothing changed; see amf help run)
 amf help <command> exits 0; unknown commands exit 2.
 Some commands return 2 for -h; use amf help <command> in scripts.
 Command-specific value validation can return 1 (for example, amf run 0).
@@ -72,8 +73,9 @@ const runHelp = `Usage:
 
 Processes one issue into a pull request (alias of amf issue run).
 
-Exit status: 0 success, 1 command failed, 2 usage error (also --help).
-Use amf help run for help that exits 0.
+Exit status: 0 success, 1 command failed, 2 usage error (also --help),
+3 the issue was skipped: it already has an open PR or an amf/issue-N branch
+(nothing changed; --force may run it). Use amf help run for help that exits 0.
 
 --merge makes run and watch merge each PR they open or update, without
 review: a merge commit, or --merge=squash or --merge=rebase (also written
