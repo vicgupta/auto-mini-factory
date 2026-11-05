@@ -1246,6 +1246,10 @@ to `amf:ready`; `amf run N` recovers it too.
 
 ## Updating (`amf update`)
 
+`amf --update` is a compatibility alias of `amf update`, with the same flags,
+output and exit status. It has no `-u` short form: at the root, `-u` would
+collide with `amf pr merge -u` (`--update-branch`).
+
 `amf help update` and the README's Install section link to
 [release notes](https://github.com/vicgupta/auto-mini-factory/releases)
 for changes in each version.

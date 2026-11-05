@@ -54,6 +54,9 @@ amf update --check    # only say whether there is a newer one
 amf update --version v0.0.7   # install a specific release (also downgrades)
 ```
 
+`amf --update` is the same command as `amf update`, with the same flags; it
+has no `-u` short form because `-u` is `--update-branch` on `amf pr merge`.
+
 See [release notes](https://github.com/vicgupta/auto-mini-factory/releases)
 for what changed in each version.
 

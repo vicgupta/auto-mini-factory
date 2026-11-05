@@ -134,6 +134,9 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return cmdDoctor(ctx, rest, stdout, stderr)
 	case "update":
 		return cmdUpdate(ctx, rest, stdout, stderr)
+	case "--update":
+		// A compatibility alias of amf update, like amf --version for version.
+		return cmdUpdate(ctx, rest, stdout, stderr)
 	case "completion":
 		return cmdCompletion(rest, stdout, stderr)
 	case "man":
