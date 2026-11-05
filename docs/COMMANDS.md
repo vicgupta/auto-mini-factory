@@ -958,7 +958,7 @@ Generated from each command's `--help`; `amf init`,
 | `-p, --memory-dir <dir>` | directory the amf-memory folder goes in (default: the current directory) |
 | `-m, --merge[=<method>]` | how to merge each PR: a merge commit, or a method after = or as the next word: --merge=squash, -m squash, -m rebase (default merge) |
 | `-N, --no-checkpoint` | merge all issues without a checkpoint or approval |
-| `-w, --wait-for-checks` | wait up to 5 minutes for completed checks before the checkpoint |
+| `-w, --wait-for-checks` | at the checkpoint, wait up to 5 minutes for checks on the merge commit (each PR merge already waits up to 30 minutes for head checks) |
 
 ### amf memory sync
 
@@ -1120,7 +1120,9 @@ nothing. The issues are created labeled `amf:auto` only, their URLs are
 printed, and `amf:ready` is added immediately before each issue runs. They
 run one at a time like `amf run`, each PR merged
 ([`--merge=merge`](#merge-methods) by default, or `--merge=squash` /
-`--merge=rebase`).
+`--merge=rebase`). Each PR merge waits up to 30 minutes for the PR head's
+checks, as `amf run --merge` does with `--wait-for-checks` (`-w`) on by
+default; `amf auto` has no flag to skip that wait.
 
 By default, after the first merge amf stops at a checkpoint and shows the PR, its merge
 commit, the agent and the checks. On a terminal it asks for approval; on
@@ -1137,9 +1139,11 @@ remain. `--approve` accepts it without prompting, even without a terminal.
 `--no-checkpoint` skips it entirely, merging all issues without recording
 approval; recovery progress is still saved until the run finishes.
 
-Checks are fetched once by default. Add `--wait-for-checks` to poll the merge
-commit every 10 seconds for up to 5 minutes, waiting for checks to appear and
-all complete. It reports pass/fail or timeout before approval; failed or
+Checks are fetched once by default. Add `--wait-for-checks` (`-w`) to poll the
+checkpoint's merge commit every 10 seconds for up to 5 minutes, waiting for
+checks to appear and all complete. This is the checkpoint wait only; it does
+not change the 30-minute wait each PR merge already makes for its head's
+checks. It reports pass/fail or timeout before approval; failed or
 unavailable checks can still be approved. Cancellation stops without approval.
 The checkpoint threshold and the skip/wait settings persist across retries.
 `--continue` approves only once the saved threshold has been reached; before

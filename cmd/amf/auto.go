@@ -46,8 +46,11 @@ https://github.com/vicgupta/auto-mini-factory/blob/main/docs/COMMANDS.md#merge-m
 2. Build: amf adds amf:ready immediately before processing each issue in
    order exactly as amf run --merge does:
    branch, agent, PR, merge (a merge commit by default, or --merge=squash or
-   --merge=rebase). The safety rules hold: a change under .github/ is never
-   pushed, and one that edits AGENTS.md is never merged.
+   --merge=rebase). Each PR merge waits up to 30 minutes for the PR head's
+   checks, as amf run --merge does with --wait-for-checks (-w) on by default;
+   amf auto has no flag to skip that wait. The safety rules hold: a change
+   under .github/ is never pushed, and one that edits AGENTS.md is never
+   merged.
 3. Checkpoint: after the first PR is merged, amf stops and prints the issue,
    the PR, the merge commit, the agent, the checks on the merge commit and
    the issues left. Nothing else is merged until you approve:
@@ -62,10 +65,12 @@ https://github.com/vicgupta/auto-mini-factory/blob/main/docs/COMMANDS.md#merge-m
 (default 1; N must be positive). There is no checkpoint if no issues remain.
 --no-checkpoint skips the checkpoint and approval entirely, merging all issues.
 --approve accepts the checkpoint automatically, including without a terminal.
---wait-for-checks polls the checkpoint's merge commit every 10 seconds for up
-to 5 minutes, waiting for check runs to appear and all complete, then reports
-pass/fail or a timeout before approval. By default checks are fetched once.
-Failed, unavailable or timed-out checks are reported; approval can still proceed.
+--wait-for-checks (-w) is the checkpoint wait only: it polls the checkpoint's
+merge commit every 10 seconds for up to 5 minutes, waiting for check runs to
+appear and all complete, then reports pass/fail or a timeout before approval.
+It does not change the 30-minute wait each PR merge already makes for its
+head's checks. By default checks are fetched once. Failed, unavailable or
+timed-out checks are reported; approval can still proceed.
 Checkpoint settings are saved for --continue; --checkpoint-after overrides the
 saved threshold, and --no-checkpoint or --wait-for-checks enables that setting.
 
@@ -636,7 +641,7 @@ func addAutoFlags(fs *flag.FlagSet) autoFlags {
 	f.noCheckpoint = fs.Bool("no-checkpoint", false, "merge all issues without a checkpoint or approval")
 	f.checkpointAfter = fs.Int("checkpoint-after", 1, "checkpoint after this many merges (must be positive)")
 	f.approve = fs.Bool("approve", false, "approve the checkpoint without prompting")
-	f.waitForChecks = fs.Bool("wait-for-checks", false, "wait up to 5 minutes for completed checks before the checkpoint")
+	f.waitForChecks = fs.Bool("wait-for-checks", false, "at the checkpoint, wait up to 5 minutes for checks on the merge commit (each PR merge already waits up to 30 minutes for head checks)")
 	f.abort = fs.Bool("abort", false, "abandon the saved run by removing its state")
 	f.closeIssues = fs.Bool("close-issues", false, "with --abort, close the created, unmerged issues first")
 	f.dryRun = fs.Bool("dry-run", false, "plan only: print the issues amf would create, and create nothing")

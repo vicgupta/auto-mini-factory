@@ -131,7 +131,7 @@ amf run 42 --merge          # ...and merge its PR with a merge commit
 amf run 42 --merge --wait-for-checks  # ...after waiting for CI (-w)
 amf watch --merge=squash    # squash and merge each PR (or --merge=rebase)
 amf auto "Add a dark mode toggle"  # plan issues, merge the first PR, then ask before the rest
-amf auto "Add a dark mode toggle" --checkpoint-after 2 --wait-for-checks # review CI after two merges
+amf auto "Add a dark mode toggle" --checkpoint-after 2 --wait-for-checks # checkpoint: wait up to 5m for CI after two merges (each merge waits up to 30m for head checks)
 amf auto "Add a dark mode toggle" --approve # approve the checkpoint without a terminal
 amf auto "Add a dark mode toggle" --no-checkpoint # merge all issues without pausing
 amf auto --continue        # approve the checkpoint and resume
