@@ -125,6 +125,11 @@ func TestCompletionShells(t *testing.T) {
 			}{
 				{"amf ", "completion", "--agent"},
 				{"amf pr ", "merge", "--agent"},
+				{"amf --update --", "--check", "--agent"},
+				{"amf -u -", "-V", "--update-branch"},
+				{"amf -q -u --", "--check", "--agent"},
+				{"amf -u --version ", "", "--check"},
+				{"amf pr merge 42 -u --", "--squash", "--check"},
 				{"amf pr merge 42 --", "--squash", "--agent"},
 				{"amf issue run 42 --", "--agent", "--squash"},
 				{"amf run 42 -", "-a", "--squash"},

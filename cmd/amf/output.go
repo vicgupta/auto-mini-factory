@@ -66,6 +66,9 @@ func extractOutputFlags(args []string, o *outputOptions) ([]string, error) {
 				return nil, fmt.Errorf("--color must be auto, always or never, got %q", value)
 			}
 		default:
+			if command == "" && (a == "--update" || a == "-u") {
+				command = "update"
+			}
 			rest = append(rest, a)
 			// A flag's next word is data, even when it spells --quiet or
 			// --color. Leave it for the command's own flag parser.

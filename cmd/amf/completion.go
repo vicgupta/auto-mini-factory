@@ -211,6 +211,7 @@ _amf_candidates() {
         options="$(_amf_options "$context")"
         case "$word" in
             --) return 0 ;;
+            --update|-u) [ -n "$context" ] || context=update ;;
             -*=*) ;;
             -*) case " $options " in *" $word= "*) pending=1 ;; esac ;;
             *) case " $options " in
@@ -262,6 +263,10 @@ function _amf_candidates
         switch "$word"
             case --
                 return
+            case --update -u
+                if test -z "$context"
+                    set context update
+                end
             case '-*=*'
             case '-*'
                 if contains -- "$word=" $options

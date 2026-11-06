@@ -1669,6 +1669,16 @@ func TestRootShortUIsUpdateNotMerge(t *testing.T) {
 	}
 }
 
+func TestUpdateAliasPreservesGlobalLookingVersionValue(t *testing.T) {
+	for _, command := range []string{"update", "--update", "-u"} {
+		var out, stderr bytes.Buffer
+		err := run(context.Background(), []string{command, "--check", "--version", "--quiet"}, nil, &out, &stderr)
+		if err != nil || !strings.Contains(out.String(), "v--quiet") {
+			t.Errorf("%s: version value was swallowed as a global: err=%v stdout=%s stderr=%s", command, err, &out, &stderr)
+		}
+	}
+}
+
 func TestUpdateRefusesBadDownloads(t *testing.T) {
 	for _, tc := range []struct {
 		name, reports string
