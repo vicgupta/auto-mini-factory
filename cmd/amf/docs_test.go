@@ -285,6 +285,10 @@ func TestDocumentedFlagsExist(t *testing.T) {
 				t.Fatal(err)
 			}
 			accepted := map[string]bool{"h": true, "help": true, "dir": true, "env-file": true, "clone-dir": true} // path flags: every command
+			if cmd[0] == "update" {
+				accepted["update"] = true // amf --update, a command alias
+				accepted["u"] = true      // amf -u, root short alias of update
+			}
 			for _, f := range helpFlags(stderr.String()) {
 				accepted[f.long] = true
 				if f.short != "" {

@@ -1597,6 +1597,88 @@ func TestUpdateTrimsVersionFlag(t *testing.T) {
 	}
 }
 
+func TestUpdateAliasRoutesToUpdater(t *testing.T) {
+	srv := fakeReleases(t, "v9.9.9", "amf v9.9.9", false)
+	t.Setenv("AMF_RELEASES_URL", srv.URL)
+	want := fmt.Sprintf("amf v9.9.9 is available (you have %s); run amf update\n", buildVersion())
+	for _, args := range [][]string{
+		{"update", "--check"},
+		{"--update", "--check"},
+		{"-u", "--check"},
+		{"--update", "-c"},
+		{"-u", "-c"},
+		{"-q", "--update", "--check"},
+		{"-q", "-u", "--check"},
+	} {
+		var out, stderr bytes.Buffer
+		if err := run(context.Background(), args, nil, &out, &stderr); err != nil {
+			t.Fatalf("amf %v: %v\n%s", args, err, out.String())
+		}
+		if got := out.String(); got != want {
+			t.Errorf("amf %v: output = %q, want %q", args, got, want)
+		}
+		if stderr.Len() != 0 {
+			t.Errorf("amf %v: stderr = %q", args, &stderr)
+		}
+	}
+}
+
+func TestUpdateAliasKeepsPinnedVersion(t *testing.T) {
+	want := fmt.Sprintf("amf v0.0.7 is available (you have %s); run amf update --version v0.0.7\n", buildVersion())
+	for _, args := range [][]string{
+		{"update", "--check", "--version", " v0.0.7 "},
+		{"--update", "--check", "--version", " v0.0.7 "},
+		{"-u", "--check", "--version", " v0.0.7 "},
+		{"--update", "-c", "-V", "v0.0.7"},
+		{"-u", "-c", "-V", "v0.0.7"},
+	} {
+		var out bytes.Buffer
+		if err := run(context.Background(), args, nil, &out, io.Discard); err != nil {
+			t.Fatalf("amf %v: %v", args, err)
+		}
+		if got := out.String(); got != want {
+			t.Errorf("amf %v: output = %q, want %q", args, got, want)
+		}
+	}
+}
+
+func TestRootShortUIsUpdateNotMerge(t *testing.T) {
+	// Root -u is the update alias; pr merge -u remains --update-branch.
+	srv := fakeReleases(t, "v9.9.9", "amf v9.9.9", false)
+	t.Setenv("AMF_RELEASES_URL", srv.URL)
+	var out, stderr bytes.Buffer
+	if err := run(context.Background(), []string{"-u", "--check"}, nil, &out, &stderr); err != nil {
+		t.Fatalf("amf -u --check: %v\n%s", err, out.String())
+	}
+	want := fmt.Sprintf("amf v9.9.9 is available (you have %s); run amf update\n", buildVersion())
+	if got := out.String(); got != want {
+		t.Fatalf("amf -u --check: output = %q, want %q", got, want)
+	}
+	if strings.Contains(stderr.String(), "unknown command") {
+		t.Fatalf("amf -u hit unknown-command path: %q", &stderr)
+	}
+	// Sanity: update help mentions -u; pr merge help still documents -u as update-branch.
+	var uh, mh bytes.Buffer
+	_ = run(context.Background(), []string{"help", "update"}, nil, &uh, io.Discard)
+	if !strings.Contains(uh.String(), "amf -u") {
+		t.Fatalf("update help missing amf -u:\n%s", &uh)
+	}
+	_ = run(context.Background(), []string{"pr", "merge", "--help"}, nil, io.Discard, &mh)
+	if !strings.Contains(mh.String(), "-u, --update-branch") {
+		t.Fatalf("pr merge help lost -u/--update-branch:\n%s", &mh)
+	}
+}
+
+func TestUpdateAliasPreservesGlobalLookingVersionValue(t *testing.T) {
+	for _, command := range []string{"update", "--update", "-u"} {
+		var out, stderr bytes.Buffer
+		err := run(context.Background(), []string{command, "--check", "--version", "--quiet"}, nil, &out, &stderr)
+		if err != nil || !strings.Contains(out.String(), "v--quiet") {
+			t.Errorf("%s: version value was swallowed as a global: err=%v stdout=%s stderr=%s", command, err, &out, &stderr)
+		}
+	}
+}
+
 func TestUpdateRefusesBadDownloads(t *testing.T) {
 	for _, tc := range []struct {
 		name, reports string

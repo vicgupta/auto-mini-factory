@@ -42,7 +42,7 @@ func cmdCompletion(args []string, stdout, stderr io.Writer) error {
 // same lists as help and flag parsing.
 func completionOptions() map[string][]string {
 	options := map[string][]string{
-		"":            append(slices.Clone(topCommands), "--version"),
+		"":            append(slices.Clone(topCommands), "--version", "--update", "-u"),
 		"completion":  {"bash", "zsh", "fish"},
 		"auto":        {"status"},
 		"auto status": {},
@@ -211,6 +211,7 @@ _amf_candidates() {
         options="$(_amf_options "$context")"
         case "$word" in
             --) return 0 ;;
+            --update|-u) [ -n "$context" ] || context=update ;;
             -*=*) ;;
             -*) case " $options " in *" $word= "*) pending=1 ;; esac ;;
             *) case " $options " in
@@ -262,6 +263,10 @@ function _amf_candidates
         switch "$word"
             case --
                 return
+            case --update -u
+                if test -z "$context"
+                    set context update
+                end
             case '-*=*'
             case '-*'
                 if contains -- "$word=" $options

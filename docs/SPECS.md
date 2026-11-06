@@ -1246,6 +1246,13 @@ to `amf:ready`; `amf run N` recovers it too.
 
 ## Updating (`amf update`)
 
+`amf --update` and `amf -u` are compatibility aliases of `amf update`, with
+the same flags, output and exit status. Root `-u` is free under the
+per-command short-flag convention; `amf pr merge -u` remains
+`--update-branch` on that command only. (The update command's own
+`-V/--version <tag>` selects a release tag; it is unrelated to root
+`amf --version`.)
+
 `amf help update` and the README's Install section link to
 [release notes](https://github.com/vicgupta/auto-mini-factory/releases)
 for changes in each version.

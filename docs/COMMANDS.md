@@ -1048,6 +1048,10 @@ Generated from each command's `--help`; `amf init`,
 | `-c, --check` | only report whether an update is available |
 | `-V, --version <tag>` | release to install, e.g. v0.0.7 (default: latest) |
 
+`amf --update` and `amf -u` are the same command as `amf update`, with the
+same flags. Root `-u` is only this alias; on `amf pr merge`, `-u` remains
+`--update-branch`.
+
 ## Run and watch
 
 Run `run` and `watch` inside a clone of `GITHUB_REPO`, or from any folder that

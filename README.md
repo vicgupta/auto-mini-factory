@@ -54,6 +54,10 @@ amf update --check    # only say whether there is a newer one
 amf update --version v0.0.7   # install a specific release (also downgrades)
 ```
 
+`amf --update` and `amf -u` are the same command as `amf update`, with the
+same flags. Root `-u` is only this alias; `amf pr merge -u` remains
+`--update-branch` on that command.
+
 See [release notes](https://github.com/vicgupta/auto-mini-factory/releases)
 for what changed in each version.
 
