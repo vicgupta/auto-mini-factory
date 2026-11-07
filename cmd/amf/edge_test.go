@@ -2233,11 +2233,114 @@ func TestRunSucceedsOnceThePRExists(t *testing.T) {
 			return prOpened.Load() && r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/labels")
 		})
 		r, log := newTestRunner(t, flaky, root, fakeAgent(t, "claude", ok))
-		if err := r.Run(context.Background(), 1); err != nil {
-			t.Fatalf("Run: %v", err)
+		err := r.Run(context.Background(), 1)
+		var se *statusError
+		if !errors.As(err, &se) || !strings.Contains(err.Error(), "could not set amf:pr-open") {
+			t.Fatalf("Run error = %v, want a status label error", err)
 		}
 		if slices.Contains(gh.labels(1), "amf:failed") {
 			t.Errorf("labels = %v", gh.labels(1))
+		}
+		if c := gh.comments[1]; len(c) != 1 || !strings.Contains(c[0], "amf opened") {
+			t.Errorf("comments = %q", c)
+		}
+		if !strings.Contains(log.String(), "#1: could not set amf:pr-open") {
+			t.Errorf("log:\n%s", log)
+		}
+	})
+}
+
+func TestRunFinalStatusCleanup(t *testing.T) {
+	ok := shResult + "cat >/dev/null\necho x > x.txt\nresult 'Done.'\n"
+
+	t.Run("cancel between add and remove", func(t *testing.T) {
+		root, _ := setupRepo(t)
+		gh, srv := newFakeGitHub(t)
+		gh.issues[1] = readyIssue(1, "Cancel final label")
+		deleteSeen, release := make(chan struct{}), make(chan struct{})
+		target, _ := url.Parse(srv.URL)
+		proxy := httputil.NewSingleHostReverseProxy(target)
+		gate := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if req.Method == "DELETE" && strings.HasSuffix(req.URL.Path, "/labels/"+labelInProgress) {
+				close(deleteSeen)
+				select {
+				case <-req.Context().Done():
+					writeJSON(w, http.StatusBadGateway, map[string]string{"message": "canceled"})
+				case <-release:
+					proxy.ServeHTTP(w, req)
+				}
+				return
+			}
+			proxy.ServeHTTP(w, req)
+		}))
+		t.Cleanup(gate.Close)
+		r, _ := newTestRunner(t, gate, root, fakeAgent(t, "claude", ok))
+
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() { done <- r.Run(ctx, 1) }()
+		select {
+		case <-deleteSeen:
+		case <-time.After(20 * time.Second):
+			cancel()
+			t.Fatal("Run never reached the final status delete")
+		}
+		cancel()
+		close(release)
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+		case <-time.After(20 * time.Second):
+			t.Fatal("Run did not return after cancellation")
+		}
+		if got, want := gh.labels(1), []string{labelPROpen}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("labels = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("bounded timeout", func(t *testing.T) {
+		old := finalStatusTimeout
+		finalStatusTimeout = 100 * time.Millisecond
+		t.Cleanup(func() { finalStatusTimeout = old })
+
+		root, _ := setupRepo(t)
+		gh, srv := newFakeGitHub(t)
+		gh.issues[1] = readyIssue(1, "Final label times out")
+		target, _ := url.Parse(srv.URL)
+		proxy := httputil.NewSingleHostReverseProxy(target)
+		gate := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if req.Method == "DELETE" && strings.HasSuffix(req.URL.Path, "/labels/"+labelInProgress) {
+				<-req.Context().Done()
+				writeJSON(w, http.StatusBadGateway, map[string]string{"message": "timed out"})
+				return
+			}
+			proxy.ServeHTTP(w, req)
+		}))
+		t.Cleanup(gate.Close)
+		r, log := newTestRunner(t, gate, root, fakeAgent(t, "claude", ok))
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		done := make(chan error, 1)
+		go func() { done <- r.Run(ctx, 1) }()
+		var err error
+		select {
+		case err = <-done:
+		case <-time.After(5 * time.Second):
+			cancel()
+			t.Fatal("Run did not stop at the final status timeout")
+		}
+		if err == nil {
+			t.Fatal("Run should report the final status timeout")
+		}
+		var se *statusError
+		if !errors.As(err, &se) || !strings.Contains(err.Error(), "could not set amf:pr-open") {
+			t.Fatalf("Run error = %v, want a status label timeout", err)
+		}
+		if labels := gh.labels(1); slices.Contains(labels, labelFailed) || !slices.Contains(labels, labelPROpen) {
+			t.Fatalf("labels = %v, want the real %s status, not %s", labels, labelPROpen, labelFailed)
 		}
 		if c := gh.comments[1]; len(c) != 1 || !strings.Contains(c[0], "amf opened") {
 			t.Errorf("comments = %q", c)
