@@ -31,6 +31,10 @@ const (
 
 var statusLabels = []string{labelInProgress, labelPROpen, labelDone, labelFailed}
 
+// finalStatusTimeout bounds the status label cleanup after a PR exists, so a
+// Ctrl-C can't leave the issue on both amf:in-progress and its real status.
+var finalStatusTimeout = 10 * time.Second
+
 // amfLabels are the labels amf uses, as `amf init` creates them.
 var amfLabels = []LabelSpec{
 	{labelReady, "0e8a16", "Ready for amf to turn into a pull request"},
@@ -259,8 +263,9 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 		return err
 	}
 	defer func() {
-		// A PR amf couldn't merge is still open: the issue is amf:pr-open.
-		if err == nil || errors.As(err, new(*mergeError)) {
+		// A PR amf couldn't merge, or whose final label couldn't be set, is
+		// still open: the issue is amf:pr-open.
+		if err == nil || errors.As(err, new(*mergeError)) || errors.As(err, new(*statusError)) {
 			return
 		}
 		// Report even if ctx was cancelled (e.g. Ctrl-C), but don't hang on it.
@@ -356,8 +361,14 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 	if r.Merge != "" && merr == nil && r.confirmMerged(ctx, pr.Number) {
 		status = labelDone
 	}
-	if err := r.setStatus(ctx, n, status); err != nil {
-		r.event(slog.LevelWarn, "issue.status", n, fmt.Sprintf("#%d: could not set %s: %v", n, status, err), "to", status, "error", err)
+	// The PR exists now, so finish its status even when watch is stopping.
+	// WithoutCancel keeps a Ctrl-C from leaving both the old and the new
+	// status label behind, and the timeout keeps shutdown bounded.
+	sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finalStatusTimeout)
+	serr := r.setStatus(sctx, n, status)
+	cancel()
+	if serr != nil {
+		r.event(slog.LevelWarn, "issue.status", n, fmt.Sprintf("#%d: could not set %s: %v", n, status, serr), "to", status, "error", serr)
 	} else {
 		r.statusEvent(n, labelInProgress, status)
 	}
@@ -369,8 +380,24 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 	if merr != nil {
 		return &mergeError{url: pr.HTMLURL, err: merr}
 	}
+	if serr != nil {
+		return &statusError{url: pr.HTMLURL, label: status, err: serr}
+	}
 	return nil
 }
+
+// statusError is a PR amf opened or updated but whose final issue status label
+// could not be set. The PR is real, so the issue never becomes amf:failed.
+type statusError struct {
+	url   string
+	label string
+	err   error
+}
+
+func (e *statusError) Error() string {
+	return fmt.Sprintf("opened %s but could not set %s: %v", e.url, e.label, e.err)
+}
+func (e *statusError) Unwrap() error { return e.err }
 
 // comment posts msg, redacted, on issue n, logging how it went.
 func (r *Runner) comment(ctx context.Context, n int, msg string) {

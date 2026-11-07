@@ -869,20 +869,40 @@ func TestWatchProcessesLabeledIssues(t *testing.T) {
 	gh.issues[3] = &Issue{Number: 3, Title: "Not for amf", State: "open"}
 	gh.issues[4] = &Issue{Number: 4, Title: "Retry", State: "open", Labels: []Label{{Name: "amf:ready"}, {Name: "amf:failed"}}}
 	claude := fakeClaude(t, `cat >/dev/null; date > out.txt; echo ok`)
-	r, log := newTestRunner(t, srv, root, claude)
+	r, _ := newTestRunner(t, srv, root, claude)
+	var log syncBuffer
+	r.Log = &log
 
 	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error)
+	done := make(chan error, 1)
 	go func() { done <- r.Watch(ctx, "amf:ready", 50*time.Millisecond) }()
+	stopped := false
+	stop := func() error {
+		if stopped {
+			return nil
+		}
+		stopped = true
+		cancel()
+		select {
+		case err := <-done:
+			return err
+		case <-time.After(10 * time.Second):
+			return fmt.Errorf("watch did not stop")
+		}
+	}
+	t.Cleanup(func() {
+		if err := stop(); err != nil {
+			t.Errorf("stopping watch: %v", err)
+		}
+	})
 	deadline := time.Now().Add(10 * time.Second)
-	for !slices.Contains(gh.labels(1), "amf:pr-open") || !slices.Contains(gh.labels(4), "amf:pr-open") {
+	for !reflect.DeepEqual(gh.labels(1), []string{"amf:pr-open"}) || !reflect.DeepEqual(gh.labels(4), []string{"amf:pr-open"}) {
 		if time.Now().After(deadline) {
-			t.Fatalf("issue 1 never processed; log:\n%s", log)
+			t.Fatalf("issues not fully processed; log:\n%s", log.String())
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	cancel()
-	if err := <-done; err != nil {
+	if err := stop(); err != nil {
 		t.Fatal(err)
 	}
 	if len(gh.prs) != 2 || gh.prs[0]["head"] != "amf/issue-1" || gh.prs[1]["head"] != "amf/issue-4" {

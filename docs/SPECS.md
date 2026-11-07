@@ -1114,8 +1114,13 @@ and exit code are preserved.
       <PR URL> but could not merge it: <reason>`, and `watch` logs that as
       a failure and goes on.
 
-    The PR exists by now, so if setting the label or commenting fails, amf
-    logs a warning and the run still succeeds.
+    The PR exists by now, so amf sets its final status even when watch is
+    stopping, with a short timeout: a Ctrl-C doesn't leave `amf:in-progress`
+    next to `amf:pr-open`. If the status still can't be set, amf logs a
+    warning, keeps the real PR status (never `amf:failed`), comments as
+    usual, and `run` exits 1 with `opened <PR URL> but could not set
+    <label>: <reason>`; `watch` logs that failure and goes on. A failed
+    comment is still only a warning.
 
 ### Stale pull requests
 

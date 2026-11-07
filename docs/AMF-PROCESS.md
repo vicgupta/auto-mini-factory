@@ -145,8 +145,10 @@ each, one at a time.
 22. **The issue is labeled `amf:pr-open` (`amf:done` once `--merge` merged
     the PR), and amf comments "amf opened <PR URL>
     for this issue."** For a retry the comment says "updated". The PR exists
-    by now, so if either GitHub call fails, amf only logs a warning and the
-    run still counts as a success.
+    by now. amf sets the label with a short, cancellation-safe timeout, so a
+    Ctrl-C doesn't leave `amf:in-progress` behind; if the label still can't
+    be set it keeps the real PR status (never `amf:failed`), logs a warning,
+    and reports the error. A failed comment is still only a warning.
 
 ## After a failure
 
