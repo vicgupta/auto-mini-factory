@@ -106,6 +106,28 @@ func (g *GitHub) ListReleases(ctx context.Context) ([]Release, error) {
 func (g *GitHub) GetRelease(ctx context.Context, tag string) (Release, error) {
 	var rel Release
 	err := g.do(ctx, "GET", g.repoPath("/releases/tags/%s", url.PathEscape(tag)), nil, &rel)
+	// GitHub documents the by-tag endpoint for published releases. Drafts
+	// visible to these same credentials must be found in the paginated list;
+	// do not assume a 404 proves no draft exists or broaden authentication.
+	if isStatus(err, http.StatusNotFound) {
+		releases, listErr := g.ListReleases(ctx)
+		if listErr != nil {
+			return Release{}, listErr
+		}
+		found := false
+		for _, candidate := range releases {
+			if candidate.TagName != tag {
+				continue
+			}
+			if found {
+				return Release{}, fmt.Errorf("multiple visible releases have tag %q; refusing an ambiguous view", tag)
+			}
+			rel, found = candidate, true
+		}
+		if found {
+			return rel, nil
+		}
+	}
 	if err == nil && rel.TagName != tag {
 		return Release{}, fmt.Errorf("GitHub returned release tag %q for %q", rel.TagName, tag)
 	}

@@ -852,3 +852,47 @@ func TestReleaseViewRejectsMismatchedResponseTag(t *testing.T) {
 		t.Fatalf("error=%v", err)
 	}
 }
+
+func TestReleaseViewFindsDraftWhenByTagOnlyReturnsPublished(t *testing.T) {
+	for _, duplicates := range []bool{false, true} {
+		t.Run(fmt.Sprint(duplicates), func(t *testing.T) {
+			srv, log := newTagReleaseServer(t, func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/repos/vic/demo/releases/tags/draft":
+					writeJSON(w, 404, map[string]string{"message": "Not Found"})
+				case "/repos/vic/demo/releases":
+					rel := tagReleaseRelease(2, "draft", "Draft", true, false, time.Now())
+					if r.URL.Query().Get("page") == "2" {
+						writeJSON(w, 200, []Release{rel})
+					} else {
+						w.Header().Set("Link", tagReleaseNextLink(r, 2))
+						first := tagReleaseRelease(1, "other", "Other", true, false, time.Now())
+						if duplicates {
+							first.TagName = "draft"
+						}
+						writeJSON(w, 200, []Release{first})
+					}
+				case "/repos/vic/demo/releases/2/assets":
+					writeJSON(w, 200, []ReleaseAsset{})
+				case "/repos/vic/demo/git/ref/tags/draft":
+					writeJSON(w, 404, map[string]string{"message": "Not Found"})
+				default:
+					t.Errorf("unexpected path %s", r.URL.Path)
+					writeJSON(w, 404, map[string]string{})
+				}
+			})
+			tagReleaseEnv(t, srv)
+			out, _, err := runTagRelease(t, "release", "view", "draft", "--json")
+			if duplicates {
+				if err == nil || !strings.Contains(err.Error(), "multiple visible releases") {
+					t.Fatalf("error=%v", err)
+				}
+			} else if err != nil || !strings.Contains(out, `"commit":null`) || !strings.Contains(out, `"draft":true`) {
+				t.Fatalf("draft output=%s error=%v", out, err)
+			}
+			if got := log.wrote(); len(got) != 0 {
+				t.Fatalf("writes=%v", got)
+			}
+		})
+	}
+}

@@ -735,6 +735,10 @@ amf release latest
 amf release latest --json
 ```
 
+Draft lookup falls back from GitHub's published-by-tag endpoint to the fully
+paginated visible release list; multiple matches are rejected as ambiguous.
+No new credentials or authentication route is used.
+
 Tag/release inspection refuses HTTP redirects, including the preliminary repository
 check; credentials are never forwarded to redirect targets. Annotated tag refs
 may alias an existing object whose embedded historical tag name differs; object

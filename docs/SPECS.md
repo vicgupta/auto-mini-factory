@@ -109,6 +109,10 @@ Future writers must bind an immutable target, successful exact-target CI and a
 remotely recorded expected asset manifest to resumable drafts before an explicit
 publish operation. CLI intent does not grant an assistant permission to publish.
 
+Draft lookup falls back from GitHub's published-by-tag endpoint to the fully
+paginated visible release list; multiple matches are rejected as ambiguous.
+No new credentials or authentication route is used.
+
 Native tag/release inspection refuses HTTP redirects, including repository checks,
 so API credentials are not forwarded. Annotated tag aliases are supported: the
 requested ref and object SHA are checked, not equality with the object's
