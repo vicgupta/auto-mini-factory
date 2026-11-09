@@ -16,6 +16,11 @@ to stdout with a final newline, like the other command data described under
 | `amf memory sync` | one [sync result](#memory-sync) | `issues`, `pull_requests`, `linked`, `cursor` |
 | `amf memory similar <N \| text>` | array of [hits](#memory-similar) | `kind`, `ref`, `issue`, `pr`, `title`, `score`, `what`, `merged` |
 | `amf memory show <N>` | one [issue history](#memory-show) | `issue`, `pull_requests`, `runs` |
+| `amf tag list` | array of [tags](#tag) | `name`, `commit` |
+| `amf tag view <tag>` | one [tag](#tag-view) | `name`, `type`, `sha`, `commit`, `depth` |
+| `amf release list` | array of [releases](#release) | `id`, `tag`, `name`, `state`, `draft`, `prerelease`, `target`, `url`, `created_at`, `published_at` |
+| `amf release view <tag>` | one [release](#release-view) | the list fields plus `body`, `tag_commit`, `assets` |
+| `amf release latest` | one [release](#release-view) | the same as `amf release view` |
 
 `amf issue list`, `amf issue view`, `amf pr list` and `amf pr view` print a
 compact value on one line and do not HTML-escape their strings. `amf pr sweep`
@@ -110,6 +115,60 @@ looks like `5 checks: 5 success`. Titles and bodies are not HTML-escaped.
 ```json
 {"number":57,"title":"Fix login","state":"open","draft":false,"url":"https://github.com/owner/repo/pull/57","head":"amf/issue-42","base":"main","author":"octocat","issue":42,"mergeable":true,"mergeable_state":"clean","additions":3,"deletions":1,"changed_files":1,"behind_by":2,"ahead_by":1,"checks":{"state":"passed","summary":"5 checks: 5 success"},"body":""}
 ```
+
+## Tag
+
+Printed as an array by `amf tag list`, with the commit GitHub's tag list
+reports.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `name` | string | tag name |
+| `commit` | string | commit SHA GitHub lists for the tag |
+
+## Tag view
+
+Printed as one object by `amf tag view <tag>`.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `name` | string | tag name |
+| `type` | string | `lightweight`, `annotated` or `annotated (N deep)` |
+| `sha` | string | the tag's immediate object SHA |
+| `commit` | string | the final commit after peeling every annotated tag |
+| `depth` | integer | number of annotated tag objects peeled; 0 for a lightweight tag |
+
+```json
+{"name":"v1.2.3","type":"annotated","sha":"4b825dc642cb6eb9a060e54bf8d69288fbee4904","commit":"0123456789abcdef0123456789abcdef01234567","depth":1}
+```
+
+## Release
+
+Printed as an array by `amf release list`.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `id` | integer | release ID |
+| `tag` | string | tag name |
+| `name` | string | release name as GitHub returned it |
+| `state` | string | `draft`, `published` or `prerelease` |
+| `draft` | boolean | whether the release is a draft |
+| `prerelease` | boolean | whether it is a prerelease |
+| `target` | string | GitHub's `target_commitish`; not authority over an existing tag |
+| `url` | string | the release's GitHub page |
+| `created_at` | string | RFC 3339 creation time |
+| `published_at` | string | RFC 3339 publication time, or `""` for a draft |
+
+## Release view
+
+Printed as one object by `amf release view <tag>` and `amf release latest`;
+`latest` always selects a published, non-prerelease release. The view adds:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `body` | string | release notes |
+| `tag_commit` | string | the tag's peeled commit, or `"unknown"` when the tag does not exist |
+| `assets` | array | `{name, size, state, url}` for each release asset |
 
 ## Memory sync
 

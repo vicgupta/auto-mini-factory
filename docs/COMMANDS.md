@@ -18,6 +18,8 @@ For every `--json` command and its schema, see the [JSON output index](JSON.md).
 | `amf auth` | get a GitHub token: login, status, logout, token |
 | `amf issue` | manage issues: `create`, `list`, `label`, `unlabel`, `close`, `reopen`, `view`, `run`, `watch` |
 | `amf pr` | manage pull requests: `list`, `merge`, `sweep`, `view`, `diff`, `comment`, `close`, `reopen`, `ready`, `draft` |
+| `amf tag` | inspect tags: `list`, `view` |
+| `amf release` | inspect and stage GitHub releases: `list`, `view`, `latest`, `create`, `stage`, `verify`, `publish` |
 | `amf run` | process one issue into a PR (alias of `issue run`) |
 | `amf watch` | process `amf:ready` issues as they arrive (alias of `issue watch`) |
 | `amf auto` | plan one sentence into up to 5 issues and merge their PRs, pausing after the first by default |
@@ -130,6 +132,25 @@ such as `amf run 0`.
 | `amf pr reopen <N>` | reopen a pull request |
 | `amf pr ready <N>` | mark a draft pull request ready for review |
 | `amf pr draft <N>` | convert a pull request to a draft |
+
+## tag commands
+
+| Command | What it does |
+|---|---|
+| `amf tag list [--limit n] [--json]` | list tags, by name |
+| `amf tag view <tag> [--json]` | show a tag and the commit it peels to |
+
+## release commands
+
+| Command | What it does |
+|---|---|
+| `amf release list [--state all\|draft\|published\|prerelease] [--limit n] [--json]` | list releases, newest first |
+| `amf release view <tag> [--json]` | show a release |
+| `amf release latest [--json]` | show the latest published, non-prerelease release |
+| `amf release create <tag> --commit sha [--name text] [--body text \| --file path] [--prerelease]` | create a draft release pinned to an explicit commit |
+| `amf release stage <tag> --manifest file --asset path...` | upload and verify assets in the draft |
+| `amf release verify <tag> --manifest file` | verify the draft's assets without changing anything |
+| `amf release publish <tag> --manifest file` | verify everything again, then publish the draft |
 
 ## Subcommand reference
 
@@ -666,19 +687,21 @@ Durations are Go durations: `30s`, `5m`, `1h30m`, `2h`.
 |---|---|---|
 | `-a` | `--add` | issue label |
 | `-a` | `--agent` | run, watch, auto |
+| `-a` | `--asset` | release stage |
 | `-A` | `--abort` | auto |
-| `-b` | `--body` | issue create, pr comment |
+| `-b` | `--body` | issue create, pr comment, release create |
 | `-b` | `--memory-backend` | run, watch, auto, memory |
 | `-B` | `--no-browser` | auth login |
 | `-c` | `--check` | update |
 | `-c` | `--comment` | issue close, pr close |
 | `-c` | `--continue` | auto |
+| `-c` | `--commit` | release create |
 | `-C` | `--client-id` | auth login |
 | `-d` | `--delete-branch` | issue close, pr merge, pr close |
 | `-D` | `--draft` | run, watch |
 | `-e` | `--eval-rounds` | run, watch, auto |
 | `-E` | `--env-file` | every command |
-| `-f` | `--file` | issue create, pr comment |
+| `-f` | `--file` | issue create, pr comment, release create |
 | `-f` | `--force` | run, auth token |
 | `-F` | `--fetch` | pipeline |
 | `-F` | `--fix-labels` | doctor |
@@ -689,12 +712,14 @@ Durations are Go durations: `30s`, `5m`, `1h30m`, `2h`.
 | `-H` | `--host` | auth login, auth status, auth logout, auth token |
 | `-i` | `--interval` | watch |
 | `-i` | `--issue` | pr list |
-| `-j` | `--json` | issue list, issue view, pr list, pr sweep, pr view, memory |
+| `-j` | `--json` | issue list, issue view, pr list, pr sweep, pr view, memory, tag list, tag view, release list, release view, release latest |
 | `-l` | `--label` | issue create, issue list, issue label, issue unlabel, watch |
-| `-L` | `--limit` | issue list, pr list, memory |
+| `-L` | `--limit` | issue list, pr list, memory, tag list, release list |
 | `-m` | `--merge` | run, watch, auto, pr sweep |
+| `-M` | `--manifest` | release stage, release verify, release publish |
 | `-M` | `--max-issues` | auto |
 | `-n` | `--dry-run` | run, auto, pr sweep |
+| `-n` | `--name` | release create |
 | `-N` | `--name-only` | pr diff |
 | `-N` | `--no-checkpoint` | auto |
 | `-N` | `--no-label` | issue create |
@@ -702,11 +727,12 @@ Durations are Go durations: `30s`, `5m`, `1h30m`, `2h`.
 | `-O` | `--color` | every command |
 | `-p` | `--memory-dir` | run, watch, auto, memory |
 | `-P` | `--checkpoint-after` | auto |
+| `-P` | `--prerelease` | release create |
 | `-q` | `--quiet` | every command |
 | `-r` | `--rebase` | pr merge |
 | `-R` | `--remove` | issue label |
 | `-s` | `--squash` | pr merge |
-| `-s` | `--state` | issue list, issue label, issue unlabel, pr list |
+| `-s` | `--state` | issue list, issue label, issue unlabel, pr list, release list |
 | `-S` | `--search` | issue list |
 | `-t` | `--agent-timeout` | run, watch, auto |
 | `-T` | `--stale-timeout` | watch |
@@ -1552,3 +1578,179 @@ Issues labeled `amf` by amf v0.0.4 and earlier aren't picked up any more.
 Relabel them `amf:ready`, or run `amf watch --label amf`.
 
 `.amf/` is added to `.git/info/exclude`, so it never shows up in `git status`.
+
+## Tags and releases
+
+`amf tag list` and `amf release list` follow GitHub pagination. `amf tag
+view` peels annotated tags recursively with cycle and depth protection, so
+the `commit` it prints is the actual commit. `amf release latest` asks GitHub
+for the latest published, non-prerelease release.
+
+`amf release create` is the only command that creates a tag or draft. It
+requires an explicit full commit SHA and never uses `main` or the latest
+commit. An existing tag must already peel to that exact SHA. amf never moves
+or deletes a tag, and it refuses to modify an existing published release.
+
+Before any tag or draft mutation, and again before publish, amf requires CI
+on the exact target SHA to have passed. Check runs and commit statuses are
+paginated; the latest status per context wins. Failed, pending, missing,
+inconclusive and mismatched results fail, as does a required check that
+never reported. There is no skip, force or bypass flag. If the token cannot
+read the branch protection policy (403), amf still requires every reported
+result to pass but cannot detect a required check that never ran.
+
+A release is always a draft first. `amf release stage` uploads missing assets
+and verifies the remote bytes without publishing. The JSON manifest pins the
+tag, commit and each asset's SHA-256 (and optional size):
+
+```json
+{
+  "tag": "v1.2.3",
+  "commit": "0123456789abcdef0123456789abcdef01234567",
+  "assets": [
+    {"name": "amf_v1.2.3_linux_amd64.tar.gz", "sha256": "…64 hex…", "size": 12345}
+  ]
+}
+```
+
+Every local `--asset` must be a regular, non-symlink file whose base name
+matches exactly one manifest entry, and every manifest entry must have one
+file. Duplicate names, path names, traversal names and bad checksums are
+rejected before anything is uploaded. The verified bytes are snapshotted
+before upload, so replacing or renaming the source file cannot substitute
+different content. Identical remote assets are skipped only after verifying
+their bytes; different content under the same name is a collision and is
+never overwritten or deleted. An interrupted asset is re-read and removed
+only when it is still the same incomplete asset, then uploaded again.
+
+`amf release verify` is read-only. `amf release publish` is the only command
+that makes a release public. It rechecks the tag's peeled commit, CI, the
+draft's identity, every remote asset byte against the manifest, and the
+asset identities, then rechecks the tag once more before publishing. An
+already published release is verified and reported as already published,
+never modified or duplicated. GitHub has no atomic compare-and-swap for
+publication, so a concurrent actor can still change remote state between
+amf's last read and the update; amf narrows, but cannot remove, that window.
+
+The CLI only performs these operations. Running `amf release ...` is not a
+permission grant for an assistant or agent to publish on your behalf; use it
+deliberately.
+
+### amf tag list
+
+```text
+amf tag list [--limit N] [--json]
+```
+
+Lists tags by name after reading every page. `--limit` defaults to 0
+(unlimited); negative values are rejected. `--json` prints an array of
+`{name, commit}`; `[]` when there are no tags.
+
+### amf tag view
+
+```text
+amf tag view <tag> [--json]
+```
+
+Shows the tag type, its immediate object SHA and the commit it peels to.
+Recursive annotated tags report their depth. A cycle, a non-commit target or
+more than 32 nested tag objects is an error. `--json` prints
+`{name, type, sha, commit, depth}`.
+
+### amf release list
+
+```text
+amf release list [--state all|draft|published|prerelease] [--limit N] [--json]
+```
+
+Lists releases newest first. `--state` defaults to `all`; `published`
+excludes drafts and prereleases. `--limit` defaults to 0 and applies after
+filtering. Text columns are TAG, STATE, TARGET and NAME. `--json` prints an
+array of `{id, tag, name, state, draft, prerelease, target, url,
+created_at, published_at}`.
+
+### amf release view
+
+```text
+amf release view <tag> [--json]
+```
+
+Shows one release, draft or published, including its assets, and its tag's
+peeled commit when that tag exists. `--json` prints the list fields plus
+`body`, `tag_commit` and an `assets` array of `{name, size, state, url}`.
+
+### amf release latest
+
+```text
+amf release latest [--json]
+```
+
+Shows the latest published, non-prerelease release; no such release is an
+error. `--json` prints the same object as `amf release view`.
+
+### amf release create
+
+```text
+amf release create <tag> --commit SHA [--name TEXT] [--body TEXT | --file PATH] [--prerelease]
+```
+
+Creates the tag if absent and a draft release. `--commit` is required and
+must be a full 40- or 64-character hexadecimal SHA. An existing tag must
+peel to exactly that SHA; identical is idempotent and a conflict fails
+without moving or deleting the tag. An existing draft is reused; a published
+release is refused. `--name` defaults to the tag. `--body` sets notes even
+when empty; `--file` reads a file, or stdin for `-`; the two conflict.
+`--prerelease` marks the draft as a prerelease. CI on the exact commit must
+pass before any mutation.
+
+### amf release stage
+
+```text
+amf release stage <tag> --manifest FILE --asset PATH...
+```
+
+Uploads missing assets to an existing draft and verifies every remote byte.
+It never publishes and never edits a published release. `--asset` may repeat.
+The manifest must pin the same tag and commit and list each asset's SHA-256.
+Every file is snapshotted and verified before upload. Identical uploaded
+assets are skipped; collisions and assets outside the manifest are refused.
+An interrupted upload of the same asset is recovered without deleting a
+different asset. Prints how many assets were uploaded and skipped and says
+the release is not published.
+
+### amf release verify
+
+```text
+amf release verify <tag> --manifest FILE
+```
+
+Read-only: checks the tag's peeled commit, the release, exact asset-name
+coverage and every remote asset's SHA-256 and size. It never uploads, deletes
+or publishes.
+
+### amf release publish
+
+```text
+amf release publish <tag> --manifest FILE
+```
+
+The only publishing command. Rechecks the tag, CI, draft identity, every
+remote asset byte and the asset identities, then flips only that draft live.
+An already published release is verified and reported, never modified.
+There is no force or bypass flag. Publication is not atomic on GitHub: amf
+narrows the race with repeated reads immediately before the update but cannot
+provide a compare-and-swap guarantee.
+
+## Release and tag flag reference
+
+| Command | Flags |
+|---|---|
+| `amf tag list` | `-L, --limit <n>`, `-j, --json` |
+| `amf tag view` | `-j, --json` |
+| `amf release list` | `-s, --state <state>`, `-L, --limit <n>`, `-j, --json` |
+| `amf release view` | `-j, --json` |
+| `amf release latest` | `-j, --json` |
+| `amf release create` | `-c, --commit <sha>`, `-n, --name <text>`, `-b, --body <text>`, `-f, --file <path>`, `-P, --prerelease` |
+| `amf release stage` | `-M, --manifest <path>`, `-a, --asset <path>` |
+| `amf release verify` | `-M, --manifest <path>` |
+| `amf release publish` | `-M, --manifest <path>` |

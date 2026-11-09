@@ -154,6 +154,16 @@ amf pr ready 57             # mark an open draft PR ready for review
 amf pr draft 57             # convert an open PR to a draft
 amf doctor --fix-labels     # correct amf status labels that disagree with the PRs (-F)
 
+amf tag list                # tags by name
+amf tag view v1.2.3         # annotated tags are peeled to their commit
+amf release list            # releases, newest first (--state draft to see drafts)
+amf release latest          # latest published, non-prerelease release
+amf release view v1.2.3     # one release and its assets
+amf release create v1.2.3 --commit <full-sha> --body "Notes"  # draft only
+amf release stage v1.2.3 --manifest release.json --asset dist/amf.tar.gz
+amf release verify v1.2.3 --manifest release.json  # read-only
+amf release publish v1.2.3 --manifest release.json  # the only publish step
+
 amf memory sync             # backfill the repo's memory from GitHub (then only what changed)
 amf memory similar 42       # past issues, PRs and runs like issue 42
 amf memory similar "flaky login test" --json
@@ -167,7 +177,10 @@ Or run `amf watch` to process open issues labeled `amf:ready`, oldest first.
 saves a token; `amf auth status`, `amf auth logout` and `amf auth token` (with
 `-f, --force` to print to a terminal) manage it. Every flag has a long and a
 short form: `amf help flags` lists them, including `-D, --draft` and
-`-O, --color=auto|always|never`. An agent that prints no output for
+`-O, --color=auto|always|never`. Release publishing is deliberately
+separate from inspection and staging: only `amf release publish` makes a
+release public, and running any `amf release` command does not grant an
+assistant permission to publish. An agent that prints no output for
 `AMF_AGENT_IDLE_TIMEOUT` (default 15m; `off` disables it) is stopped and the
 run fails, so the fallback agent can try.
 

@@ -80,6 +80,8 @@ on amf's output. Users can opt into paging with `amf pr diff 42 | less` or
 | `amf pr reopen <N>` | Reopens a chosen closed PR (`42` or `#42`); no git checkout needed. See below. |
 | `amf pr ready <N>` | Marks a draft pull request ready for review; no git checkout needed. See below. |
 | `amf pr draft <N>` | Converts a ready pull request back to a draft; no git checkout needed. See below. |
+| `amf tag <command>` | Groups tag inspection: `list` and `view` (plus `help`). Bare `amf tag` prints the group usage to stdout and exits 0; an unknown subcommand prints `amf: unknown tag command "<word>"`, a suggestion when close, and the usage to stderr, exit 2. Needs no git checkout. See [Tags and releases](#amf-tag-and-amf-release). |
+| `amf release <command>` | Groups release inspection and staging: `list`, `view`, `latest`, `create`, `stage`, `verify`, `publish` (plus `help`). Only `publish` makes a release public. Bare `amf release` prints the group usage to stdout and exits 0; an unknown subcommand prints `amf: unknown release command "<word>"`, a suggestion when close, and the usage to stderr, exit 2. Needs no git checkout. See [Tags and releases](#amf-tag-and-amf-release). |
 | `amf run <N> [--agent A] [--agent-timeout 60m] [--eval-rounds 2] [--dry-run] [--draft] [--merge[=squash\|rebase] [--wait-for-checks[=false]]] [--log-level L] [--log-file P]` | Processes issue N (`42` or `#42`, surrounding whitespace trimmed) once. Anything else, or `0`, fails with `invalid issue number "X"; use a positive number such as 42 or #42` (exit 1). |
 | `amf watch [--agent A] [--interval 60s] [--label amf:ready] [--exclude-label L]... [--agent-timeout 60m] [--eval-rounds 2] [--draft] [--merge[=squash\|rebase]] [--log-level L] [--log-file P]` | Polls open issues with the label (every page), oldest first by issue number (GitHub's `created_at` can tie for issues opened in the same second), and processes them one at a time until interrupted, skipping any issue that has one of the `--exclude-label` labels. `-h` and `--help`, including in the `amf issue watch` form, print the existing watch help and flags to stderr, leave stdout empty, and exit 0 before reading configuration, resolving a checkout, contacting GitHub or starting a runner. Unknown flags and missing flag values remain usage errors (exit 2); help follows normal argument parsing, so an unknown flag before `--help` remains an error. |
 | `amf pipeline [--fetch]` | Checks the pipeline in `AGENTS.md` of the enclosing checkout, as it is on disk. See below. |
@@ -88,7 +90,7 @@ on amf's output. Users can opt into paging with `amf pr diff 42 | less` or
 | `amf completion <bash\|zsh\|fish>` | Prints a self-contained script for the selected shell to stdout, with no configuration or GitHub access. Scripts complete visible commands, nested subcommands, help topics, shell names, and command-specific long and short flags, including the global flags (--quiet, --color and the path flags); all flags come from the same FlagSets as help and parsing, so adding a flag needs no completion change. Required flag values are skipped when finding the command; `--` stops command and flag suggestions. Scripts never invoke amf or GitHub during completion. Source Bash output in `.bashrc`, Zsh output after `compinit` in `.zshrc`, or pipe Fish output to `source` in `config.fish`; saved scripts must be regenerated after an upgrade to include new commands and flags. Missing or unsupported shells and extra positional arguments print usage to stderr, leave stdout empty and exit 2. `-h` and `--help` print help to stderr and exit 0; `amf help completion` prints the same help to stdout. A script write failure exits 1. |
 | `amf version` | Prints `amf <version>`: the release tag, or the module version for `go install`. `amf --version` is the same. |
 | `amf man` | Prints a section 1 man page in roff format to stdout, generated from the help overview and every listed command, subcommand and topic, including flags, examples and configuration settings. Output order is deterministic and has no generation date. Needs no configuration, git checkout, GitHub access or external tools. Takes no positional arguments or command-specific flags; extra arguments and unknown flags exit 2. `-h`, `--help` and `amf help man` print help and exit 0. A stdout write failure exits 1. Redirect output to `amf.1` and install it as `man1/amf.1` in a manual directory for `man amf`; see [Man page](COMMANDS.md#man-page). Generation and installation are manual: neither `install.sh` nor `amf update` installs the page. |
-| `amf help` | Prints the usage, as `-h` and `--help` do. `amf help <command>` prints that command's help; every `pr` and `issue` subcommand has a topic reachable with `amf help <group> <subcommand>` (including `help`, which prints group usage), without reading configuration or contacting GitHub. Unknown multiword topics follow the same error path as unknown single-word topics. For `issue` and `pr` alone it prints the group usage, as `amf issue help` and `amf pr help` do. `amf help agents` describes agent selection, and `amf help env` lists every configuration setting with its default and purpose, matching the [configuration guide](CONFIGURATION.md#configuration-env) table. The overview command names and descriptions match the [command reference](COMMANDS.md#commands), and its topics match the command reference's [Topics](COMMANDS.md#topics) table. The overview, also printed by bare `amf`, points to `docs/EXAMPLES.md` for examples and `docs/TROUBLESHOOTING.md` for troubleshooting. An unknown topic is an error: `amf: unknown help topic "x"`, a `Did you mean` suggestion when one is close, then the usage on stderr, exit code 2. |
+| `amf help` | Prints the usage, as `-h` and `--help` do. `amf help <command>` prints that command's help; every `pr`, `issue`, `tag` and `release` subcommand has a topic reachable with `amf help <group> <subcommand>` (including `help`, which prints group usage), without reading configuration or contacting GitHub. Unknown multiword topics follow the same error path as unknown single-word topics. For `issue` and `pr` alone it prints the group usage, as `amf issue help` and `amf pr help` do. `amf help agents` describes agent selection, and `amf help env` lists every configuration setting with its default and purpose, matching the [configuration guide](CONFIGURATION.md#configuration-env) table. The overview command names and descriptions match the [command reference](COMMANDS.md#commands), and its topics match the command reference's [Topics](COMMANDS.md#topics) table. The overview, also printed by bare `amf`, points to `docs/EXAMPLES.md` for examples and `docs/TROUBLESHOOTING.md` for troubleshooting. An unknown topic is an error: `amf: unknown help topic "x"`, a `Did you mean` suggestion when one is close, then the usage on stderr, exit code 2. |
 
 For `issue label` and `issue unlabel`, replace the issue number with one or
 more selectors to operate on a set: `--state open|closed|all` (`-s`),
@@ -732,6 +734,127 @@ maps to `https://api.github.com/graphql`, and a GitHub Enterprise Server
 base `https://host/api/v3` maps to `https://host/api/graphql`. A GraphQL
 response whose `errors` array is non-empty (for example, a token without
 permission) fails with its first message and leaves the PR as it was.
+
+### `amf tag` and `amf release`
+
+Both groups read `.env` and the environment, check repository access and need
+no git checkout. They use amf's existing GitHub client; none is a wrapper
+around `gh`.
+
+- `amf tag list [--limit N] [--json]` follows `GET /repos/{repo}/tags`
+  pagination, sorts by name, and prints TAG and COMMIT (the commit GitHub
+  lists). `--limit` defaults to 0 (unlimited) and is applied after sorting.
+  JSON is an array of `{name, commit}`.
+- `amf tag view <tag> [--json]` reads
+  `GET /repos/{repo}/git/ref/tags/{tag}`, then follows each `type: tag`
+  object through `GET /repos/{repo}/git/tags/{sha}` until a commit. It
+  detects a repeated tag-object SHA, stops after 32 tag objects, and rejects
+  a non-commit terminal object. JSON is
+  `{name, type, sha, commit, depth}`; `sha` is the immediate object and
+  `commit` the peeled commit.
+- `amf release list [--state all|draft|published|prerelease] [--limit N]
+  [--json]` follows `GET /repos/{repo}/releases` pagination, sorts newest
+  first, then filters. `published` means neither draft nor prerelease;
+  `prerelease` means published and prerelease. JSON is an array of
+  `{id, tag, name, state, draft, prerelease, target, url, created_at,
+  published_at}`.
+- `amf release view <tag> [--json]` uses
+  `GET /repos/{repo}/releases/tags/{tag}`, lists every asset page, and
+  reports the tag's peeled commit when the tag exists. `amf release latest`
+  uses `GET /repos/{repo}/releases/latest`, so it never returns a draft or
+  prerelease.
+
+**Validation.** Tag names follow git's conservative ref-name rules: no
+leading dash or slash, no `..`, `@{`, `//`, trailing slash or dot, a part
+beginning with a dot or ending in `.lock`, control characters, spaces or
+`~^:?*[\]`. Commits are explicit full
+40- or 64-character hexadecimal SHAs; branch names, short SHAs and `main`
+are rejected. An asset name must be one plain file name: no path separator,
+traversal, leading dash, surrounding whitespace or control characters.
+
+**Tag and draft creation.** `amf release create <tag> --commit SHA` first
+reads the tag. An existing tag must peel to exactly `SHA`: that is
+idempotent, any other target fails, and amf never moves or deletes a tag.
+Before changing anything it requires CI success on `SHA`. If the tag is
+absent it creates `refs/tags/<tag>` with `POST /repos/{repo}/git/refs`; a
+422 from a concurrent creation is resolved by re-reading the tag and
+checking the same target. It then looks for a release by tag: an existing
+draft is reused, an existing published release is refused, and otherwise it
+creates a draft with `POST /repos/{repo}/releases` using `draft: true` and
+`target_commitish` set to the commit. `target_commitish` is only a hint once
+the tag exists; the tag's peeled SHA is the authority. A concurrent release
+creation is likewise resolved by re-reading and reusing the draft for the
+same tag. A tag is created before its draft, so a failed draft creation can
+leave a tag that a retry reuses; GitHub offers no transaction across the two.
+
+**CI gate.** Mutating tag/draft operations and final publication call the
+same check on the exact target SHA. It reads every page of
+`GET /repos/{repo}/commits/{sha}/check-runs` and
+`GET /repos/{repo}/commits/{sha}/statuses`, validates any reported
+`head_sha`/`sha` against the target, and uses the latest status per context.
+Every check run must be completed with conclusion `success`; neutral or
+skipped is inconclusive and fails. Every latest status must be `success`.
+No check runs and no statuses is missing and fails. It also reads the default
+branch's `required_status_checks`; readable required contexts that never
+reported fail. A 403 means the policy is unreadable: amf still requires
+every reported result to pass but cannot detect a missing required check.
+There is no force, skip or bypass flag.
+
+**Staging and manifests.** `amf release stage <tag> --manifest FILE --asset
+PATH...` requires a JSON manifest:
+
+```json
+{"tag":"v1.2.3","commit":"<full sha>","assets":[{"name":"amf.tar.gz","sha256":"<64 hex>","size":123}]}
+```
+
+Unknown fields, a different tag, an invalid commit, duplicate asset names,
+bad SHA-256 values, negative sizes, traversal or path names are rejected.
+Every manifest entry needs exactly one `--asset`; every `--asset` base name
+must match an entry. Files must be regular non-symlinks. amf reads each file
+into an immutable snapshot, verifies its SHA-256 and optional size, and
+uploads that snapshot, so a rename or replacement after verification cannot
+change the uploaded bytes.
+
+Staging requires an existing draft whose tag still peels to the manifest
+commit, rechecks CI, and refuses a published release or any remote asset not
+named in the manifest. For each entry it downloads and hashes an existing
+asset: an identical one is skipped; different content under the same name is
+a collision and is never overwritten or deleted. An interrupted asset (a
+listed state other than `uploaded`) is re-read; only when it is still the
+same asset ID is it deleted and uploaded again, so a different asset is left
+alone. A concurrent upload race answered with 422/409 is accepted only after
+the same-name remote content verifies. After uploading, staging verifies
+every remote asset again. It never publishes.
+
+`amf release verify` performs the same manifest, tag, release and remote-byte
+checks read-only. It never uploads, deletes or publishes.
+
+**Publishing.** `amf release publish <tag> --manifest FILE` is the only
+publishing command. It requires the tag to peel to the manifest commit, the
+release to exist, and CI on that commit to pass. For a draft it verifies
+every remote asset against the manifest, re-reads the tag and release,
+compares every verified asset's ID, size and state, re-reads the tag and the
+draft once more, then sends `PATCH /repos/{repo}/releases/{id}
+{"draft":false}`. It does not create tags or releases at this stage and does
+not touch a published release. An already published release is verified and
+reported as already published, so a retry does not duplicate it. GitHub has
+no compare-and-swap for publication: amf narrows the race with repeated reads
+immediately before the PATCH but cannot make remote publication atomic; a
+concurrent actor can still change remote state in the final window.
+
+**Upload and download safety.** Upload URLs come from the release response.
+amf strips the `{?name,label}` template, requires HTTPS (or HTTP only when
+`AMF_API_URL` itself is HTTP, as in tests), rejects user info, fragments,
+`..` and any host other than the API host or `uploads.github.com`, and
+requires the path to end in `/repos/{repo}/releases/{id}/assets`. Upload
+redirects are refused, so an Authorization header is never forwarded.
+Asset downloads are read through the API with Authorization sent only to the
+API host; redirects are followed without that header, with scheme and user
+info checks and a five-redirect limit.
+
+Every `amf tag`/`amf release` command is an explicit CLI action. It is not a
+permission grant for an assistant or agent to publish releases on the user's
+behalf.
 
 ### `amf auth`
 

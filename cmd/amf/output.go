@@ -83,22 +83,40 @@ func extractOutputFlags(args []string, o *outputOptions) ([]string, error) {
 
 // requiredFlagValues lets global extraction skip command flag values without
 // parsing them. TestGlobalFlagValueMetadata checks it against command help.
-var requiredFlagValues = strings.Fields(`add agent agent-timeout body checkpoint-after
-client-id clone-dir color comment dir env-file eval-rounds exclude-label file host interval
-issue label limit log-file log-level max-issues memory-backend memory-dir remove
+var requiredFlagValues = strings.Fields(`add agent agent-timeout asset body checkpoint-after
+client-id clone-dir color comment commit dir env-file eval-rounds exclude-label file host interval
+issue label limit log-file log-level manifest max-issues memory-backend memory-dir name remove
 scopes search stale-timeout state timeout version`)
 
 func flagNeedsValue(name, command, subcommand string) bool {
 	if len(name) == 1 {
 		switch name {
-		case "f": // --file on issue creation and pr comment, --force elsewhere
+		case "f": // --file on issue creation, pr comment and release create, --force elsewhere
 			return command == "issue" && (subcommand == "create" || !slices.Contains(issueSubcommands, subcommand)) ||
-				command == "pr" && subcommand == "comment"
-		case "c": // --comment, --check or --continue
-			return (command == "issue" || command == "pr") && subcommand == "close"
+				command == "pr" && subcommand == "comment" ||
+				command == "release" && subcommand == "create"
+		case "c": // --comment, --check, --continue or --commit
+			if command == "release" && subcommand == "create" {
+				return true // --commit
+			}
+			return (command == "issue" || command == "pr") && subcommand == "close" // --comment
 		case "s": // --state or --squash
 			return command == "list" || subcommand == "list" ||
 				command == "issue" && (subcommand == "label" || subcommand == "unlabel")
+		case "a": // --add, --agent or --asset
+			if command == "issue" && (subcommand == "label" || subcommand == "unlabel") {
+				return true // --add
+			}
+			if command == "release" && subcommand == "stage" {
+				return true // --asset
+			}
+			return command == "run" || command == "watch" || command == "auto" || command == "issue"
+		case "M": // --max-issues or --manifest
+			return command == "auto" || command == "release"
+		case "n": // --dry-run or --name
+			return command == "release" && subcommand == "create" // --name
+		case "P": // --checkpoint-after or --prerelease
+			return command == "auto" // --checkpoint-after; release create's --prerelease is a bool
 		}
 		for long, short := range shortFlags {
 			if short == name {

@@ -22,6 +22,8 @@ var helpCommands = [][]string{
 	{"init"}, {"auth", "login"}, {"auth", "status"}, {"auth", "logout"}, {"auth", "token"}, {"issue", "create"}, {"issue", "list"}, {"list"}, {"run"}, {"watch"}, {"auto"},
 	{"pr", "list"}, {"pr", "merge"}, {"pr", "sweep"}, {"pr", "view"}, {"pr", "diff"}, {"pr", "comment"}, {"pr", "close"},
 	{"pr", "reopen"}, {"pr", "ready"}, {"pr", "draft"},
+	{"tag", "list"}, {"tag", "view"},
+	{"release", "list"}, {"release", "view"}, {"release", "latest"}, {"release", "create"}, {"release", "stage"}, {"release", "verify"}, {"release", "publish"},
 	{"memory", "sync"}, {"memory", "similar"}, {"memory", "show"},
 	{"pipeline"}, {"doctor"}, {"update"}, {"completion"}, {"man"}, {"version"},
 }
