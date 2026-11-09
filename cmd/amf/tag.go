@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 	"text/tabwriter"
@@ -18,17 +20,20 @@ var tagUsage = `usage: amf tag <command>
 Commands:
   list [--limit n] [--json]  list tags by name, with their commits
   view <name> [--json]  show a tag's recursively peeled commit
+  create <name> --commit <sha>  create a tag only at a full commit SHA
 
-Tags are read-only in amf: it cannot create, move or delete tags.
+Tags are created once at an immutable commit; amf never moves or deletes
+one. Creating a tag that already peels to the same commit succeeds without
+a write, and one that peels elsewhere fails.
 Run amf help tag <command> or amf tag <command> --help for its flags.
 ` + "\nExamples:\n" + helpExamples["tag"] + "\nSee also: amf help release, amf help flags\n"
 
-var tagSubcommands = []string{"list", "view", "help"}
+var tagSubcommands = []string{"list", "view", "create", "help"}
 
-// Use the existing sanctioned API client, but refuse all redirects for these
-// inspection commands (including the preliminary repository check). Go's
-// default redirect policy can forward Authorization across ports or to
-// subdomains; inspection must never send credentials to a redirected target.
+// Use the existing sanctioned API client, but refuse all redirects for tag and
+// release commands (including the preliminary repository check). Go's default
+// redirect policy can forward Authorization across ports or to subdomains;
+// these commands must never send credentials to a redirected target.
 func newTagReleaseGitHub(cfg Config) *GitHub {
 	g := newGitHub(cfg)
 	g.http.CheckRedirect = func(*http.Request, []*http.Request) error {
@@ -50,6 +55,8 @@ func cmdTag(ctx context.Context, args []string, stdout, stderr io.Writer) error 
 		return cmdTagList(ctx, args[1:], stdout, stderr)
 	case "view":
 		return cmdTagView(ctx, args[1:], stdout, stderr)
+	case "create":
+		return cmdTagCreate(ctx, args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "amf: unknown tag command %q\n", args[0])
 		if s := suggestFrom(args[0], tagSubcommands); s != "" {
@@ -287,5 +294,137 @@ func cmdTagView(ctx context.Context, args []string, stdout, stderr io.Writer) er
 		return enc.Encode(viewedTag{Name: name, Commit: commit})
 	}
 	_, err = fmt.Fprintf(stdout, "%-8s %s\n%-8s %s\n", "tag:", name, "commit:", commit)
+	return err
+}
+
+var fullCommitSHA = regexp.MustCompile(`^[0-9a-f]{40}(?:[0-9a-f]{24})?$`)
+
+// validateFullCommitSHA accepts only a complete, lower-case SHA. A branch or
+// short SHA would let the target move after the check, which the release
+// workflow must never allow.
+func validateFullCommitSHA(sha string) (string, error) {
+	sha = strings.TrimSpace(sha)
+	if !fullCommitSHA.MatchString(sha) {
+		return "", fmt.Errorf("--commit must be a full 40- or 64-character lower-case Git commit SHA, got %q", sha)
+	}
+	return sha, nil
+}
+
+// validateTagName applies git's ref-name rules for a tag, so amf never asks
+// GitHub to create an ambiguous or malformed ref.
+func validateTagName(name string) error {
+	if name == "" {
+		return errors.New("tag name can't be empty")
+	}
+	if name == "@" || strings.HasPrefix(name, "/") || strings.HasSuffix(name, "/") || strings.Contains(name, "//") {
+		return fmt.Errorf("invalid tag name %q", name)
+	}
+	if strings.HasSuffix(name, ".") || strings.HasSuffix(name, ".lock") || strings.Contains(name, "..") || strings.Contains(name, "@{") {
+		return fmt.Errorf("invalid tag name %q", name)
+	}
+	for _, r := range name {
+		if r <= ' ' || r == 0x7f || strings.ContainsRune("~^:?*[\\", r) {
+			return fmt.Errorf("invalid tag name %q", name)
+		}
+	}
+	for _, part := range strings.Split(name, "/") {
+		if part == "" || part == "." || part == ".." || strings.HasPrefix(part, ".") {
+			return fmt.Errorf("invalid tag name %q", name)
+		}
+	}
+	return nil
+}
+
+// CommitExists checks that sha names a commit object in the repository, not
+// a tag, tree or blob. Tag creation stays at an immutable commit.
+func (g *GitHub) CommitExists(ctx context.Context, sha string) error {
+	var out struct {
+		SHA string `json:"sha"`
+	}
+	if err := g.do(ctx, "GET", g.repoPath("/git/commits/%s", url.PathEscape(sha)), nil, &out); err != nil {
+		if isStatus(err, http.StatusNotFound) {
+			return fmt.Errorf("commit %s was not found in %s", sha, g.repo)
+		}
+		return err
+	}
+	if out.SHA != sha {
+		return fmt.Errorf("GitHub returned commit %q for %q", out.SHA, sha)
+	}
+	return nil
+}
+
+type tagCreateFlags struct {
+	commit *string
+}
+
+func addTagCreateFlags(fs *flag.FlagSet) tagCreateFlags {
+	return tagCreateFlags{commit: fs.String("commit", "", "full 40- or 64-character commit `sha` the tag must point to")}
+}
+
+func cmdTagCreate(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := newCommandFlags("tag create", stderr)
+	f := addTagCreateFlags(fs)
+	pos, err := parseArgs(fs, args)
+	if err != nil {
+		if err == flag.ErrHelp {
+			return nil
+		}
+		return errUsage
+	}
+	if len(pos) != 1 || strings.TrimSpace(pos[0]) == "" {
+		fmt.Fprintln(stderr, "usage: amf tag create <name> --commit <sha>")
+		return errUsage
+	}
+	name := strings.TrimSpace(pos[0])
+	if err := validateTagName(name); err != nil {
+		return err
+	}
+	sha, err := validateFullCommitSHA(*f.commit)
+	if err != nil {
+		return err
+	}
+	cfg, err := loadConfig(envPaths(ctx)...)
+	if err != nil {
+		return err
+	}
+	gh := newTagReleaseGitHub(cfg)
+	if err := checkRepo(ctx, gh, cfg.Repo); err != nil {
+		return err
+	}
+	if err := gh.CommitExists(ctx, sha); err != nil {
+		return err
+	}
+	peeled, err := gh.TagCommit(ctx, name)
+	switch {
+	case err == nil:
+		if peeled != sha {
+			return fmt.Errorf("tag %q already points to commit %s, not %s; amf never moves a tag", name, peeled, sha)
+		}
+		_, err = fmt.Fprintf(stdout, "Tag %s already points to %s.\n", name, sha)
+		return err
+	case !isStatus(err, http.StatusNotFound):
+		return err
+	}
+	in := map[string]string{"ref": "refs/tags/" + name, "sha": sha}
+	if err := gh.do(ctx, "POST", gh.repoPath("/git/refs"), in, nil); err != nil {
+		// A concurrent creator may have made the same tag between the read
+		// and the write. Re-read and accept only the same immutable target.
+		if peeled, readErr := gh.TagCommit(ctx, name); readErr == nil {
+			if peeled != sha {
+				return fmt.Errorf("tag %q was created concurrently at commit %s, not %s; amf never moves a tag", name, peeled, sha)
+			}
+			_, outErr := fmt.Fprintf(stdout, "Tag %s already points to %s.\n", name, sha)
+			return outErr
+		}
+		return err
+	}
+	peeled, err = gh.TagCommit(ctx, name)
+	if err != nil {
+		return err
+	}
+	if peeled != sha {
+		return fmt.Errorf("tag %q now points to commit %s, not %s", name, peeled, sha)
+	}
+	_, err = fmt.Fprintf(stdout, "Created tag %s at %s.\n", name, sha)
 	return err
 }

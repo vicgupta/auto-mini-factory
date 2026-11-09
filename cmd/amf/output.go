@@ -84,9 +84,9 @@ func extractOutputFlags(args []string, o *outputOptions) ([]string, error) {
 // requiredFlagValues lets global extraction skip command flag values without
 // parsing them. TestGlobalFlagValueMetadata checks it against command help.
 var requiredFlagValues = strings.Fields(`add agent agent-timeout body checkpoint-after
-client-id clone-dir color comment dir env-file eval-rounds exclude-label file host interval
-issue label limit log-file log-level max-issues memory-backend memory-dir remove
-scopes search stale-timeout state timeout version`)
+client-id clone-dir color comment commit dir env-file eval-rounds exclude-label file host interval
+issue label limit log-file log-level manifest max-issues memory-backend memory-dir plan remove
+release scopes search stale-timeout state timeout version`)
 
 func flagNeedsValue(name, command, subcommand string) bool {
 	if len(name) == 1 {
@@ -94,8 +94,11 @@ func flagNeedsValue(name, command, subcommand string) bool {
 		case "f": // --file on issue creation and pr comment, --force elsewhere
 			return command == "issue" && (subcommand == "create" || !slices.Contains(issueSubcommands, subcommand)) ||
 				command == "pr" && subcommand == "comment"
-		case "c": // --comment, --check or --continue
-			return (command == "issue" || command == "pr") && subcommand == "close"
+		case "c": // --comment and --commit take a value; --check and --continue do not
+			if command == "auto" || command == "update" {
+				return false
+			}
+			return slices.Contains(requiredFlagValues, "commit")
 		case "s": // --state or --squash
 			return command == "list" || subcommand == "list" ||
 				command == "issue" && (subcommand == "label" || subcommand == "unlabel")

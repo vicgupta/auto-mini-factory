@@ -279,7 +279,9 @@ func TestDocumentedFlagsExist(t *testing.T) {
 		{"init"}, {"issue", "create"}, {"issue", "list"}, {"issue", "run"}, {"issue", "watch"},
 		{"pr", "list"}, {"pr", "merge"}, {"pr", "view"}, {"pr", "diff"}, {"pr", "comment"}, {"pr", "close"},
 		{"pr", "reopen"}, {"pr", "ready"}, {"pr", "draft"},
-		{"tag", "list"}, {"tag", "view"}, {"release", "list"}, {"release", "view"}, {"release", "latest"},
+		{"tag", "list"}, {"tag", "view"}, {"tag", "create"},
+		{"release", "list"}, {"release", "view"}, {"release", "latest"},
+		{"release", "create"}, {"release", "stage"}, {"release", "publish"},
 		{"run"}, {"watch"}, {"auto"}, {"pipeline"}, {"doctor"}, {"update"},
 	} {
 		t.Run(strings.Join(cmd, " "), func(t *testing.T) {

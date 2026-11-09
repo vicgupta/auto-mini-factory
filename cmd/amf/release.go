@@ -21,13 +21,15 @@ Commands:
   list [--state all|published|draft|prerelease] [--limit n] [--json]  list releases, newest first
   view <tag> [--json]  show a release, its assets and its tag's actual commit
   latest [--json]  show GitHub's latest published non-prerelease release
+  create <tag> --plan <file> --manifest <file>  create an unpublished draft pinned to a tag and plan
+  stage <tag> --release <id> --plan <file> --manifest <file>  verify and upload the plan's artifacts
+  publish <tag> --release <id> --plan <file> --manifest <file>  verify everything, then publish once
 
-Releases are read-only in amf: it cannot create, stage, upload, publish or
-delete releases or assets.
+create never publishes, stage never publishes, and only publish publishes.
 Run amf help release <command> or amf release <command> --help for its flags.
 ` + "\nExamples:\n" + helpExamples["release"] + "\nSee also: amf help tag, amf help flags\n"
 
-var releaseSubcommands = []string{"list", "view", "latest", "help"}
+var releaseSubcommands = []string{"list", "view", "latest", "create", "stage", "publish", "help"}
 
 func cmdRelease(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
@@ -44,6 +46,12 @@ func cmdRelease(ctx context.Context, args []string, stdout, stderr io.Writer) er
 		return cmdReleaseView(ctx, args[1:], stdout, stderr)
 	case "latest":
 		return cmdReleaseLatest(ctx, args[1:], stdout, stderr)
+	case "create":
+		return cmdReleaseCreate(ctx, args[1:], stdout, stderr)
+	case "stage":
+		return cmdReleaseStage(ctx, args[1:], stdout, stderr)
+	case "publish":
+		return cmdReleasePublish(ctx, args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "amf: unknown release command %q\n", args[0])
 		if s := suggestFrom(args[0], releaseSubcommands); s != "" {

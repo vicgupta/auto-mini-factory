@@ -734,27 +734,32 @@ func TestTagReleaseEmptyErrorsAndNoAuth(t *testing.T) {
 }
 
 func TestTagReleaseReadOnlyCommands(t *testing.T) {
-	mutations := [][]string{
-		{"tag", "create"}, {"tag", "delete"}, {"tag", "update"},
-		{"release", "create"}, {"release", "delete"}, {"release", "edit"},
-		{"release", "upload"}, {"release", "publish"}, {"release", "stage"}, {"release", "verify"},
+	unknown := [][]string{
+		{"tag", "delete"}, {"tag", "update"},
+		{"release", "delete"}, {"release", "edit"},
+		{"release", "upload"}, {"release", "verify"},
 	}
 	srv, log := newTagReleaseServer(t, func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, []any{})
 	})
 	tagReleaseEnv(t, srv)
-	for _, args := range mutations {
+	for _, args := range unknown {
 		if _, _, err := runTagRelease(t, args...); !errors.Is(err, errUsage) {
 			t.Errorf("amf %v: error = %v, want a usage error", args, err)
 		}
 	}
-	for _, word := range []string{"create", "delete", "update", "edit", "upload", "publish", "stage", "verify"} {
+	for _, word := range []string{"delete", "update", "edit", "upload", "verify"} {
 		if tagReleaseContains(tagSubcommands, word) || tagReleaseContains(releaseSubcommands, word) {
-			t.Errorf("mutation subcommand %q is exposed", word)
+			t.Errorf("unknown subcommand %q is exposed", word)
+		}
+	}
+	for _, word := range []string{"create", "stage", "publish"} {
+		if !tagReleaseContains(releaseSubcommands, word) {
+			t.Errorf("release subcommand %q is missing", word)
 		}
 	}
 	if wrote := log.wrote(); len(wrote) != 0 {
-		t.Fatalf("mutation attempts wrote %v", wrote)
+		t.Fatalf("unknown commands wrote %v", wrote)
 	}
 
 	// Every advertised subcommand only reads. Give it enough data to finish.

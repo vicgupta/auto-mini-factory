@@ -18,8 +18,8 @@ For every `--json` command and its schema, see the [JSON output index](JSON.md).
 | `amf auth` | get a GitHub token: login, status, logout, token |
 | `amf issue` | manage issues: `create`, `list`, `label`, `unlabel`, `close`, `reopen`, `view`, `run`, `watch` |
 | `amf pr` | manage pull requests: `list`, `merge`, `sweep`, `view`, `diff`, `comment`, `close`, `reopen`, `ready`, `draft` |
-| `amf tag` | inspect tags: `list`, `view` |
-| `amf release` | inspect releases: `list`, `view`, `latest` |
+| `amf tag` | inspect and create tags: `list`, `view`, `create` |
+| `amf release` | inspect and safely stage releases: `list`, `view`, `latest`, `create`, `stage`, `publish` |
 | `amf run` | process one issue into a PR (alias of `issue run`) |
 | `amf watch` | process `amf:ready` issues as they arrive (alias of `issue watch`) |
 | `amf auto` | plan one sentence into up to 5 issues and merge their PRs, pausing after the first by default |
@@ -139,8 +139,10 @@ such as `amf run 0`.
 |---|---|
 | `amf tag list [--limit n] [--json]` | list tags by name, with their commits |
 | `amf tag view <name> [--json]` | show a tag's recursively peeled commit |
+| `amf tag create <name> --commit <sha>` | create a tag at one full immutable commit SHA |
 
-Tags are read-only in amf: it cannot create, move or delete tags.
+amf creates a tag only when it does not exist; the same commit is an idempotent
+success. It never moves, force-updates or deletes a tag.
 
 ## release commands
 
@@ -149,9 +151,13 @@ Tags are read-only in amf: it cannot create, move or delete tags.
 | `amf release list [--state all\|published\|draft\|prerelease] [--limit n] [--json]` | list releases, newest first |
 | `amf release view <tag> [--json]` | show a release, its assets and its tag's actual commit |
 | `amf release latest [--json]` | show GitHub's latest published non-prerelease release |
+| `amf release create <tag> --plan file --manifest file` | create an unpublished draft pinned to a tag, full SHA and exact artifact plan |
+| `amf release stage <tag> --release id --plan file --manifest file` | verify local snapshots and upload them to the pinned draft |
+| `amf release publish <tag> --release id --plan file --manifest file` | recheck everything, then publish the draft once |
 
-Releases are read-only in amf: it cannot create, stage, upload, publish or
-delete releases or assets.
+`create` never publishes and never uploads; `stage` only stages; only
+`publish` publishes. Each command requires an exact plan and checksum manifest;
+see [Staged release workflow](#staged-release-workflow).
 
 ## Subcommand reference
 
@@ -637,6 +643,23 @@ Example output:
 #57 is now a draft https://github.com/owner/repo/pull/57
 ```
 
+### amf tag create
+
+```text
+amf tag create <name> --commit <sha>
+```
+
+Creates a lightweight tag at a full, lower-case 40- or 64-character commit SHA.
+The SHA must name a commit object, not a branch, short SHA, tag, tree or blob.
+amf reads the existing ref first and peels annotated tags recursively: the same
+commit succeeds without a write, and a different commit fails, so amf never
+moves a tag. `-c, --commit` supplies the SHA. Tag names follow git ref rules.
+Needs no git checkout.
+
+```sh
+amf tag create v1.2.3 --commit 0123456789abcdef0123456789abcdef01234567
+```
+
 ### amf tag list
 
 ```text
@@ -649,7 +672,7 @@ authoritative creation order, so amf never presents a tag as "latest".
 hides some, stderr says `Showing N of M tags; use --limit 0 to list them all.`
 Text columns are `TAG` and `COMMIT`. `--json` prints an array of objects with
 exactly `name` and `commit`, or `[]` when there are none. Needs no git
-checkout. amf never creates, moves or deletes tags.
+checkout. Creating tags needs `amf tag create`; this listing never writes.
 
 ```sh
 amf tag list --limit 10
@@ -668,7 +691,7 @@ incomplete, points to anything other than a commit, repeats a tag object (a
 cycle), or nests deeper than 16 tag objects is rejected. The ref name and each
 tag object's SHA are checked, so amf never reports another tag's object.
 `--json` prints one object with exactly `name` and `commit`. Needs no git
-checkout. amf never creates, moves or deletes tags.
+checkout. Creating tags needs `amf tag create`; viewing never writes.
 
 ```sh
 amf tag view v1.2.3
@@ -691,8 +714,8 @@ asset array is not treated as complete. Drafts are visible only when the token
 can see them. Text columns are `TAG`, `STATE`, `ASSETS` and `NAME`, and when
 nothing matches it prints `No releases in owner/name.` (or `No published
 releases ...` for a state filter). `--json`
-prints an array of release objects, or `[]`. Needs no git checkout. amf never
-creates, uploads, publishes or deletes releases or assets.
+prints an array of release objects, or `[]`. Needs no git checkout. Listing
+never changes a release or asset.
 
 ```sh
 amf release list --state published --limit 5
@@ -710,8 +733,8 @@ actual commit the tag peels to, shown separately from `target_commitish`, which
 GitHub recorded at creation and which does not prove the tag's ref. A draft
 whose tag does not exist yet shows `commit` as `unknown`; a published release
 with a missing tag is an error. `--json` prints one object with `commit` set to
-`null` when unknown. Needs no git checkout. amf never creates, uploads,
-publishes or deletes releases or assets.
+`null` when unknown. Needs no git checkout. Viewing never changes a release or
+asset.
 
 ```sh
 amf release view v1.2.3
@@ -727,13 +750,126 @@ amf release latest [--json]
 Shows GitHub's latest published, non-prerelease release, with every asset and
 the tag's actual peeled commit. When there is none, prints
 `No published releases in owner/name.` and exits 0; `--json` prints `null`.
-Needs no git checkout. amf never creates, uploads, publishes or deletes
-releases or assets.
+Needs no git checkout. Viewing never changes a release or asset.
 
 ```sh
 amf release latest
 amf release latest --json
 ```
+
+### amf release create
+
+```text
+amf release create <tag> --plan plan.json --manifest checksums.txt
+```
+
+Creates an unpublished draft release pinned to the plan's tag, full commit SHA
+and exact artifact set. The tag must already exist and peel to that SHA. amf
+reads the required CI policy from the policy file at that exact commit and
+stores a versioned ownership record in the draft body with the repository, tag,
+SHA, policy, and each artifact's name, SHA-256 and size. An existing draft is
+reused only after the remote record matches the requested plan exactly; an
+unrelated draft or published release, or a changed policy, is never modified.
+Prints `Created draft release <id> for tag <tag> at <sha>.`, or
+`Draft release <id> already matches ...` when the draft already exists, so the
+ID can be passed to `stage` and `publish`. It never uploads an artifact and
+never publishes. Flags: `-p, --plan`, `-M, --manifest`.
+
+### amf release stage
+
+```text
+amf release stage <tag> --release 42 --plan plan.json --manifest checksums.txt
+```
+
+Stages the plan's named files on the pinned draft. `-R, --release` is required
+and pins the numeric release ID. Every local file must be regular (never a
+symlink), stay inside the plan directory, have an unambiguous name, and be
+covered exactly once by `-M, --manifest`. amf copies each file into a bounded
+temporary snapshot while hashing it, checks the manifest checksum and records
+its size, then uploads only that verified snapshot; renaming or replacing the
+original cannot substitute different bytes.
+
+An asset already present is skipped only after its remote size and downloaded
+bytes match the record. A different, unfinished or unexpected asset, including
+an interrupted upload or a publication claim, fails closed and is never deleted
+or overwritten. A lost upload response is resolved by re-reading and verifying
+the remote asset. Rerunning after an interrupted stage is safe. Prints how many
+artifacts were staged. It never publishes.
+
+### amf release publish
+
+```text
+amf release publish <tag> --release 42 --plan plan.json --manifest checksums.txt
+```
+
+Publishes the pinned draft after rechecking the tag's actual peeled SHA, the
+exact recorded plan, release identity and policy, every expected artifact's
+remote size and downloaded bytes, and the required CI on the exact commit.
+`-R, --release`, `-p, --plan` and `-M, --manifest` are required.
+
+The policy file at the target commit supplies required check names with app IDs
+and required commit-status contexts with creator IDs. Every requirement must be
+present, the latest attempt, from the recorded source, completed and successful;
+missing, pending, failed, inconclusive, wrong-SHA or wrong-source results fail,
+and an absent, empty or unreadable policy fails closed. Policy is never drawn
+from a moving branch or a local override.
+
+Publication uses a create-only claim asset to serialize cooperating amf
+processes, then one PATCH that only clears draft. GitHub provides no CAS or
+transaction across tag, assets and publication, so a lost or uncertain response
+is re-read; if the outcome is still ambiguous amf refuses, keeps the claim, and
+leaves recovery to an operator. An already published identical retry verifies
+and returns without modification. Explicit publish intent does not grant an
+assistant permission to publish.
+
+### Staged release workflow
+
+Build artifacts, write a plan and a `sha256sum`-style manifest, create the tag,
+create the draft, stage, then publish:
+
+```json
+{
+  "schema": "amf-release-plan/v1",
+  "tag": "v1.2.3",
+  "commit": "0123456789abcdef0123456789abcdef01234567",
+  "name": "amf v1.2.3",
+  "notes": "What changed in this release.",
+  "policy": "amf-release-policy.json",
+  "artifacts": [
+    {"path": "dist/amf_v1.2.3_linux_amd64.tar.gz", "name": "amf_v1.2.3_linux_amd64.tar.gz"}
+  ]
+}
+```
+
+```json
+{
+  "version": 1,
+  "required_checks": [
+    {"name": "test", "app_id": 15368}
+  ],
+  "required_statuses": [
+    {"context": "ci/build", "creator_id": 12345}
+  ]
+}
+```
+
+```sh
+sha256sum dist/amf_v1.2.3_linux_amd64.tar.gz > dist/checksums.txt
+amf tag create v1.2.3 --commit 0123456789abcdef0123456789abcdef01234567
+amf release create v1.2.3 --plan dist/plan.json --manifest dist/checksums.txt
+amf release stage v1.2.3 --release 42 --plan dist/plan.json --manifest dist/checksums.txt
+amf release publish v1.2.3 --release 42 --plan dist/plan.json --manifest dist/checksums.txt
+```
+
+The policy is target-committed release policy: it describes what amf requires on
+that commit, not an inference of every branch protection or ruleset requirement.
+An absent, empty or malformed policy is an error, not an empty requirement list.
+Artifact paths are resolved relative to the plan file. The ownership record is
+strict versioned JSON; duplicate keys, duplicate markers, unknown fields and
+changed, subset or extra plans are rejected.
+
+`amf tag create` and `amf release create`, `stage` and `publish` print a short
+status line and do not take `--json`.
 
 Draft lookup falls back from GitHub's published-by-tag endpoint to the fully
 paginated visible release list; multiple matches are rejected as ambiguous.
@@ -801,6 +937,7 @@ Durations are Go durations: `30s`, `5m`, `1h30m`, `2h`.
 | `-B` | `--no-browser` | auth login |
 | `-c` | `--check` | update |
 | `-c` | `--comment` | issue close, pr close |
+| `-c` | `--commit` | tag create |
 | `-c` | `--continue` | auto |
 | `-C` | `--client-id` | auth login |
 | `-d` | `--delete-branch` | issue close, pr merge, pr close |
@@ -822,6 +959,7 @@ Durations are Go durations: `30s`, `5m`, `1h30m`, `2h`.
 | `-l` | `--label` | issue create, issue list, issue label, issue unlabel, watch |
 | `-L` | `--limit` | issue list, pr list, tag list, release list, memory |
 | `-m` | `--merge` | run, watch, auto, pr sweep |
+| `-M` | `--manifest` | release create, release stage, release publish |
 | `-M` | `--max-issues` | auto |
 | `-n` | `--dry-run` | run, auto, pr sweep |
 | `-N` | `--name-only` | pr diff |
@@ -830,9 +968,11 @@ Durations are Go durations: `30s`, `5m`, `1h30m`, `2h`.
 | `-o` | `--scopes` | auth login |
 | `-O` | `--color` | every command |
 | `-p` | `--memory-dir` | run, watch, auto, memory |
+| `-p` | `--plan` | release create, release stage, release publish |
 | `-P` | `--checkpoint-after` | auto |
 | `-q` | `--quiet` | every command |
 | `-r` | `--rebase` | pr merge |
+| `-R` | `--release` | release stage, release publish |
 | `-R` | `--remove` | issue label |
 | `-s` | `--squash` | pr merge |
 | `-s` | `--state` | issue list, issue label, issue unlabel, pr list, release list |

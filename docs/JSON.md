@@ -6,6 +6,10 @@ in the [command reference](COMMANDS.md#subcommand-reference). JSON is written
 to stdout with a final newline, like the other command data described under
 [Output](../README.md#output).
 
+The write commands `amf tag create` and `amf release create`, `stage` and
+`publish` have no `--json` mode; each prints one status line and leaves the
+release or asset as described in the command reference.
+
 | Command | JSON value | Fields |
 |---|---|---|
 | `amf issue list` (or `amf list`) | array of [issues](#issue) | `number`, `title`, `state`, `url`, `labels` |
