@@ -134,12 +134,6 @@ func completionCommandFlagSet(key string) *flag.FlagSet {
 		addReleaseListFlags(fs)
 	case "release view", "release latest":
 		addReleaseViewFlags(fs)
-	case "release create":
-		addReleaseCreateFlags(fs)
-	case "release stage":
-		addReleaseStageFlags(fs)
-	case "release verify", "release publish":
-		fs.String("manifest", "", "read tag, commit and expected SHA-256 checksums from this `path`")
 	case "auth login", "auth status", "auth logout", "auth token":
 		addAuthFlags(fs, strings.TrimPrefix(key, "auth "))
 	case "memory sync", "memory similar", "memory show":

@@ -226,159 +226,96 @@ Closed or merged PRs fail. Issue labels are left as they are. Prints
 	"tag list": `Usage:
   amf tag list [flags]
 
-Lists tags by name, following every page. The commit is the one GitHub's
-tag list reports; amf tag view is the authority for annotated tags.
-
---limit defaults to 0 (unlimited) and is applied after sorting.
---json prints an array of {name, commit}.
+Lists every tag, sorted by name ascending. Tags have no authoritative
+creation-time order, so no tag is presented as "latest". GitHub's listing
+supplies each tag's commit. --limit keeps the first N after sorting (0, the
+default, means no limit). --json prints an array of {name, commit}, or [].
+Needs no git checkout. amf never creates, moves or deletes tags.
 `,
 	"tag view": `Usage:
-  amf tag view <tag> [flags]
+  amf tag view <name> [flags]
 
-Shows a tag and the commit it ultimately names. Annotated tags are peeled
-recursively; a cycle, a non-commit target or nesting deeper than 32 tag
-objects is an error.
-
---json prints one object with name, type, sha, commit and depth. sha is the
-tag's immediate object; commit is the final commit.
+Shows a tag and the commit it ultimately points to. Annotated tags are peeled
+recursively. A response that is incomplete, points to anything other than a
+commit, repeats a tag object (a cycle), or nests deeper than 16 tag objects
+is rejected, and the ref name and each tag object's SHA are checked, so amf
+never reports another tag's object. --json prints {name, commit}. Needs no
+git checkout. amf never creates, moves or deletes tags.
 `,
 	"release list": `Usage:
   amf release list [flags]
 
-Lists releases, newest first, following every page. Drafts are included
-only with --state all (the default) or --state draft.
-
---state is all, draft, published or prerelease. published excludes drafts
-and prereleases. --limit defaults to 0 (unlimited) and applies after
-filtering. --json prints an array of {id, tag, name, state, draft,
-prerelease, target, url, created_at, published_at}.
+Lists releases newest first by creation time, ties by release ID. --state
+all (the default) includes drafts and prereleases; published keeps only
+releases that are neither, draft keeps drafts, and prerelease keeps releases
+marked prerelease. --limit keeps the first N after filtering (0 means no
+limit). Every page of releases and of each shown release's assets is fetched;
+an inline asset array is not treated as complete. Drafts are visible only
+when the token can see them. --json prints an array, or [].
+Needs no git checkout. amf never creates, uploads, publishes or deletes.
 `,
 	"release view": `Usage:
   amf release view <tag> [flags]
 
-Shows a release, draft or published, and the commit its tag peels to when
-the tag exists. --json adds body, tag_commit and an assets array of
-{name, size, state, url} to the list fields.
+Shows the release for a tag, including every asset. The commit is the actual
+commit the tag peels to, shown separately from target_commitish, which GitHub
+recorded at creation and which does not prove the tag's ref. A draft whose tag
+does not exist yet shows commit as unknown; a published release with a missing
+tag is an error. --json prints one object with commit null when unknown.
+Needs no git checkout. amf never creates, uploads, publishes or deletes.
 `,
 	"release latest": `Usage:
   amf release latest [flags]
 
-Shows the latest published, non-prerelease release. No published release is
-an error. --json prints the same object as amf release view.
-`,
-	"release create": `Usage:
-  amf release create <tag> --commit sha [flags]
-
-Creates the tag (if absent) and a DRAFT release, never a published one.
---commit is required and must be a full 40- or 64-character commit SHA;
-amf never assumes the latest commit or a branch name.
-
-An existing tag must already peel to exactly --commit: identical is
-idempotent, anything else fails, and amf never moves or deletes a tag.
-An existing published release for the tag is refused; an existing draft is
-reused. Both tag and draft creation re-read after a race.
-
-Before mutating anything, amf requires CI on the exact commit to have
-passed: every check run and latest commit status must be successful, no
-result may be pending or inconclusive, and required checks must have
-reported. Missing CI fails too. There is no bypass flag.
-
---name defaults to the tag. --body sets the notes even when empty; --file
-reads a file, or stdin for --file -. --body and --file conflict.
---prerelease marks the draft (and its eventual release) as a prerelease.
-Prints the draft URL and the staging command.
-`,
-	"release stage": `Usage:
-  amf release stage <tag> --manifest file --asset path... [flags]
-
-Uploads missing assets to an existing draft and verifies every remote byte.
-It never publishes and never edits a published release.
-
-The JSON manifest pins {tag, commit, assets:[{name, sha256, size?}]}.
---manifest is required. Every --asset path is repeatable; each base name
-must match exactly one manifest entry, and every entry needs a file. Symlinks,
-non-regular files, path names, duplicate names and bad checksums are rejected.
-Verified bytes are snapshotted before upload, so a later rename cannot
-substitute different content.
-
-An identical uploaded asset is skipped only after downloading and hashing
-it. Different content under the same name is a collision and is never
-overwritten or deleted. An interrupted (non-uploaded) asset is re-read and
-removed only when it is still the same asset, then uploaded again. A draft
-with an asset outside the manifest is refused. CI on the pinned commit is
-checked again. Output says staged, not published.
-`,
-	"release verify": `Usage:
-  amf release verify <tag> --manifest file
-
-Read-only check of a tag, release and manifest: the tag must still peel to
-the pinned commit, the release must exist, its asset names must exactly
-match the manifest, and every asset's remote bytes must match its recorded
-SHA-256 and size. It never uploads, deletes or publishes.
-`,
-	"release publish": `Usage:
-  amf release publish <tag> --manifest file
-
-The only command that publishes. It rechecks, in order: the tag's peeled
-commit, CI success on that exact SHA, the draft's identity, every remote
-asset byte against the manifest, and that no asset identity changed. It then
-rechecks the tag once more and flips only this draft live.
-
-An already published release is verified and reported as already published,
-never modified or duplicated. There is no force, skip or bypass flag.
-GitHub has no atomic compare-and-swap for release publication: amf narrows
-the race with repeated reads immediately before the final update, but a
-concurrent actor can still change remote state between the last read and the
-write. No tag, release or asset is created or moved outside this workflow.
+Shows GitHub's latest published, non-prerelease release, with every asset and
+the tag's actual peeled commit. When there is none, prints
+No published releases in owner/name. and exits 0; --json prints null.
+Needs no git checkout. amf never creates, uploads, publishes or deletes.
 `,
 }
 
 // helpSeeAlso lists related topics for commands with flags. Group and topic
 // help include their footers directly, since they don't use commandHelp.
 var helpSeeAlso = map[string][]string{
-	"init":            {"env", "auth", "doctor"},
-	"run":             {"agents", "env", "memory"},
-	"watch":           {"run", "agents", "env", "memory"},
-	"auto":            {"run", "agents", "pipeline", "memory"},
-	"list":            {"issue", "issue label", "run"},
-	"pipeline":        {"agents", "run", "env"},
-	"doctor":          {"init", "env", "auth"},
-	"update":          {"version"},
-	"version":         {"update"},
-	"completion":      {"help", "flags"},
-	"man":             {"help", "flags"},
-	"issue create":    {"issue label", "issue list", "run"},
-	"issue label":     {"issue unlabel", "issue list", "run", "watch"},
-	"issue unlabel":   {"issue label", "issue list", "watch"},
-	"issue close":     {"issue reopen", "issue view"},
-	"issue reopen":    {"issue close", "issue view"},
-	"issue view":      {"issue list", "issue close", "issue label"},
-	"pr list":         {"pr view", "pr diff", "pr merge"},
-	"pr merge":        {"pr view", "pr sweep", "run"},
-	"pr sweep":        {"pr merge", "watch"},
-	"pr view":         {"pr diff", "pr merge"},
-	"pr diff":         {"pr view"},
-	"pr comment":      {"pr view", "pr list"},
-	"pr close":        {"pr reopen", "issue label"},
-	"pr reopen":       {"pr close", "pr view"},
-	"pr ready":        {"pr draft", "pr merge"},
-	"pr draft":        {"pr ready", "pr view"},
-	"tag list":        {"tag view", "release list"},
-	"tag view":        {"tag list", "release view"},
-	"release list":    {"release view", "release latest", "tag list"},
-	"release view":    {"release list", "release latest", "tag view"},
-	"release latest":  {"release list", "release view"},
-	"release create":  {"release stage", "release verify", "release publish"},
-	"release stage":   {"release verify", "release publish", "release create"},
-	"release verify":  {"release stage", "release publish"},
-	"release publish": {"release verify", "release create"},
-	"auth login":      {"auth", "auth status", "env"},
-	"auth status":     {"auth", "auth login", "doctor"},
-	"auth logout":     {"auth", "auth login"},
-	"auth token":      {"auth", "auth login", "env"},
-	"memory sync":     {"memory", "memory similar", "memory show"},
-	"memory similar":  {"memory", "memory sync", "memory show"},
-	"memory show":     {"memory", "memory sync", "memory similar"},
+	"init":           {"env", "auth", "doctor"},
+	"run":            {"agents", "env", "memory"},
+	"watch":          {"run", "agents", "env", "memory"},
+	"auto":           {"run", "agents", "pipeline", "memory"},
+	"list":           {"issue", "issue label", "run"},
+	"pipeline":       {"agents", "run", "env"},
+	"doctor":         {"init", "env", "auth"},
+	"update":         {"version"},
+	"version":        {"update"},
+	"completion":     {"help", "flags"},
+	"man":            {"help", "flags"},
+	"issue create":   {"issue label", "issue list", "run"},
+	"issue label":    {"issue unlabel", "issue list", "run", "watch"},
+	"issue unlabel":  {"issue label", "issue list", "watch"},
+	"issue close":    {"issue reopen", "issue view"},
+	"issue reopen":   {"issue close", "issue view"},
+	"issue view":     {"issue list", "issue close", "issue label"},
+	"pr list":        {"pr view", "pr diff", "pr merge"},
+	"pr merge":       {"pr view", "pr sweep", "run"},
+	"pr sweep":       {"pr merge", "watch"},
+	"pr view":        {"pr diff", "pr merge"},
+	"pr diff":        {"pr view"},
+	"pr comment":     {"pr view", "pr list"},
+	"pr close":       {"pr reopen", "issue label"},
+	"pr reopen":      {"pr close", "pr view"},
+	"pr ready":       {"pr draft", "pr merge"},
+	"pr draft":       {"pr ready", "pr view"},
+	"tag list":       {"tag view", "release list"},
+	"tag view":       {"tag list", "release view"},
+	"release list":   {"release view", "release latest", "tag list"},
+	"release view":   {"release list", "release latest", "tag view"},
+	"release latest": {"release list", "release view", "tag view"},
+	"auth login":     {"auth", "auth status", "env"},
+	"auth status":    {"auth", "auth login", "doctor"},
+	"auth logout":    {"auth", "auth login"},
+	"auth token":     {"auth", "auth login", "env"},
+	"memory sync":    {"memory", "memory similar", "memory show"},
+	"memory similar": {"memory", "memory sync", "memory show"},
+	"memory show":    {"memory", "memory sync", "memory similar"},
 }
 
 // helpExamples are the short examples before a command's See also footer.
@@ -386,6 +323,8 @@ var helpExamples = map[string]string{
 	"auth":           "  amf auth status\n  amf auth login --client-id Ov23liABC123\n",
 	"issue":          "  amf issue create \"Fix the login redirect\" --body \"Users land on /404 after login\"\n  amf issue list --label amf:ready\n",
 	"pr":             "  amf pr list\n  amf pr view 57\n",
+	"tag":            "  amf tag list --limit 10\n  amf tag view v1.2.3 --json\n",
+	"release":        "  amf release list --state published\n  amf release latest --json\n",
 	"memory":         "  amf memory sync\n  amf memory similar 42\n",
 	"help":           "  amf help run\n  amf help pr merge\n",
 	"memory sync":    "  amf memory sync\n  amf memory sync --full --memory-backend markdown\n",
@@ -420,29 +359,23 @@ var helpExamples = map[string]string{
   amf auto status
   amf auto --abort
 `,
-	"pipeline":        "  amf pipeline\n  amf pipeline --fetch\n",
-	"update":          "  amf update --check\n  amf update --version v0.0.7\n",
-	"pr list":         "  amf pr list --state merged --limit 5\n  amf pr list --issue 42 --json\n",
-	"pr merge":        "  amf pr merge 57 --squash --delete-branch\n  amf pr merge 57 -u -w --squash\n",
-	"pr sweep":        "  amf pr sweep --dry-run\n  amf pr sweep --merge=squash --wait-for-checks\n",
-	"pr view":         "  amf pr view 57 --json\n",
-	"pr diff":         "  amf pr diff 57 --name-only\n",
-	"pr comment":      "  amf pr comment 57 --body \"Looks good to me\"\n  amf pr comment 57 --file review.md\n",
-	"pr close":        "  amf pr close 57 --comment \"Superseded by #58\" --delete-branch\n",
-	"pr reopen":       "  amf pr reopen 57\n",
-	"pr ready":        "  amf pr ready 57\n",
-	"pr draft":        "  amf pr draft 57\n",
-	"tag":             "  amf tag list\n  amf tag view v1.2.3\n",
-	"release":         "  amf release list\n  amf release view v1.2.3\n  amf release latest\n",
-	"tag list":        "  amf tag list --limit 10\n  amf tag list --json\n",
-	"tag view":        "  amf tag view v1.2.3\n  amf tag view v1.2.3 --json\n",
-	"release list":    "  amf release list --state draft\n  amf release list --limit 5 --json\n",
-	"release view":    "  amf release view v1.2.3\n  amf release view v1.2.3 --json\n",
-	"release latest":  "  amf release latest\n  amf release latest --json\n",
-	"release create":  "  amf release create v1.2.3 --commit 0123456789abcdef0123456789abcdef01234567 --body \"Notes\"\n",
-	"release stage":   "  amf release stage v1.2.3 --manifest release.json --asset dist/amf.tar.gz\n",
-	"release verify":  "  amf release verify v1.2.3 --manifest release.json\n",
-	"release publish": "  amf release publish v1.2.3 --manifest release.json\n",
+	"pipeline":       "  amf pipeline\n  amf pipeline --fetch\n",
+	"update":         "  amf update --check\n  amf update --version v0.0.7\n",
+	"pr list":        "  amf pr list --state merged --limit 5\n  amf pr list --issue 42 --json\n",
+	"pr merge":       "  amf pr merge 57 --squash --delete-branch\n  amf pr merge 57 -u -w --squash\n",
+	"pr sweep":       "  amf pr sweep --dry-run\n  amf pr sweep --merge=squash --wait-for-checks\n",
+	"pr view":        "  amf pr view 57 --json\n",
+	"pr diff":        "  amf pr diff 57 --name-only\n",
+	"tag list":       "  amf tag list --limit 10\n  amf tag list --json\n",
+	"tag view":       "  amf tag view v1.2.3\n  amf tag view v1.2.3 --json\n",
+	"release list":   "  amf release list --state published --limit 5\n  amf release list --json\n",
+	"release view":   "  amf release view v1.2.3\n  amf release view v1.2.3 --json\n",
+	"release latest": "  amf release latest\n  amf release latest --json\n",
+	"pr comment":     "  amf pr comment 57 --body \"Looks good to me\"\n  amf pr comment 57 --file review.md\n",
+	"pr close":       "  amf pr close 57 --comment \"Superseded by #58\" --delete-branch\n",
+	"pr reopen":      "  amf pr reopen 57\n",
+	"pr ready":       "  amf pr ready 57\n",
+	"pr draft":       "  amf pr draft 57\n",
 }
 
 func init() {

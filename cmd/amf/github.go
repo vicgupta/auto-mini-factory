@@ -581,6 +581,45 @@ func (g *GitHub) nextPage(h http.Header) (string, error) {
 	return "", nil
 }
 
+// nextPageScoped is nextPage for one exact endpoint. It refuses a link to
+// another host or to a path other than endpoint, so pagination can't leak the
+// token or wander into another repository, and it records each page in seen
+// so a link that cycles back is an error instead of an endless loop.
+func (g *GitHub) nextPageScoped(h http.Header, endpoint string, seen map[string]bool) (string, error) {
+	base, err := url.Parse(g.base)
+	if err != nil {
+		return "", err
+	}
+	wantPath := strings.TrimSuffix(base.Path, "/") + endpoint
+	for _, link := range strings.Split(h.Get("Link"), ",") {
+		target, params, ok := strings.Cut(strings.TrimSpace(link), ";")
+		if !ok || !strings.Contains(params, `rel="next"`) {
+			continue
+		}
+		target = strings.Trim(strings.TrimSpace(target), "<>")
+		u, err := url.Parse(target)
+		if err != nil {
+			return "", fmt.Errorf("github pagination link %q: %w", target, err)
+		}
+		if !strings.EqualFold(u.Scheme, base.Scheme) || !strings.EqualFold(u.Host, base.Host) {
+			return "", fmt.Errorf("github pagination link %q is outside %s", target, g.base)
+		}
+		if u.Path != wantPath {
+			return "", fmt.Errorf("github pagination link %q leaves %s", target, endpoint)
+		}
+		path := strings.TrimPrefix(u.Path, strings.TrimSuffix(base.Path, "/"))
+		if u.RawQuery != "" {
+			path += "?" + u.RawQuery
+		}
+		if seen[path] {
+			return "", fmt.Errorf("github pagination for %s cycles back to %s", endpoint, path)
+		}
+		seen[path] = true
+		return path, nil
+	}
+	return "", nil
+}
+
 // LabelSpec describes a repository label.
 type LabelSpec struct {
 	Name, Color, Description string

@@ -23,7 +23,7 @@ var helpCommands = [][]string{
 	{"pr", "list"}, {"pr", "merge"}, {"pr", "sweep"}, {"pr", "view"}, {"pr", "diff"}, {"pr", "comment"}, {"pr", "close"},
 	{"pr", "reopen"}, {"pr", "ready"}, {"pr", "draft"},
 	{"tag", "list"}, {"tag", "view"},
-	{"release", "list"}, {"release", "view"}, {"release", "latest"}, {"release", "create"}, {"release", "stage"}, {"release", "verify"}, {"release", "publish"},
+	{"release", "list"}, {"release", "view"}, {"release", "latest"},
 	{"memory", "sync"}, {"memory", "similar"}, {"memory", "show"},
 	{"pipeline"}, {"doctor"}, {"update"}, {"completion"}, {"man"}, {"version"},
 }

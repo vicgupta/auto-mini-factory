@@ -116,14 +116,14 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return cmdAuth(ctx, rest, stdout, stderr)
 	case "pr":
 		return cmdPR(ctx, rest, stdin, stdout, stderr)
-	case "tag":
-		return cmdTag(ctx, rest, stdout, stderr)
-	case "release":
-		return cmdRelease(ctx, rest, stdin, stdout, stderr)
 	case "list": // undocumented alias of amf issue list, kept for existing scripts
 		return cmdList(ctx, rest, stdout, stderr)
 	case "issue":
 		return cmdIssueGroup(ctx, rest, stdin, stdout, stderr)
+	case "tag":
+		return cmdTag(ctx, rest, stdout, stderr)
+	case "release":
+		return cmdRelease(ctx, rest, stdout, stderr)
 	case "run":
 		return cmdRun(ctx, rest, stderr)
 	case "watch":
@@ -158,7 +158,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		// amf help <command or topic> prints its details.
 		if cmd == "help" && len(rest) > 0 {
 			key := rest[0]
-			if len(rest) > 1 && (key == "pr" || key == "issue" || key == "memory" || key == "auth" || key == "tag" || key == "release") {
+			if len(rest) > 1 && (key == "pr" || key == "issue" || key == "tag" || key == "release" || key == "memory" || key == "auth") {
 				key += " " + rest[1]
 			}
 			if a, ok := helpArgs[key]; ok {

@@ -20,8 +20,8 @@ Commands:
   auth       get a GitHub token: login, status, logout, token
   issue      manage issues: create, list, label, unlabel, close, reopen, view, run, watch
   pr         manage pull requests: list, merge, sweep, view, diff, comment, close, reopen, ready, draft
-  tag        inspect tags: list, view
-  release    inspect and stage GitHub releases: list, view, latest, create, stage, verify, publish
+  tag        inspect tags (read-only): list, view
+  release    inspect releases (read-only): list, view, latest
   run        process one issue into a PR (alias of issue run)
   watch      process amf:ready issues as they arrive (alias of issue watch)
   auto       plan one sentence into up to 5 issues and merge their PRs, pausing after the first by default
@@ -369,9 +369,9 @@ func newCommandFlags(key string, w io.Writer) *flag.FlagSet {
 // helpSubcommands lists the subcommands amf help <group> <subcommand> knows.
 var helpSubcommands = map[string][]string{
 	"pr":      prSubcommands,
+	"issue":   issueSubcommands,
 	"tag":     tagSubcommands,
 	"release": releaseSubcommands,
-	"issue":   issueSubcommands,
 	"memory":  {"sync", "similar", "show", "help"},
 	"auth":    authSubcommands,
 }
@@ -387,7 +387,6 @@ var helpArgs = map[string][]string{
 	"pr list": {"pr", "list"}, "pr merge": {"pr", "merge"}, "pr sweep": {"pr", "sweep"}, "pr view": {"pr", "view"}, "pr diff": {"pr", "diff"},
 	"tag list": {"tag", "list"}, "tag view": {"tag", "view"},
 	"release list": {"release", "list"}, "release view": {"release", "view"}, "release latest": {"release", "latest"},
-	"release create": {"release", "create"}, "release stage": {"release", "stage"}, "release verify": {"release", "verify"}, "release publish": {"release", "publish"},
 	"auth login": {"auth", "login"}, "auth status": {"auth", "status"}, "auth logout": {"auth", "logout"}, "auth token": {"auth", "token"},
 	"memory sync": {"memory", "sync"}, "memory similar": {"memory", "similar"}, "memory show": {"memory", "show"},
 	"pr comment": {"pr", "comment"}, "pr close": {"pr", "close"}, "pr reopen": {"pr", "reopen"}, "pr ready": {"pr", "ready"}, "pr draft": {"pr", "draft"},
