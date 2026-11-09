@@ -250,7 +250,9 @@ SHA. amf first reads the ref and peels annotated tags recursively; an
 existing tag at the same commit succeeds without a write, and one at a
 different commit fails. amf never moves, force-updates or deletes a tag, and
 never treats target_commitish or a branch as authority. The SHA must name a
-commit object in the repository. Needs no git checkout.
+commit object in the repository. Before any new tag POST, the fixed
+amf-release-policy.json at that exact SHA must be valid and all required CI
+must pass. No policy override or CI bypass. Needs no git checkout.
 `,
 	"release list": `Usage:
   amf release list [flags]
@@ -287,8 +289,8 @@ Needs no git checkout. This command never writes.
 
 Creates a draft release pinned to the plan's tag, full commit SHA and exact
 artifact set. The tag must already exist and peel to that SHA. amf reads the
-required CI policy from the release policy file in that exact commit and
-records the repository, tag, SHA, policy and artifact names, SHA-256 sums and
+required CI policy from amf-release-policy.json in that exact commit,
+requires all its CI to pass, and records the repository, tag, SHA, policy and artifact names, SHA-256 sums and
 sizes in a versioned ownership record in the draft body. An existing draft
 is reused only when its record matches exactly; an unrelated draft or
 published release is never modified. The command prints the draft release ID
@@ -298,7 +300,9 @@ git checkout.
 	"release stage": `Usage:
   amf release stage <tag> --release <id> --plan <file> --manifest <file>
 
-Stages the plan's named artifacts on the pinned draft release. Every file is
+Stages the plan's named artifacts on the pinned draft release. Required
+exact-target CI must pass before uploads. Existing remote content is
+preflighted and identity/record/CI are refreshed before each upload. Every file is
 rejected if it is a symlink, not regular, outside the plan directory, has an
 unsafe or duplicate name, or is not covered exactly once by the checksum
 manifest. amf copies each file into a bounded temporary snapshot while hashing
@@ -315,12 +319,13 @@ remote asset. A successful or interrupted stage can be rerun. It never publishes
 Publishes the pinned draft only after rechecking the tag's actual peeled SHA,
 the exact recorded plan, release identity and policy, every expected artifact's
 remote size and bytes, and the required CI on the exact commit. The required
-CI policy comes from the policy file at that commit: every required check and
+CI policy comes from the fixed amf-release-policy.json at that commit: every required check and
 status must have the recorded name and provenance (app ID or creator ID), be
 the latest attempt, and be completed successfully; missing, pending, failed,
 inconclusive, wrong-SHA or wrong-source results fail, and an unreadable policy
 fails closed. amf creates a create-only publication claim asset to serialize
-cooperating publishers, then sends one PATCH that only clears draft. It never
+cooperating publishers. Claim bytes, artifacts, identity, record, tag and
+current CI are revalidated after claiming, before the single publish PATCH. It never
 uses GitHub CAS or transactions; an ambiguous interrupted publication is
 re-read, and if it is still ambiguous amf refuses and leaves recovery to an
 operator. An already published identical retry verifies and returns without

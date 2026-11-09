@@ -485,6 +485,7 @@ func runReleaseCmd(t *testing.T, args ...string) (string, string, error) {
 
 func TestTagCreateImmutableTarget(t *testing.T) {
 	f, _ := newReleaseFake(t)
+	f.allowRelease("policy-fixture")
 	f.mu.Lock()
 	f.tagCommits["v1"] = testCommit
 	f.mu.Unlock()
@@ -521,6 +522,7 @@ func TestTagCreateImmutableTarget(t *testing.T) {
 
 func TestTagCreateConcurrentAndMissingCommit(t *testing.T) {
 	f, _ := newReleaseFake(t)
+	f.allowRelease("policy-fixture")
 	f.mu.Lock()
 	f.tagRace = map[string]string{"v1": testCommit}
 	f.mu.Unlock()
@@ -530,6 +532,7 @@ func TestTagCreateConcurrentAndMissingCommit(t *testing.T) {
 	}
 
 	f2, _ := newReleaseFake(t)
+	f2.allowRelease("policy-fixture")
 	f2.mu.Lock()
 	f2.tagRace = map[string]string{"v2": testCommit2}
 	f2.mu.Unlock()

@@ -654,6 +654,9 @@ The SHA must name a commit object, not a branch, short SHA, tag, tree or blob.
 amf reads the existing ref first and peels annotated tags recursively: the same
 commit succeeds without a write, and a different commit fails, so amf never
 moves a tag. `-c, --commit` supplies the SHA. Tag names follow git ref rules.
+Before any new tag POST, the target commit must contain
+`amf-release-policy.json` and its exact required CI must pass. Missing,
+unreadable, empty or invalid policy is never treated as permission to create.
 Needs no git checkout.
 
 ```sh
@@ -765,8 +768,8 @@ amf release create <tag> --plan plan.json --manifest checksums.txt
 
 Creates an unpublished draft release pinned to the plan's tag, full commit SHA
 and exact artifact set. The tag must already exist and peel to that SHA. amf
-reads the required CI policy from the policy file at that exact commit and
-stores a versioned ownership record in the draft body with the repository, tag,
+reads `amf-release-policy.json` at that exact commit, requires its exact
+CI policy to pass, and stores a versioned ownership record in the draft body with the repository, tag,
 SHA, policy, and each artifact's name, SHA-256 and size. An existing draft is
 reused only after the remote record matches the requested plan exactly; an
 unrelated draft or published release, or a changed policy, is never modified.
@@ -781,7 +784,10 @@ never publishes. Flags: `-p, --plan`, `-M, --manifest`.
 amf release stage <tag> --release 42 --plan plan.json --manifest checksums.txt
 ```
 
-Stages the plan's named files on the pinned draft. `-R, --release` is required
+Stages the plan's named files on the pinned draft. Current required exact-target
+CI must pass before uploads; existing remote content is preflighted before any
+new upload, and the pinned record, draft identity and CI are revalidated before
+each upload. `-R, --release` is required
 and pins the numeric release ID. Every local file must be regular (never a
 symlink), stay inside the plan directory, have an unambiguous name, and be
 covered exactly once by `-M, --manifest`. amf copies each file into a bounded
@@ -807,7 +813,7 @@ exact recorded plan, release identity and policy, every expected artifact's
 remote size and downloaded bytes, and the required CI on the exact commit.
 `-R, --release`, `-p, --plan` and `-M, --manifest` are required.
 
-The policy file at the target commit supplies required check names with app IDs
+The fixed `amf-release-policy.json` file at the target commit supplies required check names with app IDs
 and required commit-status contexts with creator IDs. Every requirement must be
 present, the latest attempt, from the recorded source, completed and successful;
 missing, pending, failed, inconclusive, wrong-SHA or wrong-source results fail,
@@ -815,7 +821,9 @@ and an absent, empty or unreadable policy fails closed. Policy is never drawn
 from a moving branch or a local override.
 
 Publication uses a create-only claim asset to serialize cooperating amf
-processes, then one PATCH that only clears draft. GitHub provides no CAS or
+processes. The completed claim bytes, all artifacts, ownership record, unique
+release identity, actual tag and current CI are revalidated after claiming and
+before the one PATCH that only clears draft. GitHub provides no CAS or
 transaction across tag, assets and publication, so a lost or uncertain response
 is re-read; if the outcome is still ambiguous amf refuses, keeps the claim, and
 leaves recovery to an operator. An already published identical retry verifies
@@ -824,8 +832,13 @@ assistant permission to publish.
 
 ### Staged release workflow
 
-Build artifacts, write a plan and a `sha256sum`-style manifest, create the tag,
-create the draft, stage, then publish:
+First commit a reviewed `amf-release-policy.json` at the intended release commit
+and wait for its required CI. Replace the illustrative check/status names and
+source IDs below with this repository's actual required names and provenance;
+requirements must not be weakened merely to obtain a pass. Pin that exact full
+commit in `plan.json`. Build its artifacts and a `sha256sum`-style manifest, then
+create the tag, create the draft, stage, and explicitly publish. Keep `plan.json`
+in the parent of `dist/` for this example:
 
 ```json
 {
@@ -854,19 +867,50 @@ create the draft, stage, then publish:
 ```
 
 ```sh
-sha256sum dist/amf_v1.2.3_linux_amd64.tar.gz > dist/checksums.txt
+(cd dist && sha256sum amf_v1.2.3_linux_amd64.tar.gz) > checksums.txt
 amf tag create v1.2.3 --commit 0123456789abcdef0123456789abcdef01234567
-amf release create v1.2.3 --plan dist/plan.json --manifest dist/checksums.txt
-amf release stage v1.2.3 --release 42 --plan dist/plan.json --manifest dist/checksums.txt
-amf release publish v1.2.3 --release 42 --plan dist/plan.json --manifest dist/checksums.txt
+amf release create v1.2.3 --plan plan.json --manifest checksums.txt
+amf release stage v1.2.3 --release 42 --plan plan.json --manifest checksums.txt
+amf release publish v1.2.3 --release 42 --plan plan.json --manifest checksums.txt
 ```
+
+To publish a checksum file as an asset, list it explicitly in the plan and use
+a separate upload manifest that hashes both the archives and that checksum file
+(e.g. `sha256sum archive.zip checksums.txt > upload-manifest.txt`). A manifest
+cannot hash itself. Both the checksum asset and archives are then snapshot-
+verified and remotely verified like any other exact named artifacts.
 
 The policy is target-committed release policy: it describes what amf requires on
 that commit, not an inference of every branch protection or ruleset requirement.
 An absent, empty or malformed policy is an error, not an empty requirement list.
+The plan's `policy` must be exactly `amf-release-policy.json`; alternate local or
+committed policy paths are not overrides. Check names/context matching is exact;
+recorded app/creator IDs and the exact commit proof are required.
 Artifact paths are resolved relative to the plan file. The ownership record is
 strict versioned JSON; duplicate keys, duplicate markers, unknown fields and
 changed, subset or extra plans are rejected.
+
+Resource and recovery boundaries:
+
+- All three release write commands require the same plan, checksum manifest and
+  locally available artifacts. Snapshot data is spooled to private temporary
+  files (4 GiB per artifact, 16 GiB total); payload download hashes are streamed,
+  not accumulated in memory. Plan, manifest, policy and ownership JSON are
+  bounded to 1 MiB; bookkeeping downloads have the same 1 MiB bound. GitHub's
+  own upload/body limits and the existing API timeout still apply.
+- Asset names must match exactly, including case. Case-ambiguous names, JSON
+  case aliases (including Unicode aliases), duplicate markers/keys and changed
+  draft metadata fail closed. Partial stage recovery skips only completed,
+  remotely verified byte-identical assets; it never deletes an incomplete asset.
+- `amf-publish-claim-v1.json` is reserved bookkeeping and remains as an asset.
+  If a claim exists while still draft, or an upload is incomplete, AMF stops.
+  An operator must first determine whether an uploader/publisher is active and
+  resolve the uncertain outcome; any manual cleanup or publication needs its
+  own authorization. AMF never steals, clears or deletes claims/assets.
+- The ownership record is not a signature or a new authorization mechanism:
+  existing repository permissions remain the trust boundary. Cooperating AMF
+  publishers are serialized; unrelated external writers can still change state
+  after a final check. GitHub offers no atomic tag/CI/asset/publish transaction.
 
 `amf tag create` and `amf release create`, `stage` and `publish` print a short
 status line and do not take `--json`.

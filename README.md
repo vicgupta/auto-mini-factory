@@ -170,6 +170,14 @@ amf memory show 42          # issue 42's PRs and every run
 amf watch --memory-backend markdown --memory-dir ~/amf-notes  # keep memory as Markdown files elsewhere
 ```
 
+Native writes require a reviewed `amf-release-policy.json` committed at the exact
+target SHA, with required check names/app IDs and status contexts/creator IDs.
+Only explicit `release publish` publishes. The plan and expected checksums stay
+bound to the draft across retries; incomplete uploads/claims stop for operator
+investigation, never silent deletion or overwrite. See the native staged-release
+workflow and concurrency limits in [COMMANDS](docs/COMMANDS.md#staged-release-workflow).
+
+
 Or run `amf watch` to process open issues labeled `amf:ready`, oldest first.
 
 `amf auth login` (with `--client-id` or `-C`, else `AMF_GITHUB_CLIENT_ID`)

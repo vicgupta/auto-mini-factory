@@ -328,7 +328,7 @@ func validateTagName(name string) error {
 		}
 	}
 	for _, part := range strings.Split(name, "/") {
-		if part == "" || part == "." || part == ".." || strings.HasPrefix(part, ".") {
+		if part == "" || part == "." || part == ".." || strings.HasPrefix(part, ".") || strings.HasSuffix(part, ".lock") {
 			return fmt.Errorf("invalid tag name %q", name)
 		}
 	}
@@ -403,6 +403,13 @@ func cmdTagCreate(ctx context.Context, args []string, stdout, stderr io.Writer) 
 		_, err = fmt.Fprintf(stdout, "Tag %s already points to %s.\n", name, sha)
 		return err
 	case !isStatus(err, http.StatusNotFound):
+		return err
+	}
+	policy, err := fetchReleasePolicy(ctx, gh, defaultReleasePolicyPath, sha)
+	if err != nil {
+		return err
+	}
+	if err := requireReleaseCI(ctx, gh, policy, sha); err != nil {
 		return err
 	}
 	in := map[string]string{"ref": "refs/tags/" + name, "sha": sha}

@@ -18,22 +18,23 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 )
 
 const (
-	releasePlanSchema    = "amf-release-plan/v1"
-	releaseRecordSchema  = "amf-release-ownership/v1"
-	releasePolicyVersion = 1
-	releaseRecordMarker  = "<!-- " + releaseRecordSchema
-	publishClaimAsset    = "amf-publish-claim-v1.json"
+	releasePlanSchema        = "amf-release-plan/v1"
+	releaseRecordSchema      = "amf-release-ownership/v1"
+	releasePolicyVersion     = 1
+	defaultReleasePolicyPath = "amf-release-policy.json"
+	releaseRecordMarker      = "<!-- " + releaseRecordSchema
+	publishClaimAsset        = "amf-publish-claim-v1.json"
 
-	maxPlanBytes       = int64(1) << 20
-	maxManifestBytes   = int64(1) << 20
-	maxPolicyBytes     = int64(1) << 20
-	maxRecordBytes     = int64(1) << 20
-	maxArtifactBytes   = int64(4) << 30
-	maxTotalArtifacts  = int64(16) << 30
-	maxDownloadedAsset = int64(4) << 30
+	maxPlanBytes      = int64(1) << 20
+	maxManifestBytes  = int64(1) << 20
+	maxPolicyBytes    = int64(1) << 20
+	maxRecordBytes    = int64(1) << 20
+	maxArtifactBytes  = int64(4) << 30
+	maxTotalArtifacts = int64(16) << 30
 )
 
 // releasePlan is the local, explicit input for create, stage and publish.
@@ -184,10 +185,11 @@ func rejectDuplicateJSONKeys(data []byte) error {
 				if !ok {
 					return errors.New("object key is not a string")
 				}
-				if top.keys[key] {
+				normalized := foldedJSONKey(key)
+				if top.keys[normalized] {
 					return fmt.Errorf("duplicate JSON key %q", key)
 				}
-				top.keys[key] = true
+				top.keys[normalized] = true
 				top.expectKey = false
 			} else {
 				top.expectKey = true
@@ -443,23 +445,12 @@ func validateAssetName(name string) error {
 }
 
 func validatePolicyPath(p string) error {
-	p = strings.TrimSpace(p)
-	if p == "" {
-		return errors.New("policy path can't be empty")
-	}
-	if filepath.IsAbs(p) || filepath.VolumeName(p) != "" || strings.HasPrefix(p, "/") || strings.ContainsAny(p, "\\\x00") {
-		return fmt.Errorf("policy path %q must be a relative repository path", p)
-	}
-	for _, part := range strings.Split(p, "/") {
-		if part == "" || part == "." || part == ".." {
-			return fmt.Errorf("policy path %q is not a clean repository path", p)
-		}
+	if p != defaultReleasePolicyPath {
+		return fmt.Errorf("policy must be the target-committed %s; local policy overrides are not supported", defaultReleasePolicyPath)
 	}
 	return nil
 }
 
-// rejectSymlinkPath refuses a symlink anywhere between the plan directory and
-// the artifact, so a symlinked parent cannot redirect reads outside it.
 func rejectSymlinkPath(planDir, local, name string) error {
 	rel, err := filepath.Rel(planDir, local)
 	if err != nil {
@@ -879,7 +870,7 @@ func (g *GitHub) UploadReleaseAsset(ctx context.Context, releaseID int64, name s
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 	req.Header.Set("Content-Type", "application/octet-stream")
 	req.ContentLength = size
-	client := &http.Client{Timeout: g.http.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error {
+	client := &http.Client{Timeout: g.http.Timeout, Transport: g.http.Transport, CheckRedirect: func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	}}
 	resp, err := client.Do(req)
@@ -907,7 +898,7 @@ func (g *GitHub) UploadReleaseAsset(ctx context.Context, releaseID int64, name s
 // DownloadReleaseAsset reads an asset through the API, not its browser URL.
 // Redirects are allowed only to the API host or GitHub's asset storage; the
 // Authorization header is stripped whenever the host or port changes.
-func (g *GitHub) DownloadReleaseAsset(ctx context.Context, assetID int64) ([]byte, error) {
+func (g *GitHub) openReleaseAsset(ctx context.Context, assetID int64) (io.ReadCloser, error) {
 	base, err := url.Parse(g.base)
 	if err != nil {
 		return nil, err
@@ -920,11 +911,15 @@ func (g *GitHub) DownloadReleaseAsset(ctx context.Context, assetID int64) ([]byt
 	req.Header.Set("Authorization", "Bearer "+g.token)
 	req.Header.Set("Accept", "application/octet-stream")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	client := &http.Client{Timeout: g.http.Timeout, CheckRedirect: func(req *http.Request, via []*http.Request) error {
+	client := &http.Client{Timeout: g.http.Timeout, Transport: g.http.Transport, CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 10 {
 			return errors.New("too many asset download redirects")
 		}
-		if !strings.EqualFold(req.URL.Scheme, "https") && !strings.EqualFold(req.URL.Scheme, "http") {
+		req.Header.Del("Authorization")
+		if req.URL.User != nil || req.URL.Fragment != "" {
+			return errors.New("unsafe asset redirect URL")
+		}
+		if req.URL.Scheme != "https" && !(base.Scheme == "http" && req.URL.Scheme == "http" && strings.EqualFold(req.URL.Host, base.Host)) {
 			return fmt.Errorf("refusing asset download redirect to scheme %q", req.URL.Scheme)
 		}
 		if strings.EqualFold(base.Scheme, "https") && !strings.EqualFold(req.URL.Scheme, "https") {
@@ -948,8 +943,8 @@ func (g *GitHub) DownloadReleaseAsset(ctx context.Context, assetID int64) ([]byt
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
+		defer resp.Body.Close()
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
 		msg := string(raw)
 		var parsed struct {
@@ -960,24 +955,56 @@ func (g *GitHub) DownloadReleaseAsset(ctx context.Context, assetID int64) ([]byt
 		}
 		return nil, &APIError{Method: "GET", Path: endpoint, Status: resp.StatusCode, Message: msg}
 	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxDownloadedAsset+1))
+	return resp.Body, nil
+}
+
+// Only small bookkeeping assets are materialized; payload verification streams.
+func (g *GitHub) DownloadReleaseAsset(ctx context.Context, assetID int64) ([]byte, error) {
+	body, err := g.openReleaseAsset(ctx, assetID)
 	if err != nil {
 		return nil, err
 	}
-	if int64(len(data)) > maxDownloadedAsset {
-		return nil, fmt.Errorf("asset %d is larger than %d bytes", assetID, maxDownloadedAsset)
+	defer body.Close()
+	data, err := io.ReadAll(io.LimitReader(body, maxRecordBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxRecordBytes {
+		return nil, fmt.Errorf("bookkeeping asset %d exceeds its size bound", assetID)
 	}
 	return data, nil
 }
 
+func verifyRemotePayload(ctx context.Context, gh *GitHub, asset ReleaseAsset, want recordArtifact) error {
+	if want.Size < 0 || want.Size > maxArtifactBytes {
+		return errors.New("recorded artifact size is outside bounds")
+	}
+	body, err := gh.openReleaseAsset(ctx, asset.ID)
+	if err != nil {
+		return err
+	}
+	defer body.Close()
+	h := sha256.New()
+	n, err := io.Copy(h, io.LimitReader(body, want.Size+1))
+	if err != nil {
+		return err
+	}
+	if n != want.Size || hex.EncodeToString(h.Sum(nil)) != want.SHA256 {
+		return fmt.Errorf("artifact %q has different remote bytes or size than the recorded plan", want.Name)
+	}
+	return nil
+}
+
 func assetMap(assets []ReleaseAsset) (map[string]ReleaseAsset, error) {
 	out := map[string]ReleaseAsset{}
+	seen := map[string]bool{}
 	for _, a := range assets {
 		key := strings.ToLower(a.Name)
-		if _, ok := out[key]; ok {
+		if seen[key] {
 			return nil, fmt.Errorf("release has duplicate asset name %q", a.Name)
 		}
-		out[key] = a
+		seen[key] = true
+		out[a.Name] = a
 	}
 	return out, nil
 }
@@ -993,7 +1020,7 @@ func verifyRemoteArtifacts(ctx context.Context, gh *GitHub, rel Release, want []
 	}
 	wantByName := map[string]recordArtifact{}
 	for _, art := range want {
-		wantByName[strings.ToLower(art.Name)] = art
+		wantByName[art.Name] = art
 	}
 	for key, asset := range byName {
 		if _, ok := wantByName[key]; ok {
@@ -1015,7 +1042,7 @@ func verifyRemoteArtifacts(ctx context.Context, gh *GitHub, rel Release, want []
 		}
 	}
 	for _, art := range want {
-		asset, ok := byName[strings.ToLower(art.Name)]
+		asset, ok := byName[art.Name]
 		if !ok {
 			return fmt.Errorf("release %d is missing artifact %q", rel.ID, art.Name)
 		}
@@ -1025,13 +1052,8 @@ func verifyRemoteArtifacts(ctx context.Context, gh *GitHub, rel Release, want []
 		if asset.Size != art.Size {
 			return fmt.Errorf("release %d artifact %q is %d bytes, expected %d", rel.ID, art.Name, asset.Size, art.Size)
 		}
-		data, err := gh.DownloadReleaseAsset(ctx, asset.ID)
-		if err != nil {
+		if err := verifyRemotePayload(ctx, gh, asset, art); err != nil {
 			return err
-		}
-		sum := sha256.Sum256(data)
-		if hex.EncodeToString(sum[:]) != art.SHA256 {
-			return fmt.Errorf("release %d artifact %q has different remote bytes than the recorded plan", rel.ID, art.Name)
 		}
 	}
 	return nil
@@ -1046,7 +1068,7 @@ func verifyRemoteArtifact(ctx context.Context, gh *GitHub, rel Release, want rec
 	if err != nil {
 		return err
 	}
-	asset, ok := byName[strings.ToLower(want.Name)]
+	asset, ok := byName[want.Name]
 	if !ok {
 		return fmt.Errorf("release %d is missing artifact %q", rel.ID, want.Name)
 	}
@@ -1056,15 +1078,7 @@ func verifyRemoteArtifact(ctx context.Context, gh *GitHub, rel Release, want rec
 	if asset.Size != want.Size {
 		return fmt.Errorf("release %d artifact %q is %d bytes, expected %d", rel.ID, want.Name, asset.Size, want.Size)
 	}
-	data, err := gh.DownloadReleaseAsset(ctx, asset.ID)
-	if err != nil {
-		return err
-	}
-	sum := sha256.Sum256(data)
-	if hex.EncodeToString(sum[:]) != want.SHA256 {
-		return fmt.Errorf("release %d artifact %q has different remote bytes than the recorded plan", rel.ID, want.Name)
-	}
-	return nil
+	return verifyRemotePayload(ctx, gh, asset, want)
 }
 
 func verifyTagAt(ctx context.Context, gh *GitHub, tag, commit string) error {
@@ -1087,6 +1101,9 @@ func recordFromDraft(rel Release, tag, commit string, plan releasePlan, policy r
 		return rec, err
 	}
 	want := buildReleaseRecord(cfg, plan, policy, artifacts)
+	if rel.TagName != tag || rel.Name != want.Name || rel.Prerelease {
+		return rec, errors.New("release tag, name or prerelease state does not match the pinned plan")
+	}
 	if err := compareReleaseRecords(rec, want); err != nil {
 		return rec, err
 	}
@@ -1162,6 +1179,9 @@ func cmdReleaseCreate(ctx context.Context, args []string, stdout, stderr io.Writ
 	for _, snap := range snapshots {
 		arts = append(arts, snap.Art)
 	}
+	if err := requireReleaseCI(ctx, gh, policy, plan.Commit); err != nil {
+		return err
+	}
 	return createDraft(ctx, cfg, gh, plan, policy, arts, stdout)
 }
 
@@ -1195,6 +1215,12 @@ func createDraft(ctx context.Context, cfg Config, gh *GitHub, plan releasePlan, 
 		// created the same draft. Re-read and accept only an exact match.
 		if rel, ok, readErr := gh.findReleaseByTag(ctx, plan.Tag); readErr == nil && ok {
 			if _, recErr := recordFromDraft(rel, plan.Tag, plan.Commit, plan, policy, arts, cfg); recErr == nil && rel.Draft {
+				if err := verifyTagAt(ctx, gh, plan.Tag, plan.Commit); err != nil {
+					return err
+				}
+				if err := requireReleaseCI(ctx, gh, policy, plan.Commit); err != nil {
+					return err
+				}
 				_, outErr := fmt.Fprintf(stdout, "Draft release %d already matches tag %s at %s.\n", rel.ID, plan.Tag, plan.Commit)
 				return outErr
 			}
@@ -1296,6 +1322,9 @@ func cmdReleaseStage(ctx context.Context, args []string, stdout, stderr io.Write
 	if err := verifyTagAt(ctx, gh, tag, plan.Commit); err != nil {
 		return err
 	}
+	if _, err := revalidatePinnedRelease(ctx, cfg, gh, plan, arts, rel.ID, true); err != nil {
+		return err
+	}
 	// Refuse up front if the draft already contains anything amf does not
 	// expect, including an unfinished upload or a publication claim.
 	assets, err := gh.ReleaseAssets(ctx, rel.ID)
@@ -1304,11 +1333,21 @@ func cmdReleaseStage(ctx context.Context, args []string, stdout, stderr io.Write
 	}
 	expected := map[string]recordArtifact{}
 	for _, art := range arts {
-		expected[strings.ToLower(art.Name)] = art
+		expected[art.Name] = art
+	}
+	if _, err := assetMap(assets); err != nil {
+		return err
 	}
 	for _, asset := range assets {
-		if _, ok := expected[strings.ToLower(asset.Name)]; !ok {
+		want, ok := expected[asset.Name]
+		if !ok {
 			return fmt.Errorf("release %d has unexpected asset %q; refusing to delete or overwrite it", rel.ID, asset.Name)
+		}
+		if asset.State != "uploaded" || asset.Size != want.Size {
+			return fmt.Errorf("artifact %q is incomplete or conflicts with the recorded plan; refusing to delete or overwrite it", asset.Name)
+		}
+		if err := verifyRemotePayload(ctx, gh, asset, want); err != nil {
+			return err
 		}
 	}
 	uploaded := 0
@@ -1321,11 +1360,14 @@ func cmdReleaseStage(ctx context.Context, args []string, stdout, stderr io.Write
 		if err != nil {
 			return err
 		}
-		if _, ok := byName[strings.ToLower(snap.Art.Name)]; ok {
+		if _, ok := byName[snap.Art.Name]; ok {
 			if err := verifyRemoteArtifact(ctx, gh, rel, snap.Art); err != nil {
 				return err
 			}
 			continue
+		}
+		if _, err := revalidatePinnedRelease(ctx, cfg, gh, plan, arts, rel.ID, true); err != nil {
+			return err
 		}
 		in, err := os.Open(snap.File)
 		if err != nil {
@@ -1423,9 +1465,12 @@ func cmdReleasePublish(ctx context.Context, args []string, stdout, stderr io.Wri
 	}
 
 	claim := publishClaim(recIdentity{repo: cfg.Repo, tag: tag, commit: plan.Commit, arts: arts})
-	claimKey := strings.ToLower(publishClaimAsset)
+	claimKey := publishClaimAsset
 
 	if !rel.Draft {
+		if _, err := revalidatePinnedRelease(ctx, cfg, gh, plan, arts, rel.ID, false); err != nil {
+			return err
+		}
 		// An identical published retry verifies remote bytes and returns
 		// without a write. A claim asset may be present from our publication.
 		if err := verifyRemoteArtifacts(ctx, gh, rel, arts, map[string][]byte{claimKey: claim}); err != nil {
@@ -1460,14 +1505,25 @@ func cmdReleasePublish(ctx context.Context, args []string, stdout, stderr io.Wri
 		return fmt.Errorf("could not create the publication claim on release %d: %w; if %s exists now, inspect the draft and recover it manually; amf never deletes or steals a claim", rel.ID, err, publishClaimAsset)
 	}
 
-	// The claim must be the last thing between verification and the PATCH.
-	if err := verifyTagAt(ctx, gh, tag, plan.Commit); err != nil {
+	// The create-only claim excludes other cooperating publishers. It does
+	// not freeze GitHub metadata, assets, tags or CI: revalidate all of them.
+	current, err := revalidatePinnedRelease(ctx, cfg, gh, plan, arts, rel.ID, true)
+	if err != nil {
+		return err
+	}
+	if err := requirePublicationClaim(ctx, gh, current, claim); err != nil {
+		return err
+	}
+	if err := verifyRemoteArtifacts(ctx, gh, current, arts, map[string][]byte{claimKey: claim}); err != nil {
+		return err
+	}
+	if _, err := revalidatePinnedRelease(ctx, cfg, gh, plan, arts, rel.ID, true); err != nil {
 		return err
 	}
 	updated, err := gh.UpdateRelease(ctx, rel.ID, map[string]any{"draft": false})
 	if err != nil {
 		// The PATCH may have committed even though its response was lost.
-		if got, readErr := gh.GetReleaseByID(ctx, rel.ID); readErr == nil && !got.Draft {
+		if got, readErr := revalidatePinnedRelease(ctx, cfg, gh, plan, arts, rel.ID, false); readErr == nil && !got.Draft {
 			if verr := verifyRemoteArtifacts(ctx, gh, got, arts, map[string][]byte{claimKey: claim}); verr == nil {
 				_, outErr := fmt.Fprintf(stdout, "Published release %d (%s) at %s.\n", got.ID, tag, plan.Commit)
 				return outErr
@@ -1478,7 +1534,7 @@ func cmdReleasePublish(ctx context.Context, args []string, stdout, stderr io.Wri
 	if updated.ID != rel.ID || updated.Draft {
 		return fmt.Errorf("GitHub did not publish release %d as requested", rel.ID)
 	}
-	if err := verifyTagAt(ctx, gh, tag, plan.Commit); err != nil {
+	if _, err := revalidatePinnedRelease(ctx, cfg, gh, plan, arts, rel.ID, false); err != nil {
 		return err
 	}
 	if err := verifyRemoteArtifacts(ctx, gh, updated, arts, map[string][]byte{claimKey: claim}); err != nil {
@@ -1558,7 +1614,7 @@ func (g *GitHub) AllCommitStatuses(ctx context.Context, sha string) ([]commitSta
 	if err := g.do(ctx, "GET", g.repoPath("/commits/%s/status", url.PathEscape(sha)), nil, &combined); err != nil {
 		return nil, err
 	}
-	if combined.SHA != "" && combined.SHA != sha {
+	if combined.SHA != sha {
 		return nil, fmt.Errorf("GitHub returned statuses for commit %q, not %q", combined.SHA, sha)
 	}
 	endpoint := g.repoPath("/commits/%s/statuses", url.PathEscape(sha))
@@ -1582,7 +1638,7 @@ func (g *GitHub) AllCommitStatuses(ctx context.Context, sha string) ([]commitSta
 func latestCheckByName(runs []checkRunDetail) map[string]checkRunDetail {
 	out := map[string]checkRunDetail{}
 	for _, run := range runs {
-		key := strings.ToLower(run.Name)
+		key := run.Name
 		if prev, ok := out[key]; !ok || run.ID > prev.ID {
 			out[key] = run
 		}
@@ -1593,7 +1649,7 @@ func latestCheckByName(runs []checkRunDetail) map[string]checkRunDetail {
 func latestStatusByContext(statuses []commitStatusDetail) map[string]commitStatusDetail {
 	out := map[string]commitStatusDetail{}
 	for _, s := range statuses {
-		key := strings.ToLower(s.Context)
+		key := s.Context
 		if prev, ok := out[key]; !ok || s.ID > prev.ID {
 			out[key] = s
 		}
@@ -1606,7 +1662,7 @@ func evaluateReleaseCI(policy releasePolicy, runs []checkRunDetail, statuses []c
 	contexts := latestStatusByContext(statuses)
 	var problems []string
 	for _, want := range policy.RequiredChecks {
-		run, ok := checks[strings.ToLower(want.Name)]
+		run, ok := checks[want.Name]
 		if !ok {
 			problems = append(problems, fmt.Sprintf("check %q is missing", want.Name))
 			continue
@@ -1628,7 +1684,7 @@ func evaluateReleaseCI(policy releasePolicy, runs []checkRunDetail, statuses []c
 		}
 	}
 	for _, want := range policy.RequiredStatuses {
-		status, ok := contexts[strings.ToLower(want.Context)]
+		status, ok := contexts[want.Context]
 		if !ok {
 			problems = append(problems, fmt.Sprintf("status %q is missing", want.Context))
 			continue
@@ -1643,6 +1699,89 @@ func evaluateReleaseCI(policy releasePolicy, runs []checkRunDetail, statuses []c
 	}
 	if len(problems) > 0 {
 		return fmt.Errorf("required CI for commit %s is not satisfied: %s", sha, strings.Join(problems, "; "))
+	}
+	return nil
+}
+
+// requireReleaseCI always queries current attempts on the immutable target.
+func requireReleaseCI(ctx context.Context, gh *GitHub, policy releasePolicy, sha string) error {
+	checks, err := gh.AllCheckRuns(ctx, sha)
+	if err != nil {
+		return err
+	}
+	statuses, err := gh.AllCommitStatuses(ctx, sha)
+	if err != nil {
+		return err
+	}
+	return evaluateReleaseCI(policy, checks, statuses, sha)
+}
+
+// Re-read the exact identity and ownership record, never target_commitish.
+// This is fail-closed revalidation, not a transaction or GitHub CAS.
+func revalidatePinnedRelease(ctx context.Context, cfg Config, gh *GitHub, plan releasePlan, arts []recordArtifact, id int64, draft bool) (Release, error) {
+	policy, err := fetchReleasePolicy(ctx, gh, plan.Policy, plan.Commit)
+	if err != nil {
+		return Release{}, err
+	}
+	rel, err := gh.GetReleaseByID(ctx, id)
+	if err != nil {
+		return rel, err
+	}
+	if rel.Draft != draft {
+		return rel, errors.New("release publication state changed; refusing further mutation or a stale success report")
+	}
+	if _, err := recordFromDraft(rel, plan.Tag, plan.Commit, plan, policy, arts, cfg); err != nil {
+		return rel, err
+	}
+	visible, found, err := gh.findReleaseByTag(ctx, plan.Tag)
+	if err != nil {
+		return rel, err
+	}
+	if !found || visible.ID != id {
+		return rel, errors.New("pinned release is not the unique visible release for this tag")
+	}
+	if err := requireReleaseCI(ctx, gh, policy, plan.Commit); err != nil {
+		return rel, err
+	}
+	if err := verifyTagAt(ctx, gh, plan.Tag, plan.Commit); err != nil {
+		return rel, err
+	}
+	return rel, nil
+}
+
+// Match encoding/json's Unicode case folding so case aliases cannot override
+// the same struct field through two different JSON keys.
+func foldedJSONKey(s string) string {
+	return strings.Map(func(r rune) rune {
+		smallest := r
+		for next := unicode.SimpleFold(r); next != r; next = unicode.SimpleFold(next) {
+			if next < smallest {
+				smallest = next
+			}
+		}
+		return smallest
+	}, s)
+}
+
+func requirePublicationClaim(ctx context.Context, gh *GitHub, rel Release, content []byte) error {
+	assets, err := gh.ReleaseAssets(ctx, rel.ID)
+	if err != nil {
+		return err
+	}
+	byName, err := assetMap(assets)
+	if err != nil {
+		return err
+	}
+	asset, ok := byName[publishClaimAsset]
+	if !ok || asset.State != "uploaded" || asset.Size != int64(len(content)) {
+		return errors.New("the completed publication claim is missing or changed; refusing to publish")
+	}
+	got, err := gh.DownloadReleaseAsset(ctx, asset.ID)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(got, content) {
+		return errors.New("publication claim bytes changed; refusing to publish")
 	}
 	return nil
 }
