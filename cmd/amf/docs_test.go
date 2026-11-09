@@ -105,6 +105,8 @@ func TestDocumentationCommands(t *testing.T) {
 	}{
 		{"issue", issueUsage, issueSubcommands},
 		{"pr", prUsage, prSubcommands},
+		{"tag", tagUsage, tagSubcommands},
+		{"release", releaseUsage, releaseSubcommands},
 	} {
 		names := group.names[:len(group.names)-1] // help is a usage alias
 		checkDocNames(t, group.name+" help commands", helpRows(group.help, "Commands"), 1, names)
@@ -209,6 +211,7 @@ func TestReadmeMentionsCommandsAndFlags(t *testing.T) {
 		"amf pr merge", "--update-branch", "--wait-for-checks",
 		"amf pr sweep", "--merge", "--dry-run", "--json",
 		"amf pr view",
+		"amf tag list", "amf tag view", "amf release list", "amf release latest", "--state published",
 		"amf pr comment", "--body", "--file",
 		"amf issue label",
 		"amf doctor --fix-labels",
@@ -276,6 +279,9 @@ func TestDocumentedFlagsExist(t *testing.T) {
 		{"init"}, {"issue", "create"}, {"issue", "list"}, {"issue", "run"}, {"issue", "watch"},
 		{"pr", "list"}, {"pr", "merge"}, {"pr", "view"}, {"pr", "diff"}, {"pr", "comment"}, {"pr", "close"},
 		{"pr", "reopen"}, {"pr", "ready"}, {"pr", "draft"},
+		{"tag", "list"}, {"tag", "view"}, {"tag", "create"},
+		{"release", "list"}, {"release", "view"}, {"release", "latest"},
+		{"release", "create"}, {"release", "stage"}, {"release", "publish"},
 		{"run"}, {"watch"}, {"auto"}, {"pipeline"}, {"doctor"}, {"update"},
 	} {
 		t.Run(strings.Join(cmd, " "), func(t *testing.T) {

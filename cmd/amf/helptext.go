@@ -223,45 +223,163 @@ Converts a pull request to a draft.
 Closed or merged PRs fail. Issue labels are left as they are. Prints
 #N is now a draft <url>, or #N is already a draft.
 `,
+	"tag list": `Usage:
+  amf tag list [flags]
+
+Lists every tag, sorted by name ascending. Tags have no authoritative
+creation-time order, so no tag is presented as "latest". GitHub's listing
+supplies each tag's commit. --limit keeps the first N after sorting (0, the
+default, means no limit). --json prints an array of {name, commit}, or [].
+Needs no git checkout. This command never writes.
+`,
+	"tag view": `Usage:
+  amf tag view <name> [flags]
+
+Shows a tag and the commit it ultimately points to. Annotated tags are peeled
+recursively. A response that is incomplete, points to anything other than a
+commit, repeats a tag object (a cycle), or nests deeper than 16 tag objects
+is rejected, and the ref name and each tag object's SHA are checked, so amf
+never reports another tag's object. --json prints {name, commit}. Needs no
+git checkout. This command never writes.
+`,
+	"tag create": `Usage:
+  amf tag create <name> --commit <sha>
+
+Creates a lightweight tag at a full, lower-case 40- or 64-character commit
+SHA. amf first reads the ref and peels annotated tags recursively; an
+existing tag at the same commit succeeds without a write, and one at a
+different commit fails. amf never moves, force-updates or deletes a tag, and
+never treats target_commitish or a branch as authority. The SHA must name a
+commit object in the repository. Before any new tag POST, the fixed
+amf-release-policy.json at that exact SHA must be valid and all required CI
+must pass. No policy override or CI bypass. Needs no git checkout.
+`,
+	"release list": `Usage:
+  amf release list [flags]
+
+Lists releases newest first by creation time, ties by release ID. --state
+all (the default) includes drafts and prereleases; published keeps only
+releases that are neither, draft keeps drafts, and prerelease keeps releases
+marked prerelease. --limit keeps the first N after filtering (0 means no
+limit). Every page of releases and of each shown release's assets is fetched;
+an inline asset array is not treated as complete. Drafts are visible only
+when the token can see them. --json prints an array, or [].
+Needs no git checkout. This command never writes.
+`,
+	"release view": `Usage:
+  amf release view <tag> [flags]
+
+Shows the release for a tag, including every asset. The commit is the actual
+commit the tag peels to, shown separately from target_commitish, which GitHub
+recorded at creation and which does not prove the tag's ref. A draft whose tag
+does not exist yet shows commit as unknown; a published release with a missing
+tag is an error. --json prints one object with commit null when unknown.
+Needs no git checkout. This command never writes.
+`,
+	"release latest": `Usage:
+  amf release latest [flags]
+
+Shows GitHub's latest published, non-prerelease release, with every asset and
+the tag's actual peeled commit. When there is none, prints
+No published releases in owner/name. and exits 0; --json prints null.
+Needs no git checkout. This command never writes.
+`,
+	"release create": `Usage:
+  amf release create <tag> --plan <file> --manifest <file>
+
+Creates a draft release pinned to the plan's tag, full commit SHA and exact
+artifact set. The tag must already exist and peel to that SHA. amf reads the
+required CI policy from amf-release-policy.json in that exact commit,
+requires all its CI to pass, and records the repository, tag, SHA, policy and artifact names, SHA-256 sums and
+sizes in a versioned ownership record in the draft body. An existing draft
+is reused only when its record matches exactly; an unrelated draft or
+published release is never modified. The command prints the draft release ID
+for stage and publish. It never uploads an artifact or publishes. Needs no
+git checkout.
+`,
+	"release stage": `Usage:
+  amf release stage <tag> --release <id> --plan <file> --manifest <file>
+
+Stages the plan's named artifacts on the pinned draft release. Required
+exact-target CI must pass before uploads. Existing remote content is
+preflighted and identity/record/CI are refreshed before each upload. Every file is
+rejected if it is a symlink, not regular, outside the plan directory, has an
+unsafe or duplicate name, or is not covered exactly once by the checksum
+manifest. amf copies each file into a bounded temporary snapshot while hashing
+it and uploads only that verified snapshot, so a rename or replacement cannot
+substitute different bytes. An existing asset with the same name is skipped
+only after its remote size and downloaded bytes match the recorded plan; a
+different, unfinished or unexpected asset fails closed and is never deleted or
+overwritten. A lost upload response is resolved by re-reading and verifying the
+remote asset. A successful or interrupted stage can be rerun. It never publishes.
+`,
+	"release publish": `Usage:
+  amf release publish <tag> --release <id> --plan <file> --manifest <file>
+
+Publishes the pinned draft only after rechecking the tag's actual peeled SHA,
+the exact recorded plan, release identity and policy, every expected artifact's
+remote size and bytes, and the required CI on the exact commit. The required
+CI policy comes from the fixed amf-release-policy.json at that commit: every required check and
+status must have the recorded name and provenance (app ID or creator ID), be
+the latest attempt, and be completed successfully; missing, pending, failed,
+inconclusive, wrong-SHA or wrong-source results fail, and an unreadable policy
+fails closed. amf creates a create-only publication claim asset to serialize
+cooperating publishers. Claim bytes, artifacts, identity, record, tag and
+current CI are revalidated after claiming, before the single publish PATCH. It never
+uses GitHub CAS or transactions; an ambiguous interrupted publication is
+re-read, and if it is still ambiguous amf refuses and leaves recovery to an
+operator. An already published identical retry verifies and returns without
+modification. CLI intent to publish is necessary but does not grant an
+assistant permission to release.
+`,
 }
 
 // helpSeeAlso lists related topics for commands with flags. Group and topic
 // help include their footers directly, since they don't use commandHelp.
 var helpSeeAlso = map[string][]string{
-	"init":           {"env", "auth", "doctor"},
-	"run":            {"agents", "env", "memory"},
-	"watch":          {"run", "agents", "env", "memory"},
-	"auto":           {"run", "agents", "pipeline", "memory"},
-	"list":           {"issue", "issue label", "run"},
-	"pipeline":       {"agents", "run", "env"},
-	"doctor":         {"init", "env", "auth"},
-	"update":         {"version"},
-	"version":        {"update"},
-	"completion":     {"help", "flags"},
-	"man":            {"help", "flags"},
-	"issue create":   {"issue label", "issue list", "run"},
-	"issue label":    {"issue unlabel", "issue list", "run", "watch"},
-	"issue unlabel":  {"issue label", "issue list", "watch"},
-	"issue close":    {"issue reopen", "issue view"},
-	"issue reopen":   {"issue close", "issue view"},
-	"issue view":     {"issue list", "issue close", "issue label"},
-	"pr list":        {"pr view", "pr diff", "pr merge"},
-	"pr merge":       {"pr view", "pr sweep", "run"},
-	"pr sweep":       {"pr merge", "watch"},
-	"pr view":        {"pr diff", "pr merge"},
-	"pr diff":        {"pr view"},
-	"pr comment":     {"pr view", "pr list"},
-	"pr close":       {"pr reopen", "issue label"},
-	"pr reopen":      {"pr close", "pr view"},
-	"pr ready":       {"pr draft", "pr merge"},
-	"pr draft":       {"pr ready", "pr view"},
-	"auth login":     {"auth", "auth status", "env"},
-	"auth status":    {"auth", "auth login", "doctor"},
-	"auth logout":    {"auth", "auth login"},
-	"auth token":     {"auth", "auth login", "env"},
-	"memory sync":    {"memory", "memory similar", "memory show"},
-	"memory similar": {"memory", "memory sync", "memory show"},
-	"memory show":    {"memory", "memory sync", "memory similar"},
+	"init":            {"env", "auth", "doctor"},
+	"run":             {"agents", "env", "memory"},
+	"watch":           {"run", "agents", "env", "memory"},
+	"auto":            {"run", "agents", "pipeline", "memory"},
+	"list":            {"issue", "issue label", "run"},
+	"pipeline":        {"agents", "run", "env"},
+	"doctor":          {"init", "env", "auth"},
+	"update":          {"version"},
+	"version":         {"update"},
+	"completion":      {"help", "flags"},
+	"man":             {"help", "flags"},
+	"issue create":    {"issue label", "issue list", "run"},
+	"issue label":     {"issue unlabel", "issue list", "run", "watch"},
+	"issue unlabel":   {"issue label", "issue list", "watch"},
+	"issue close":     {"issue reopen", "issue view"},
+	"issue reopen":    {"issue close", "issue view"},
+	"issue view":      {"issue list", "issue close", "issue label"},
+	"pr list":         {"pr view", "pr diff", "pr merge"},
+	"pr merge":        {"pr view", "pr sweep", "run"},
+	"pr sweep":        {"pr merge", "watch"},
+	"pr view":         {"pr diff", "pr merge"},
+	"pr diff":         {"pr view"},
+	"pr comment":      {"pr view", "pr list"},
+	"pr close":        {"pr reopen", "issue label"},
+	"pr reopen":       {"pr close", "pr view"},
+	"pr ready":        {"pr draft", "pr merge"},
+	"pr draft":        {"pr ready", "pr view"},
+	"tag list":        {"tag view", "tag create", "release list"},
+	"tag view":        {"tag list", "tag create", "release view"},
+	"tag create":      {"tag view", "release create", "release list"},
+	"release list":    {"release view", "release latest", "tag list"},
+	"release view":    {"release list", "release latest", "tag view"},
+	"release latest":  {"release list", "release view", "tag view"},
+	"release create":  {"release stage", "release publish", "tag create"},
+	"release stage":   {"release create", "release publish", "release view"},
+	"release publish": {"release stage", "release create", "release view"},
+	"auth login":      {"auth", "auth status", "env"},
+	"auth status":     {"auth", "auth login", "doctor"},
+	"auth logout":     {"auth", "auth login"},
+	"auth token":      {"auth", "auth login", "env"},
+	"memory sync":     {"memory", "memory similar", "memory show"},
+	"memory similar":  {"memory", "memory sync", "memory show"},
+	"memory show":     {"memory", "memory sync", "memory similar"},
 }
 
 // helpExamples are the short examples before a command's See also footer.
@@ -269,6 +387,8 @@ var helpExamples = map[string]string{
 	"auth":           "  amf auth status\n  amf auth login --client-id Ov23liABC123\n",
 	"issue":          "  amf issue create \"Fix the login redirect\" --body \"Users land on /404 after login\"\n  amf issue list --label amf:ready\n",
 	"pr":             "  amf pr list\n  amf pr view 57\n",
+	"tag":            "  amf tag list --limit 10\n  amf tag view v1.2.3 --json\n",
+	"release":        "  amf release list --state published\n  amf release latest --json\n",
 	"memory":         "  amf memory sync\n  amf memory similar 42\n",
 	"help":           "  amf help run\n  amf help pr merge\n",
 	"memory sync":    "  amf memory sync\n  amf memory sync --full --memory-backend markdown\n",
@@ -303,18 +423,27 @@ var helpExamples = map[string]string{
   amf auto status
   amf auto --abort
 `,
-	"pipeline":   "  amf pipeline\n  amf pipeline --fetch\n",
-	"update":     "  amf update --check\n  amf update --version v0.0.7\n",
-	"pr list":    "  amf pr list --state merged --limit 5\n  amf pr list --issue 42 --json\n",
-	"pr merge":   "  amf pr merge 57 --squash --delete-branch\n  amf pr merge 57 -u -w --squash\n",
-	"pr sweep":   "  amf pr sweep --dry-run\n  amf pr sweep --merge=squash --wait-for-checks\n",
-	"pr view":    "  amf pr view 57 --json\n",
-	"pr diff":    "  amf pr diff 57 --name-only\n",
-	"pr comment": "  amf pr comment 57 --body \"Looks good to me\"\n  amf pr comment 57 --file review.md\n",
-	"pr close":   "  amf pr close 57 --comment \"Superseded by #58\" --delete-branch\n",
-	"pr reopen":  "  amf pr reopen 57\n",
-	"pr ready":   "  amf pr ready 57\n",
-	"pr draft":   "  amf pr draft 57\n",
+	"pipeline":        "  amf pipeline\n  amf pipeline --fetch\n",
+	"update":          "  amf update --check\n  amf update --version v0.0.7\n",
+	"pr list":         "  amf pr list --state merged --limit 5\n  amf pr list --issue 42 --json\n",
+	"pr merge":        "  amf pr merge 57 --squash --delete-branch\n  amf pr merge 57 -u -w --squash\n",
+	"pr sweep":        "  amf pr sweep --dry-run\n  amf pr sweep --merge=squash --wait-for-checks\n",
+	"pr view":         "  amf pr view 57 --json\n",
+	"pr diff":         "  amf pr diff 57 --name-only\n",
+	"tag list":        "  amf tag list --limit 10\n  amf tag list --json\n",
+	"tag view":        "  amf tag view v1.2.3\n  amf tag view v1.2.3 --json\n",
+	"tag create":      "  amf tag create v1.2.3 --commit 0123456789abcdef0123456789abcdef01234567\n",
+	"release list":    "  amf release list --state published --limit 5\n  amf release list --json\n",
+	"release view":    "  amf release view v1.2.3\n  amf release view v1.2.3 --json\n",
+	"release latest":  "  amf release latest\n  amf release latest --json\n",
+	"release create":  "  amf release create v1.2.3 --plan plan.json --manifest checksums.txt\n",
+	"release stage":   "  amf release stage v1.2.3 --release 42 --plan plan.json --manifest checksums.txt\n",
+	"release publish": "  amf release publish v1.2.3 --release 42 --plan plan.json --manifest checksums.txt\n",
+	"pr comment":      "  amf pr comment 57 --body \"Looks good to me\"\n  amf pr comment 57 --file review.md\n",
+	"pr close":        "  amf pr close 57 --comment \"Superseded by #58\" --delete-branch\n",
+	"pr reopen":       "  amf pr reopen 57\n",
+	"pr ready":        "  amf pr ready 57\n",
+	"pr draft":        "  amf pr draft 57\n",
 }
 
 func init() {

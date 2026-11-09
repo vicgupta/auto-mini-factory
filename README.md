@@ -152,6 +152,15 @@ amf pr sweep --merge --wait-for-checks --dry-run --json  # -m/-w/-n/-j: update, 
 amf pr reopen 57            # reopen a closed, unmerged PR
 amf pr ready 57             # mark an open draft PR ready for review
 amf pr draft 57             # convert an open PR to a draft
+amf tag list --limit 10     # tags by name with their commits
+amf tag view v1.2.3         # the commit a lightweight or annotated tag points to
+amf tag create v1.2.3 --commit <full-sha>  # create once at an immutable commit
+amf release list --state published  # released versions, newest first
+amf release latest          # GitHub's latest published non-prerelease release
+
+amf release create v1.2.3 --plan plan.json --manifest checksums.txt  # draft only
+amf release stage v1.2.3 --release 42 --plan plan.json --manifest checksums.txt
+amf release publish v1.2.3 --release 42 --plan plan.json --manifest checksums.txt
 amf doctor --fix-labels     # correct amf status labels that disagree with the PRs (-F)
 
 amf memory sync             # backfill the repo's memory from GitHub (then only what changed)
@@ -160,6 +169,14 @@ amf memory similar "flaky login test" --json
 amf memory show 42          # issue 42's PRs and every run
 amf watch --memory-backend markdown --memory-dir ~/amf-notes  # keep memory as Markdown files elsewhere
 ```
+
+Native writes require a reviewed `amf-release-policy.json` committed at the exact
+target SHA, with required check names/app IDs and status contexts/creator IDs.
+Only explicit `release publish` publishes. The plan and expected checksums stay
+bound to the draft across retries; incomplete uploads/claims stop for operator
+investigation, never silent deletion or overwrite. See the native staged-release
+workflow and concurrency limits in [COMMANDS](docs/COMMANDS.md#staged-release-workflow).
+
 
 Or run `amf watch` to process open issues labeled `amf:ready`, oldest first.
 

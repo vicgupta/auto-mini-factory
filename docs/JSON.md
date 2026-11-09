@@ -6,6 +6,10 @@ in the [command reference](COMMANDS.md#subcommand-reference). JSON is written
 to stdout with a final newline, like the other command data described under
 [Output](../README.md#output).
 
+The write commands `amf tag create` and `amf release create`, `stage` and
+`publish` have no `--json` mode; each prints one status line and leaves the
+release or asset as described in the command reference.
+
 | Command | JSON value | Fields |
 |---|---|---|
 | `amf issue list` (or `amf list`) | array of [issues](#issue) | `number`, `title`, `state`, `url`, `labels` |
@@ -13,13 +17,19 @@ to stdout with a final newline, like the other command data described under
 | `amf pr list` | array of [pull requests](#pull-request-list) | `number`, `title`, `state`, `draft`, `url`, `head`, `base`, `issue` |
 | `amf pr sweep` | array of [sweep results](#sweep-result) | `number`, `issue`, `url`, `action`, `reason`, `commit` |
 | `amf pr view <N>` | one [pull request](#pull-request-view) | `number`, `title`, `state`, `draft`, `url`, `head`, `base`, `author`, `issue`, `mergeable`, `mergeable_state`, `additions`, `deletions`, `changed_files`, `behind_by`, `ahead_by`, `checks`, `body` |
+| `amf tag list` | array of [tags](#tag) | `name`, `commit` |
+| `amf tag view <name>` | one [tag](#tag) | `name`, `commit` |
+| `amf release list` | array of [releases](#release) | `id`, `tag`, `name`, `state`, `draft`, `prerelease`, `target_commitish`, `created_at`, `published_at`, `url`, `assets` |
+| `amf release view <tag>` | one [release](#release) | the release list fields, plus `commit` |
+| `amf release latest` | one [release](#release), or `null` | the release list fields, plus `commit` |
 | `amf memory sync` | one [sync result](#memory-sync) | `issues`, `pull_requests`, `linked`, `cursor` |
 | `amf memory similar <N \| text>` | array of [hits](#memory-similar) | `kind`, `ref`, `issue`, `pr`, `title`, `score`, `what`, `merged` |
 | `amf memory show <N>` | one [issue history](#memory-show) | `issue`, `pull_requests`, `runs` |
 
-`amf issue list`, `amf issue view`, `amf pr list` and `amf pr view` print a
-compact value on one line and do not HTML-escape their strings. `amf pr sweep`
-and the `amf memory` commands print the same values with two-space indentation.
+`amf issue list`, `amf issue view`, `amf pr list`, `amf pr view`, the `amf tag`
+commands and the `amf release` commands print a compact value on one line and
+do not HTML-escape their strings. `amf pr sweep` and the `amf memory` commands
+print the same values with two-space indentation.
 
 ## Issue
 
@@ -110,6 +120,60 @@ looks like `5 checks: 5 success`. Titles and bodies are not HTML-escaped.
 ```json
 {"number":57,"title":"Fix login","state":"open","draft":false,"url":"https://github.com/owner/repo/pull/57","head":"amf/issue-42","base":"main","author":"octocat","issue":42,"mergeable":true,"mergeable_state":"clean","additions":3,"deletions":1,"changed_files":1,"behind_by":2,"ahead_by":1,"checks":{"state":"passed","summary":"5 checks: 5 success"},"body":""}
 ```
+
+## Tag
+
+Printed as an array by `amf tag list` and as one object by `amf tag view`.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `name` | string | tag name |
+| `commit` | string | the commit SHA GitHub lists for the tag; use `amf tag view` to peel an annotated tag to its final commit |
+
+```json
+[{"name":"v1.2.3","commit":"1a2b3c4"}]
+```
+
+## Release
+
+Printed as an array by `amf release list` and as one object by `amf release
+view` and `amf release latest`. `commit` is present only in the view and latest
+forms. `amf release latest` prints `null` when there is no published
+non-prerelease release.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `id` | integer | release ID |
+| `tag` | string | release tag name |
+| `name` | string | display name; the tag when GitHub's name is empty |
+| `state` | string | `published`, `draft` or `prerelease` |
+| `draft` | boolean | whether the release is a draft |
+| `prerelease` | boolean | whether it is marked prerelease |
+| `target_commitish` | string | target recorded at creation; never used to resolve the commit |
+| `created_at` | string | creation time in RFC 3339 |
+| `published_at` | string or `null` | publication time in RFC 3339, or `null` |
+| `url` | string | the release's GitHub page |
+| `commit` | string or `null` | the tag's actual peeled commit (view and latest only); `null` when a draft's tag does not exist yet |
+| `assets` | array of [assets](#release-asset) | every asset, from every page; `[]` when none |
+
+### Release asset
+
+| Field | Type | Meaning |
+|---|---|---|
+| `id` | integer | asset ID |
+| `name` | string | file name |
+| `size` | integer | size in bytes |
+| `content_type` | string | media type GitHub recorded |
+| `state` | string | GitHub's upload state, such as `uploaded` |
+| `download_count` | integer | download count |
+| `url` | string | browser download URL |
+
+```json
+[{"id":12,"tag":"v1.2.3","name":"v1.2.3","state":"published","draft":false,"prerelease":false,"target_commitish":"main","created_at":"2026-01-02T03:04:05Z","published_at":"2026-01-02T04:04:05Z","url":"https://github.com/owner/repo/releases/tag/v1.2.3","assets":[{"id":3,"name":"amf.zip","size":1024,"content_type":"application/zip","state":"uploaded","download_count":5,"url":"https://github.com/owner/repo/releases/download/v1.2.3/amf.zip"}]}]
+```
+
+`amf release view` and `amf release latest` add `"commit":"1a2b3c4"` to
+that object.
 
 ## Memory sync
 
