@@ -245,3 +245,40 @@ func TestReviewChecksumManifestCanBeNamedVerifiedArtifact(t *testing.T) {
 		t.Fatal("named checksum asset was not uploaded")
 	}
 }
+
+func TestReviewManifestNamesMustMatchExactly(t *testing.T) {
+	f, _ := newReleaseFake(t)
+	f.allowRelease("v1")
+	dir, _ := os.Getwd()
+	p, m := writePlanFiles(t, dir, "v1", map[string][]byte{"one.zip": []byte("one")})
+	sum := sha256.Sum256([]byte("one"))
+	if err := os.WriteFile(m, []byte(fmt.Sprintf("%x  ONE.zip\n", sum)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := runReleaseCmd(t, "release", "create", "v1", "--plan", p, "--manifest", m); err == nil {
+		t.Fatal("case-renamed manifest artifact accepted")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.releases) != 0 {
+		t.Fatal("invalid manifest created a draft")
+	}
+}
+
+func TestReviewManifestModeDoesNotRenameAssets(t *testing.T) {
+	sum := fmt.Sprintf("%x", sha256.Sum256([]byte("one")))
+	for _, tc := range []struct{ line, name string }{{"  *one.zip", "*one.zip"}, {" *one.zip", "one.zip"}, {"  ONE.zip", "ONE.zip"}, {"  one space.zip", "one space.zip"}} {
+		got, err := parseChecksumManifest([]byte(sum + tc.line + "\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got[tc.name] != sum || len(got) != 1 {
+			t.Fatalf("%q parsed as %#v", tc.line, got)
+		}
+	}
+	for _, line := range []string{" one.zip", "   one.zip", " * one.zip"} {
+		if _, err := parseChecksumManifest([]byte(sum + line + "\n")); err == nil {
+			t.Fatalf("ambiguous mode/name %q accepted", line)
+		}
+	}
+}

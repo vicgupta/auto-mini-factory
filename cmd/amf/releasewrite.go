@@ -282,7 +282,7 @@ func loadReleasePlan(planPath, manifestPath string) (releasePlan, []artifactSnap
 			return plan, nil, nil, fmt.Errorf("release plan %s: duplicate artifact name %q", planPath, art.Name)
 		}
 		seen[key] = true
-		sum, ok := manifest[key]
+		sum, ok := manifest[art.Name]
 		if !ok {
 			return plan, nil, nil, fmt.Errorf("checksum manifest %s has no entry for artifact %q", manifestPath, art.Name)
 		}
@@ -308,7 +308,7 @@ func loadReleasePlan(planPath, manifestPath string) (releasePlan, []artifactSnap
 		for key := range manifest {
 			found := false
 			for _, art := range plan.Artifacts {
-				if strings.ToLower(art.Name) == key {
+				if art.Name == key {
 					found = true
 					break
 				}
@@ -335,7 +335,7 @@ func loadReleasePlan(planPath, manifestPath string) (releasePlan, []artifactSnap
 			stager.Close()
 			return plan, nil, nil, err
 		}
-		snap, err := snapshotArtifact(stager, local, art.Name, manifest[strings.ToLower(art.Name)])
+		snap, err := snapshotArtifact(stager, local, art.Name, manifest[art.Name])
 		if err != nil {
 			stager.Close()
 			return plan, nil, nil, err
@@ -357,15 +357,14 @@ func parseChecksumManifest(data []byte) (map[string]string, error) {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		if len(line) < 66 || line[64] != ' ' {
+		if len(line) < 67 || line[64] != ' ' || (line[65] != ' ' && line[65] != '*') {
 			return nil, fmt.Errorf("line %d is not <sha256>  <name>", lineNo+1)
 		}
 		sum := strings.ToLower(line[:64])
 		if !isSHA256(sum) {
 			return nil, fmt.Errorf("line %d has invalid SHA-256 %q", lineNo+1, line[:64])
 		}
-		name := strings.TrimLeft(line[64:], " ")
-		name = strings.TrimPrefix(name, "*")
+		name := line[66:]
 		if name == "" || strings.TrimSpace(name) != name {
 			return nil, fmt.Errorf("line %d has an empty or ambiguous name", lineNo+1)
 		}
@@ -377,7 +376,7 @@ func parseChecksumManifest(data []byte) (map[string]string, error) {
 			return nil, fmt.Errorf("line %d duplicates artifact %q (also %q)", lineNo+1, name, prev)
 		}
 		originals[key] = name
-		out[key] = sum
+		out[name] = sum
 	}
 	if len(out) == 0 {
 		return nil, errors.New("no checksums found")
@@ -897,7 +896,7 @@ func (g *GitHub) UploadReleaseAsset(ctx context.Context, releaseID int64, name s
 
 // DownloadReleaseAsset reads an asset through the API, not its browser URL.
 // Redirects are allowed only to the API host or GitHub's asset storage; the
-// Authorization header is stripped whenever the host or port changes.
+// Authorization is stripped on every redirect, even to the same host.
 func (g *GitHub) openReleaseAsset(ctx context.Context, assetID int64) (io.ReadCloser, error) {
 	base, err := url.Parse(g.base)
 	if err != nil {
