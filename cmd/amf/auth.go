@@ -431,8 +431,7 @@ and otherwise stops, saying to run amf auth login or set GITHUB_TOKEN.
   login   log in with GitHub's device flow and save the token
   status  which token amf uses, its account, scopes and type (never the token)
   logout  delete the token amf auth login saved
-  token   print the token amf uses, only when stdout isn't a terminal or
-          with --force
+  token   print the token amf uses (only to a non-terminal, or with --force)
 
 The host defaults to the one AMF_API_URL points at (github.com).
 
@@ -506,8 +505,8 @@ func addAuthFlags(fs *flag.FlagSet, sub string) authFlags {
 	f := authFlags{host: fs.String("host", "", "the GitHub `host` (default: AMF_API_URL's, github.com)")}
 	switch sub {
 	case "login":
-		f.clientID = fs.String("client-id", "", "the OAuth app's client `id` (default: AMF_GITHUB_CLIENT_ID)")
-		f.scopes = fs.String("scopes", defaultScopes, "the OAuth `scopes` to ask for, separated by spaces or commas")
+		f.clientID = fs.String("client-id", "", "OAuth client `id` (default: AMF_GITHUB_CLIENT_ID)")
+		f.scopes = fs.String("scopes", defaultScopes, "OAuth `scopes`, space/comma-separated")
 		f.noBrowser = fs.Bool("no-browser", false, "don't open the browser; just print the link")
 	case "token":
 		f.force = fs.Bool("force", false, "print the token even to a terminal")

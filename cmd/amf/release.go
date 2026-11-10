@@ -18,12 +18,12 @@ import (
 var releaseUsage = `usage: amf release <command>
 
 Commands:
-  list [--state all|published|draft|prerelease] [--limit n] [--json]  list releases, newest first
+  list [flags]  list releases, newest first
   view <tag> [--json]  show a release, its assets and its tag's actual commit
   latest [--json]  show GitHub's latest published non-prerelease release
-  create <tag> --plan <file> --manifest <file>  create an unpublished draft pinned to a tag and plan
-  stage <tag> --release <id> --plan <file> --manifest <file>  verify and upload the plan's artifacts
-  publish <tag> --release <id> --plan <file> --manifest <file>  verify everything, then publish once
+  create <tag> [flags]  create an unpublished draft pinned to a tag
+  stage <tag> [flags]  verify and upload the plan's artifacts
+  publish <tag> [flags]  verify everything, then publish once
 
 create never publishes, stage never publishes, and only publish publishes.
 Run amf help release <command> or amf release <command> --help for its flags.
@@ -330,7 +330,7 @@ func addReleaseListFlags(fs *flag.FlagSet) releaseListFlags {
 	return releaseListFlags{
 		state:  fs.String("state", "all", "all, published, draft or prerelease"),
 		limit:  fs.Int("limit", 0, "print at most N releases, 0 means no limit"),
-		asJSON: fs.Bool("json", false, "print a JSON array of tag, name, state, target_commitish, dates, url and assets"),
+		asJSON: fs.Bool("json", false, "JSON: tag, name, state, dates, url, assets"),
 	}
 }
 

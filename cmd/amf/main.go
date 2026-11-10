@@ -306,13 +306,13 @@ type runFlags struct {
 func addRunFlags(fs *flag.FlagSet) runFlags {
 	var f runFlags
 	f.timeout, f.alias = addTimeoutFlags(fs)
-	f.evalRounds = fs.Int("eval-rounds", 2, "how many times a pipeline's eval stage may send the change back to code")
+	f.evalRounds = fs.Int("eval-rounds", 2, "max eval send-backs to code")
 	f.agent = fs.String("agent", "", agentFlagHelp)
 	f.draft = fs.Bool("draft", false, draftFlagHelp)
 	f.merge = addMergeFlag(fs)
 	f.waitChecks = fs.Bool("wait-for-checks", true, waitChecksFlagHelp)
-	f.dryRun = fs.Bool("dry-run", false, "make the change on the local branch only: no label, comment, push, PR or merge")
-	f.force = fs.Bool("force", false, "run even if the issue already has an open PR or an amf/issue-N branch, updating that PR; this replaces the branch, first saving any commits it would drop to amf/backup/issue-N-<sha>-<time>")
+	f.dryRun = fs.Bool("dry-run", false, "make the change locally only; no push or PR")
+	f.force = fs.Bool("force", false, "run anyway; save replaced commits as backup")
 	f.log = addLogFlags(fs)
 	f.memory = addMemoryFlags(fs)
 	return f
@@ -396,16 +396,16 @@ type watchFlags struct {
 
 func addWatchFlags(fs *flag.FlagSet) *watchFlags {
 	f := &watchFlags{}
-	f.interval = fs.Duration("interval", 10*time.Minute, "how often to poll GitHub (Go duration, e.g. 30s or 5m)")
-	f.label = fs.String("label", labelReady, "process open issues with this label")
-	fs.Var(&f.exclude, "exclude-label", "skip issues with this `label`, leaving them as they are (repeatable: any of them skips)")
+	f.interval = fs.Duration("interval", 10*time.Minute, "poll interval as a Go duration")
+	f.label = fs.String("label", labelReady, "the label to process")
+	fs.Var(&f.exclude, "exclude-label", "skip issues with this `label` (repeatable)")
 	f.timeout, f.alias = addTimeoutFlags(fs)
-	f.evalRounds = fs.Int("eval-rounds", 2, "how many times a pipeline's eval stage may send the change back to code")
+	f.evalRounds = fs.Int("eval-rounds", 2, "max eval send-backs to code")
 	f.agent = fs.String("agent", "", agentFlagHelp)
 	f.draft = fs.Bool("draft", false, draftFlagHelp)
 	f.merge = addMergeFlag(fs)
 	f.waitChecks = fs.Bool("wait-for-checks", true, waitChecksFlagHelp)
-	f.stale = fs.String("stale-timeout", "", "put amf:in-progress issues no amf works on back to amf:ready after this long, as a Go duration (default AMF_STALE_TIMEOUT, else max(2x agent timeout, 2h); off disables)")
+	f.stale = fs.String("stale-timeout", "", "requeue stuck in-progress issues; off disables")
 	f.log = addLogFlags(fs)
 	f.memory = addMemoryFlags(fs)
 	return f
@@ -498,15 +498,15 @@ func (f *labelsFlag) Set(s string) error {
 var errDraftMerge = errors.New("--draft and --merge can't be used together: GitHub doesn't merge draft pull requests")
 
 // agentFlagHelp describes --agent for run and watch.
-const agentFlagHelp = "agent for issues without a pipeline: claudecode, codex or opencode with no fallback (default: AMF_PRIMARY_AGENT, codex, then AMF_SECONDARY_AGENT, claudecode, if it fails)"
+const agentFlagHelp = "claudecode, codex or opencode; no fallback"
 
 // draftFlagHelp describes --draft for run and watch.
-const draftFlagHelp = "open new pull requests as drafts (a retry leaves an open PR a draft or ready for review as it was)"
+const draftFlagHelp = "open new pull requests as drafts"
 
 // addTimeoutFlags registers the agent timeout flags for run and watch:
 // --agent-timeout, and the deprecated --timeout alias next to it.
 func addTimeoutFlags(fs *flag.FlagSet) (at, alias *time.Duration) {
-	at = fs.Duration("agent-timeout", defaultAgentTimeout, "maximum time each agent run may take (Go duration, e.g. 90m or 1h30m)")
+	at = fs.Duration("agent-timeout", defaultAgentTimeout, "max agent run time (Go duration)")
 	alias = fs.Duration("timeout", defaultAgentTimeout, "deprecated alias of --agent-timeout")
 	return at, alias
 }
@@ -572,8 +572,8 @@ func validateAgentTimeout(d time.Duration, src string) error {
 // addLogFlags registers --log-level and --log-file for run and watch.
 func addLogFlags(fs *flag.FlagSet) *logOptions {
 	lo := &logOptions{}
-	fs.StringVar(&lo.Level, "log-level", "", "debug, info, warn or error, for the terminal and the event log (default info, and debug in the event log)")
-	fs.StringVar(&lo.File, "log-file", "", `where the event log goes (default .amf/runs/<run_id>/events.jsonl; "off" for none)`)
+	fs.StringVar(&lo.Level, "log-level", "", "debug, info, warn or error (default: info)")
+	fs.StringVar(&lo.File, "log-file", "", "event log, or off (default .amf/runs/<id>)")
 	return lo
 }
 

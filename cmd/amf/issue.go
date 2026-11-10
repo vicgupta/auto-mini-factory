@@ -12,13 +12,13 @@ import (
 var issueUsage = `usage: amf issue <command>
 
 Commands:
-  create "Title" [--body text | --file path] [--label name] [--no-label]  create an issue (the body may also come from stdin)
-  list [--state open|closed|all] [--label name] [--search text] [--limit n] [--json]  list issues, newest first, with their amf labels
-  label [<N>] [label...] [--add name]... [--remove name]... [selectors]  add or remove labels on an issue or filtered set
-  unlabel [<N>] [label...] [selectors]  remove labels from an issue or filtered set
-  close <N> [--comment text] [--delete-branch]  close an issue
+  create "Title" [flags]  create an issue (body from --body, --file or stdin)
+  list [flags]  list issues, newest first, with their amf labels
+  label [flags]  add or remove labels on an issue or filtered set
+  unlabel [flags]  remove labels from an issue or filtered set
+  close <N> [flags]  close an issue
   reopen <N>  reopen an issue
-  view <N> [--json]  show an issue
+  view <N> [flags]  show an issue
   run <N> [flags]  process one issue into a PR: see amf help run
   watch [flags]  process amf:ready issues as they arrive: see amf help watch
 
@@ -80,7 +80,7 @@ func addIssueStateFlags(fs *flag.FlagSet, command string) issueStateFlags {
 	var f issueStateFlags
 	if command == "close" {
 		f.comment = fs.String("comment", "", "post a comment on the issue before closing")
-		f.deleteBranch = fs.Bool("delete-branch", false, "delete this repository's amf/issue-N branch after closing")
+		f.deleteBranch = fs.Bool("delete-branch", false, "delete this repo's amf/issue-N branch after closing")
 	}
 	return f
 }

@@ -243,11 +243,11 @@ var pathFlags = map[string]bool{"dir": true, "env-file": true, "clone-dir": true
 // list it, so a new global flag appears in both.
 func globalFlagSet() *flag.FlagSet {
 	fs := flag.NewFlagSet("global", flag.ContinueOnError)
-	fs.Bool("quiet", false, "suppress progress; keep warnings, errors and the final summary")
-	fs.String("color", "auto", "color status output: auto, always or never (auto honors NO_COLOR)")
-	fs.String("dir", "", "work as if amf were started in this `folder` (default: the current directory)")
-	fs.String("env-file", "", "read only this .env `file` (default: ./.env, then the checkout's top-level .env)")
-	fs.String("clone-dir", "", "use, or clone GITHUB_REPO into, this `folder` (default: the enclosing checkout, else ./<repo name>)")
+	fs.Bool("quiet", false, "suppress progress; keep warnings, errors and summary")
+	fs.String("color", "auto", "status color: auto, always or never")
+	fs.String("dir", "", "work as if started in this `folder` (default: here)")
+	fs.String("env-file", "", "read only this .env `file` (default: ./.env)")
+	fs.String("clone-dir", "", "use or clone GITHUB_REPO here (default: checkout)")
 	return fs
 }
 

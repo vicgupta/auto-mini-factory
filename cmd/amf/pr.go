@@ -17,12 +17,12 @@ import (
 var prUsage = `usage: amf pr <command>
 
 Commands:
-  list [--state open|closed|merged|all] [--limit n] [--issue n] [--json]  list pull requests, newest first
-  merge <N> [--squash | --rebase] [--delete-branch] [--update-branch] [--wait-for-checks]  merge a pull request
-  sweep [--merge[=method]] [--wait-for-checks] [--dry-run] [--json]  update, merge and label the open amf pull requests
-  view <N> [--json]  show a pull request
-  diff <N> [--name-only]  show a pull request's diff, or one changed path per line
-  comment <N> (--body text | --file path)  post a comment on a pull request
+  list [flags]  list pull requests, newest first
+  merge <N> [flags]  merge a pull request
+  sweep [flags]  update, merge and label the open amf pull requests
+  view <N> [flags]  show a pull request
+  diff <N> [--name-only]  show a diff, or one changed path per line
+  comment <N> (--body text | --file path)  post a comment
   close <N> [--comment text] [--delete-branch]  close a pull request
   reopen <N>  reopen a pull request
   ready <N>  mark a draft pull request ready for review
@@ -107,7 +107,7 @@ func addPRListFlags(fs *flag.FlagSet) prListFlags {
 		state:  fs.String("state", "open", "open, closed, merged or all"),
 		limit:  fs.Int("limit", 0, "print at most N pull requests, 0 means no limit"),
 		issue:  fs.Int("issue", 0, "only pull requests opened for issue N, 0 means no filter"),
-		asJSON: fs.Bool("json", false, "print a JSON array of number, title, state, draft, url, head, base and issue"),
+		asJSON: fs.Bool("json", false, "JSON: number, title, state, draft, url, head, base, issue"),
 	}
 }
 
@@ -218,9 +218,9 @@ func addPRMergeFlags(fs *flag.FlagSet) prMergeFlags {
 	return prMergeFlags{
 		squash:       fs.Bool("squash", false, "squash and merge"),
 		rebase:       fs.Bool("rebase", false, "rebase and merge"),
-		deleteBranch: fs.Bool("delete-branch", false, "delete the head branch after merging, if it is in this repository"),
-		update:       fs.Bool("update-branch", false, "first merge the base branch into the head if it is behind"),
-		waitChecks:   fs.Bool("wait-for-checks", false, "wait for the head's checks to pass before merging (up to 30 minutes)"),
+		deleteBranch: fs.Bool("delete-branch", false, "delete head branch if in this repo"),
+		update:       fs.Bool("update-branch", false, "merge the base into the head if it is behind"),
+		waitChecks:   fs.Bool("wait-for-checks", false, "wait for the head's checks (up to 30m)"),
 	}
 }
 
@@ -776,7 +776,7 @@ type prCloseFlags struct {
 func addPRCloseFlags(fs *flag.FlagSet) prCloseFlags {
 	return prCloseFlags{
 		comment:      fs.String("comment", "", "post a comment on the pull request before closing"),
-		deleteBranch: fs.Bool("delete-branch", false, "delete the head branch after closing, if it is in this repository"),
+		deleteBranch: fs.Bool("delete-branch", false, "delete head branch if in this repo"),
 	}
 }
 

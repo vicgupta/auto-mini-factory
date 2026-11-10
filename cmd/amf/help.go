@@ -10,7 +10,7 @@ import (
 
 // usage is the short overview amf, amf help, -h and --help print: one line
 // per command and help topic. The details live in helpTopics.
-var usage = `amf turns GitHub issues into pull requests with coding agents: Claude Code, Codex or opencode.
+var usage = `amf turns GitHub issues into PRs with coding agents: Claude, Codex or opencode.
 
 Usage:
   amf <command> [arguments]
@@ -18,13 +18,13 @@ Usage:
 Commands:
   init       write .env and create amf's labels
   auth       get a GitHub token: login, status, logout, token
-  issue      manage issues: create, list, label, unlabel, close, reopen, view, run, watch
-  pr         manage pull requests: list, merge, sweep, view, diff, comment, close, reopen, ready, draft
-  tag        inspect tags (read-only): list, view
-  release    inspect releases (read-only): list, view, latest
+  issue      create, list, label, unlabel, close, reopen, view, run, watch
+  pr         list, merge, sweep, view, diff, comment, close, reopen, ready/draft
+  tag        list, view and create tags at an exact commit
+  release    list, view, latest; create, stage and publish drafts
   run        process one issue into a PR (alias of issue run)
   watch      process amf:ready issues as they arrive (alias of issue watch)
-  auto       plan one sentence into up to 5 issues and merge their PRs, pausing after the first by default
+  auto       plan one sentence into up to 5 issues and merge their PRs
   memory     the repo's memory of issues, PRs and runs: sync, similar, show
   pipeline   check the plan/code/eval pipeline in this checkout's AGENTS.md
   doctor     check the setup here, changing nothing
@@ -83,8 +83,7 @@ Exit status: 0 success, 1 command failed, 2 usage error (also --help),
 review: a merge commit, or --merge=squash or --merge=rebase (also written
 --merge squash, -m squash or -m=squash). A merge GitHub
 refuses (a conflict, required checks or reviews) leaves the PR open.
-See diagrams and tradeoffs for --merge at:
-https://github.com/vicgupta/auto-mini-factory/blob/main/docs/COMMANDS.md#merge-methods
+See docs/COMMANDS.md#merge-methods for --merge tradeoffs.
 
 amf run --dry-run makes the change on the local amf/issue-N branch and prints
 the pull request it would open, without labeling, commenting, pushing,
@@ -137,8 +136,7 @@ With --merge, each poll also sweeps the open amf pull requests as amf pr
 sweep --merge does: it updates a branch that is behind, merges a PR whose
 checks passed and labels its issue amf:done, and comments once on a PR
 that can't merge. It doesn't wait for pending checks.
-See merge methods at:
-https://github.com/vicgupta/auto-mini-factory/blob/main/docs/COMMANDS.md#merge-methods
+See docs/COMMANDS.md#merge-methods for merge methods.
 `
 
 const listHelp = `Usage:
@@ -181,7 +179,8 @@ change doctor makes).
 const updateHelp = `Usage:
   amf update [flags]
 
-Replaces this amf binary with the latest (or given) release (also amf --update or amf -u).
+Replaces this amf binary with the latest (or given) release
+(also amf --update or amf -u).
 
 Release notes (changes in each version):
 https://github.com/vicgupta/auto-mini-factory/releases
@@ -222,53 +221,60 @@ const envHelp = `Configuration is read from .env (or the environment; environmen
 Placeholders ending in ..., and owner/name, count as unset.
 
   GITHUB_TOKEN (default: gh auth token, then amf auth login)
-    API access: Contents, Issues, Pull requests (read & write). GH_TOKEN is read too. Unset,
-    amf uses gh's token, then the one amf auth login saved (amf help auth)
+    API access: Contents, Issues, Pull requests (read & write). GH_TOKEN is read
+    too. Unset, amf uses gh's token, then the one amf auth login saved
+    (amf help auth)
   GITHUB_REPO (default: required)
     owner/name; github.com URLs are accepted
   CLAUDE_CODE_OAUTH_TOKEN (default: unset)
-    Claude subscription token, passed to Claude. Makes claude usable without --agent
+    Claude subscription token, passed to Claude. Makes claude usable
+    without --agent
   ANTHROPIC_API_KEY (default: unset)
-    Claude API key, passed to Claude when there's no CLAUDE_CODE_OAUTH_TOKEN. Makes claude
-    usable without --agent
+    Claude API key, passed to Claude when there's no
+    CLAUDE_CODE_OAUTH_TOKEN. Makes claude usable without --agent
   OPENAI_API_KEY (default: unset)
     OpenAI API key, passed to Codex. Makes codex usable without --agent
   OPENCODE_API_KEY (default: unset)
-    OpenCode Console API key (oc_sk_...), passed to opencode only. One key covers
-    pay-as-you-go opencode/<id> models (with credits) and, for a workspace subscribed to
-    OpenCode Go, opencode-go/<id> models. Makes opencode usable without --agent with a
-    paid OPENCODE_MODEL. Passed through the environment, never written to an agent
-    configuration file; amf init preserves it in .env
+    OpenCode Console API key (oc_sk_...), passed to opencode only. One key
+    covers pay-as-you-go opencode/<id> models (with credits) and, for a
+    workspace subscribed to OpenCode Go, opencode-go/<id> models. Makes
+    opencode usable without --agent with a paid OPENCODE_MODEL. Passed through
+    the environment, never written to an agent configuration file; amf init
+    preserves it in .env
   OPENCODE_MODEL (default: opencode/big-pickle)
-    The model opencode runs with: always without a pipeline, and for pipeline stages that
-    name no model. opencode/<id> is a free or pay-as-you-go model, opencode-go/<id> an
-    OpenCode Go one. opencode models lists the choices
+    The model opencode runs with: always without a pipeline, and for a
+    pipeline stage that names no model. opencode/<id> is a free or
+    pay-as-you-go model, opencode-go/<id> an OpenCode Go one. opencode models
+    lists the choices
   AMF_TRUSTED (default: unset)
-    GitHub logins, separated by commas or spaces (a leading @ is allowed, case is
-    ignored). When set, amf only works on issues they opened, except issues labeled
-    amf:auto, which are always trusted. Unset means anyone's
+    GitHub logins, separated by commas or spaces (a leading @ is allowed,
+    case is ignored). When set, amf only works on issues they opened, except
+    issues labeled amf:auto, which are always trusted. Unset means anyone's
   AMF_POSTGRES_URL (default: unset)
-    A PostgreSQL server that run and watch also write their logs to, in the amflogs database
+    A PostgreSQL server that run and watch also write their logs to, in the
+    amflogs database
   AMF_CLAUDE (default: claude)
     Path to the Claude CLI
   AMF_PRIMARY_AGENT (default: codex)
-    The agent for issues without a pipeline: claudecode (or claude), codex or opencode,
-    ignoring case. --agent and a pipeline override it
+    The agent for issues without a pipeline: claudecode (or claude), codex
+    or opencode, ignoring case. --agent and a pipeline override it
   AMF_SECONDARY_AGENT (default: claudecode)
-    The agent amf falls back to when the primary fails, in a fresh worktree; the same
-    values, or none for no fallback
+    The agent amf falls back to when the primary fails, in a fresh worktree;
+    the same values, or none for no fallback
   AMF_AGENT_TIMEOUT (default: 60m)
-    How long each agent run may take, as a Go duration; --agent-timeout (or its deprecated
-    alias --timeout) overrides it. Must be at least 1m and at most 24h
+    How long each agent run may take, as a Go duration; --agent-timeout (or
+    its deprecated alias --timeout) overrides it. Must be at least 1m and at
+    most 24h
   AMF_AGENT_IDLE_TIMEOUT (default: 15m)
-    How long an agent may produce no output on stdout or stderr before amf stops it
-    and fails the run, as a Go duration; off disables it
+    How long an agent may produce no output on stdout or stderr before amf
+    stops it and fails the run, as a Go duration; off disables it
   AMF_STALE_TIMEOUT (default: max(2x agent timeout, 2h))
-    How long watch lets an issue stay amf:in-progress with no amf working on it
-    before putting it back to amf:ready; off disables it. --stale-timeout overrides it
+    How long watch lets an issue stay amf:in-progress with no amf working on
+    it before putting it back to amf:ready; off disables it. --stale-timeout
+    overrides it
   AMF_LOG_LEVEL (default: info (terminal), debug (event log))
-    debug, info, warn or error, for both the terminal and the event log of run and watch;
-    --log-level overrides it
+    debug, info, warn or error, for both the terminal and the event log of
+    run and watch; --log-level overrides it
   AMF_CODEX (default: codex)
     Path to the Codex CLI
   AMF_OPENCODE (default: opencode)
@@ -278,8 +284,9 @@ Placeholders ending in ..., and owner/name, count as unset.
   AMF_CONFIG_DIR (default: the user config folder's amf)
     Where amf auth login saves tokens (hosts.json); environment only
   AMF_API_URL (default: https://api.github.com)
-    GitHub API base URL. amf pr ready and amf pr draft derive their GraphQL endpoint from
-    it: …/graphql appended, or a GitHub Enterprise Server …/api/v3 becomes …/api/graphql
+    GitHub API base URL. amf pr ready and amf pr draft derive their GraphQL
+    endpoint from it: …/graphql appended, or a GitHub Enterprise Server
+    …/api/v3 becomes …/api/graphql
   AMF_CLONE_URL (default: https://github.com/<repo>.git)
     Where to clone GITHUB_REPO from
 
@@ -325,9 +332,9 @@ func withHelp(fs *flag.FlagSet, w io.Writer, key string) {
 	// run strips the path flags before the command parses its own, so these
 	// are only listed here; see paths.go.
 	if fs.Lookup("dir") == nil {
-		fs.String("dir", "", "work as if amf were started in this `folder` (default: the current directory)")
-		fs.String("env-file", "", "read only this .env `file` (default: ./.env, then the checkout's top-level .env)")
-		fs.String("clone-dir", "", "use, or clone GITHUB_REPO into, this `folder` (default: the enclosing checkout, else ./<repo name>)")
+		fs.String("dir", "", "work as if started in this `folder` (default: here)")
+		fs.String("env-file", "", "read only this .env `file` (default: ./.env)")
+		fs.String("clone-dir", "", "use or clone GITHUB_REPO here (default: checkout)")
 	}
 	fs.Usage = func() { fmt.Fprint(w, commandHelp(fs, key)) }
 }

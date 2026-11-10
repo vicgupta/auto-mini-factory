@@ -152,8 +152,7 @@ var memoryUsage = `Usage:
 amf keeps a per-repo memory of issues, pull requests and runs, so it can
 point a new issue at similar past work.
 
-  sync     backfill or refresh memory from GitHub's issues and pull requests
-           (only what changed since the last sync; --full rereads all)
+  sync     refresh memory from GitHub (changes since last sync; --full: all)
   similar  rank past issues, PRs and runs like an issue or a piece of text
   show     an issue's full history: its PRs and every run
 
@@ -164,12 +163,10 @@ and add a short "Similar past work" note to the agent's prompt.
 
 --memory-backend picks where memory is kept (the same flag on run, watch
 and auto):
-  sqlite    (default) <dir>/amf-memory/<host>/<owner>/<repo>/memory.db,
-            searched with SQLite FTS5
-  markdown  one file per record: issues/N.md, prs/N.md, runs/<id>.md, plus
-            index.md and index.json, in the same per-repo folder
-  logfiles  append-only JSON Lines: issues.jsonl, prs.jsonl, runs.jsonl,
-            sync.jsonl, in the same per-repo folder
+  sqlite    (default) <dir>/amf-memory/<host>/<owner>/<repo>/memory.db (FTS5)
+  markdown  issues/N.md, prs/N.md, runs/<id>.md, index.md and index.json
+  logfiles  append-only issues.jsonl, prs.jsonl, runs.jsonl and sync.jsonl
+Markdown and logfiles use the same per-repo folder as sqlite.
 --memory-dir is <dir>, the current directory by default; a relative path is
 taken from the current directory. amf never commits the amf-memory folder.
 Markdown and log files are written only when that backend is chosen.
@@ -190,7 +187,7 @@ func addMemoryCommandFlags(fs *flag.FlagSet) memoryCommandFlags {
 		memory: addMemoryFlags(fs),
 		asJSON: fs.Bool("json", false, "print JSON"),
 		limit:  fs.Int("limit", 5, "how many results similar prints"),
-		full:   fs.Bool("full", false, "with sync, reread every issue and PR instead of only what changed"),
+		full:   fs.Bool("full", false, "with sync, reread everything"),
 	}
 }
 

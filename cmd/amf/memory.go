@@ -132,8 +132,8 @@ func addMemoryFlags(fs interface {
 	StringVar(*string, string, string, string)
 }) *memoryOptions {
 	mo := &memoryOptions{}
-	fs.StringVar(&mo.Backend, "memory-backend", backendSQLite, "where amf keeps the repo's memory: sqlite, markdown or logfiles")
-	fs.StringVar(&mo.Dir, "memory-dir", "", "directory the amf-memory folder goes in (default: the current directory)")
+	fs.StringVar(&mo.Backend, "memory-backend", backendSQLite, "sqlite, markdown or logfiles")
+	fs.StringVar(&mo.Dir, "memory-dir", "", "amf-memory folder path (default: here)")
 	return mo
 }
 

@@ -290,8 +290,9 @@ Needs no git checkout. This command never writes.
 Creates a draft release pinned to the plan's tag, full commit SHA and exact
 artifact set. The tag must already exist and peel to that SHA. amf reads the
 required CI policy from amf-release-policy.json in that exact commit,
-requires all its CI to pass, and records the repository, tag, SHA, policy and artifact names, SHA-256 sums and
-sizes in a versioned ownership record in the draft body. An existing draft
+requires all its CI to pass, and records the repository, tag, SHA, policy
+and artifact names, SHA-256 sums and sizes in a versioned ownership record
+in the draft body. An existing draft
 is reused only when its record matches exactly; an unrelated draft or
 published release is never modified. The command prints the draft release ID
 for stage and publish. It never uploads an artifact or publishes. Needs no
@@ -302,7 +303,8 @@ git checkout.
 
 Stages the plan's named artifacts on the pinned draft release. Required
 exact-target CI must pass before uploads. Existing remote content is
-preflighted and identity/record/CI are refreshed before each upload. Every file is
+preflighted and identity/record/CI are refreshed before each upload. Every
+file is
 rejected if it is a symlink, not regular, outside the plan directory, has an
 unsafe or duplicate name, or is not covered exactly once by the checksum
 manifest. amf copies each file into a bounded temporary snapshot while hashing
@@ -311,7 +313,8 @@ substitute different bytes. An existing asset with the same name is skipped
 only after its remote size and downloaded bytes match the recorded plan; a
 different, unfinished or unexpected asset fails closed and is never deleted or
 overwritten. A lost upload response is resolved by re-reading and verifying the
-remote asset. A successful or interrupted stage can be rerun. It never publishes.
+remote asset. A successful or interrupted stage can be rerun. It never
+publishes.
 `,
 	"release publish": `Usage:
   amf release publish <tag> --release <id> --plan <file> --manifest <file>
@@ -319,13 +322,15 @@ remote asset. A successful or interrupted stage can be rerun. It never publishes
 Publishes the pinned draft only after rechecking the tag's actual peeled SHA,
 the exact recorded plan, release identity and policy, every expected artifact's
 remote size and bytes, and the required CI on the exact commit. The required
-CI policy comes from the fixed amf-release-policy.json at that commit: every required check and
+CI policy comes from the fixed amf-release-policy.json at that commit: every
+required check and
 status must have the recorded name and provenance (app ID or creator ID), be
 the latest attempt, and be completed successfully; missing, pending, failed,
 inconclusive, wrong-SHA or wrong-source results fail, and an unreadable policy
 fails closed. amf creates a create-only publication claim asset to serialize
 cooperating publishers. Claim bytes, artifacts, identity, record, tag and
-current CI are revalidated after claiming, before the single publish PATCH. It never
+current CI are revalidated after claiming, before the single publish PATCH.
+It never
 uses GitHub CAS or transactions; an ambiguous interrupted publication is
 re-read, and if it is still ambiguous amf refuses and leaves recovery to an
 operator. An already published identical retry verifies and returns without
@@ -349,7 +354,7 @@ var helpSeeAlso = map[string][]string{
 	"completion":      {"help", "flags"},
 	"man":             {"help", "flags"},
 	"issue create":    {"issue label", "issue list", "run"},
-	"issue label":     {"issue unlabel", "issue list", "run", "watch"},
+	"issue label":     {"issue unlabel", "issue list", "run"},
 	"issue unlabel":   {"issue label", "issue list", "watch"},
 	"issue close":     {"issue reopen", "issue view"},
 	"issue reopen":    {"issue close", "issue view"},
@@ -371,7 +376,7 @@ var helpSeeAlso = map[string][]string{
 	"release view":    {"release list", "release latest", "tag view"},
 	"release latest":  {"release list", "release view", "tag view"},
 	"release create":  {"release stage", "release publish", "tag create"},
-	"release stage":   {"release create", "release publish", "release view"},
+	"release stage":   {"release create", "release publish"},
 	"release publish": {"release stage", "release create", "release view"},
 	"auth login":      {"auth", "auth status", "env"},
 	"auth status":     {"auth", "auth login", "doctor"},
@@ -385,7 +390,7 @@ var helpSeeAlso = map[string][]string{
 // helpExamples are the short examples before a command's See also footer.
 var helpExamples = map[string]string{
 	"auth":           "  amf auth status\n  amf auth login --client-id Ov23liABC123\n",
-	"issue":          "  amf issue create \"Fix the login redirect\" --body \"Users land on /404 after login\"\n  amf issue list --label amf:ready\n",
+	"issue":          "  amf issue create \"Fix login redirect\" --body \"Users land on /404\"\n  amf issue list --label amf:ready\n",
 	"pr":             "  amf pr list\n  amf pr view 57\n",
 	"tag":            "  amf tag list --limit 10\n  amf tag view v1.2.3 --json\n",
 	"release":        "  amf release list --state published\n  amf release latest --json\n",
@@ -402,7 +407,7 @@ var helpExamples = map[string]string{
 	"issue close":    "  amf issue close 42 --comment \"Superseded by #43\"\n  amf issue close 42 --delete-branch\n",
 	"issue reopen":   "  amf issue reopen 42\n",
 	"issue view":     "  amf issue view 42\n  amf issue view 42 --json\n",
-	"issue create": `  amf issue create "Fix the login redirect" --body "Users land on /404 after login"
+	"issue create": `  amf issue create "Fix login redirect" --body "Users land on /404"
   amf issue create "Add a dark mode" --file spec.md --no-label
 `,
 	"list": `  amf issue list --label amf:ready
@@ -437,8 +442,8 @@ var helpExamples = map[string]string{
 	"release view":    "  amf release view v1.2.3\n  amf release view v1.2.3 --json\n",
 	"release latest":  "  amf release latest\n  amf release latest --json\n",
 	"release create":  "  amf release create v1.2.3 --plan plan.json --manifest checksums.txt\n",
-	"release stage":   "  amf release stage v1.2.3 --release 42 --plan plan.json --manifest checksums.txt\n",
-	"release publish": "  amf release publish v1.2.3 --release 42 --plan plan.json --manifest checksums.txt\n",
+	"release stage":   "  amf release stage v1.2.3 --release 42 --plan plan.json --manifest sums.txt\n",
+	"release publish": "  amf release publish v1.2.3 --release 42 --plan plan.json --manifest sums.txt\n",
 	"pr comment":      "  amf pr comment 57 --body \"Looks good to me\"\n  amf pr comment 57 --file review.md\n",
 	"pr close":        "  amf pr close 57 --comment \"Superseded by #58\" --delete-branch\n",
 	"pr reopen":       "  amf pr reopen 57\n",
@@ -491,8 +496,8 @@ command has two flags with the same letter.
   -H  --host             auth login, auth status, auth logout, auth token
   -i  --interval         watch
   -i  --issue            pr list
-  -j  --json             issue list, issue view, pr list, pr sweep, pr view, memory
-  -l  --label            issue create, issue list, issue label, issue unlabel, watch
+  -j  --json             issue/pr list, issue/pr view, pr sweep, memory
+  -l  --label            issue create/list/label/unlabel, watch
   -L  --limit            issue list, pr list, memory
   -m  --merge            run, watch, auto, pr sweep
   -M  --max-issues       auto
