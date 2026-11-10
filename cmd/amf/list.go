@@ -33,7 +33,7 @@ func addListFlags(fs *flag.FlagSet) listFlags {
 		label:  fs.String("label", "", "only issues with this label, e.g. amf:ready"),
 		search: fs.String("search", "", "only issues whose title contains this text, ignoring case"),
 		limit:  fs.Int("limit", 0, "print at most N issues, 0 means no limit"),
-		asJSON: fs.Bool("json", false, "print a JSON array of number, title, state, url and labels"),
+		asJSON: fs.Bool("json", false, "print a JSON array of number, title, state, url, labels"),
 	}
 }
 

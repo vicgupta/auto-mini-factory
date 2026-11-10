@@ -50,7 +50,7 @@ func (m *mergeFlag) Set(s string) error {
 
 func addMergeFlag(fs *flag.FlagSet) *mergeFlag {
 	m := &mergeFlag{}
-	fs.Var(m, "merge", "merge each PR amf opens or updates: --merge (or -m) alone for a merge commit, or a method after = or as the next word: --merge=squash, -m squash, -m rebase")
+	fs.Var(m, "merge", "merge each PR: commit, squash or rebase")
 	return m
 }
 
@@ -174,4 +174,4 @@ func (r *Runner) waitMergeChecks(ctx context.Context, n int, pr PullRequest) err
 	return nil
 }
 
-const waitChecksFlagHelp = "with --merge, wait up to 30 minutes for the PR's checks to pass before merging (a head with no checks after 2 minutes is merged); --wait-for-checks=false merges at once"
+const waitChecksFlagHelp = "wait for PR checks to pass"

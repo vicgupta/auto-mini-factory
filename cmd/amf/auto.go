@@ -36,8 +36,7 @@ const autoHelp = `Usage:
   amf auto --abort [--close-issues]
 
 Turns one sentence into a few issues and works through them, merging each PR.
-See diagrams and tradeoffs for --merge at:
-https://github.com/vicgupta/auto-mini-factory/blob/main/docs/COMMANDS.md#merge-methods
+See docs/COMMANDS.md#merge-methods for --merge tradeoffs.
 
 1. Plan: the agent (picked as for amf run: see amf help agents) reads the
    repo and splits the sentence into at most --max-issues issues, each with a
@@ -632,19 +631,19 @@ type autoFlags struct {
 func addAutoFlags(fs *flag.FlagSet) autoFlags {
 	var f autoFlags
 	f.timeout, f.alias = addTimeoutFlags(fs)
-	f.evalRounds = fs.Int("eval-rounds", 2, "how many times a pipeline's eval stage may send the change back to code")
+	f.evalRounds = fs.Int("eval-rounds", 2, "max eval rounds before code rerun")
 	f.agent = fs.String("agent", "", agentFlagHelp)
-	f.maxIssues = fs.Int("max-issues", defaultAutoMaxIssues, "plan at most this many issues (1 to 10)")
+	f.maxIssues = fs.Int("max-issues", defaultAutoMaxIssues, "plan up to this many issues (1-10)")
 	f.merge = &mergeFlag{value: "merge"}
-	fs.Var(f.merge, "merge", "how to merge each PR: a merge commit, or a method after = or as the next word: --merge=squash, -m squash, -m rebase")
-	f.cont = fs.Bool("continue", false, "approve the checkpoint and resume the saved amf auto run")
-	f.noCheckpoint = fs.Bool("no-checkpoint", false, "merge all issues without a checkpoint or approval")
-	f.checkpointAfter = fs.Int("checkpoint-after", 1, "checkpoint after this many merges (must be positive)")
+	fs.Var(f.merge, "merge", "how to merge each PR")
+	f.cont = fs.Bool("continue", false, "resume the saved run after approving")
+	f.noCheckpoint = fs.Bool("no-checkpoint", false, "merge all issues without a checkpoint")
+	f.checkpointAfter = fs.Int("checkpoint-after", 1, "checkpoint after this many merges")
 	f.approve = fs.Bool("approve", false, "approve the checkpoint without prompting")
-	f.waitForChecks = fs.Bool("wait-for-checks", false, "at the checkpoint, wait up to 5 minutes for checks on the merge commit (each PR merge already waits up to 30 minutes for head checks)")
+	f.waitForChecks = fs.Bool("wait-for-checks", false, "5 minutes here, 30 minutes per PR merge")
 	f.abort = fs.Bool("abort", false, "abandon the saved run by removing its state")
-	f.closeIssues = fs.Bool("close-issues", false, "with --abort, close the created, unmerged issues first")
-	f.dryRun = fs.Bool("dry-run", false, "plan only: print the issues amf would create, and create nothing")
+	f.closeIssues = fs.Bool("close-issues", false, "with --abort, close unmerged issues first")
+	f.dryRun = fs.Bool("dry-run", false, "plan only; create nothing")
 	f.log = addLogFlags(fs)
 	f.memory = addMemoryFlags(fs)
 	return f

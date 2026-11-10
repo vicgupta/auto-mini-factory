@@ -44,7 +44,7 @@ func (d *doctor) line(status, check, format string, a ...any) {
 }
 
 func addDoctorFlags(fs *flag.FlagSet) *bool {
-	return fs.Bool("fix-labels", false, "relabel issues whose amf status label disagrees with their pull requests")
+	return fs.Bool("fix-labels", false, "relabel issues whose status disagrees with PRs")
 }
 
 // cmdDoctor checks everything amf needs to run here, without changing

@@ -232,9 +232,9 @@ type prSweepFlags struct {
 func addPRSweepFlags(fs *flag.FlagSet) prSweepFlags {
 	var f prSweepFlags
 	f.merge = addSweepMergeFlag(fs)
-	f.wait = fs.Bool("wait-for-checks", false, "wait for pending checks on each PR (up to 30 minutes) instead of leaving it for the next sweep")
-	f.dryRun = fs.Bool("dry-run", false, "only read from GitHub and print what the sweep would do")
-	f.asJSON = fs.Bool("json", false, "print a JSON array of number, issue, url, action, reason and commit")
+	f.wait = fs.Bool("wait-for-checks", false, "wait for pending checks (up to 30m)")
+	f.dryRun = fs.Bool("dry-run", false, "only read from GitHub; print what it would do")
+	f.asJSON = fs.Bool("json", false, "JSON: number, issue, url, action, reason, commit")
 	return f
 }
 
@@ -323,7 +323,7 @@ func sweepBlockedError(res []sweptPR) error {
 // and watch, but it merges the PRs the sweep finds ready.
 func addSweepMergeFlag(fs *flag.FlagSet) *mergeFlag {
 	m := &mergeFlag{}
-	fs.Var(m, "merge", "merge each ready PR: --merge (or -m) alone for a merge commit, or --merge=squash, -m squash, -m rebase (default: don't merge)")
+	fs.Var(m, "merge", "merge ready PRs; method after = (default: no)")
 	return m
 }
 

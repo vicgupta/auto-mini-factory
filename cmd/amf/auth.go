@@ -506,8 +506,8 @@ func addAuthFlags(fs *flag.FlagSet, sub string) authFlags {
 	f := authFlags{host: fs.String("host", "", "the GitHub `host` (default: AMF_API_URL's, github.com)")}
 	switch sub {
 	case "login":
-		f.clientID = fs.String("client-id", "", "the OAuth app's client `id` (default: AMF_GITHUB_CLIENT_ID)")
-		f.scopes = fs.String("scopes", defaultScopes, "the OAuth `scopes` to ask for, separated by spaces or commas")
+		f.clientID = fs.String("client-id", "", "OAuth client `id` (default: AMF_GITHUB_CLIENT_ID)")
+		f.scopes = fs.String("scopes", defaultScopes, "OAuth `scopes`, space/comma-separated")
 		f.noBrowser = fs.Bool("no-browser", false, "don't open the browser; just print the link")
 	case "token":
 		f.force = fs.Bool("force", false, "print the token even to a terminal")

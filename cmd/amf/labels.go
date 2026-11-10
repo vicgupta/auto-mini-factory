@@ -33,7 +33,7 @@ type issueLabelFlags struct {
 
 func addIssueLabelFlags(fs *flag.FlagSet, command string) *issueLabelFlags {
 	f := &issueLabelFlags{}
-	f.state = fs.String("state", "open", "select issues by state: open, closed or all (bulk mode)")
+	f.state = fs.String("state", "open", "select issues by state: open, closed, all")
 	f.label = fs.String("label", "", "select issues with this label (bulk mode)")
 	f.unlabeled = fs.Bool("unlabeled", false, "select only issues with no labels (bulk mode)")
 	if command == "label" {

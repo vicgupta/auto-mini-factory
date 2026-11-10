@@ -190,7 +190,7 @@ func addMemoryCommandFlags(fs *flag.FlagSet) memoryCommandFlags {
 		memory: addMemoryFlags(fs),
 		asJSON: fs.Bool("json", false, "print JSON"),
 		limit:  fs.Int("limit", 5, "how many results similar prints"),
-		full:   fs.Bool("full", false, "with sync, reread every issue and PR instead of only what changed"),
+		full:   fs.Bool("full", false, "with sync, reread everything"),
 	}
 }
 
