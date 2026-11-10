@@ -631,16 +631,16 @@ type autoFlags struct {
 func addAutoFlags(fs *flag.FlagSet) autoFlags {
 	var f autoFlags
 	f.timeout, f.alias = addTimeoutFlags(fs)
-	f.evalRounds = fs.Int("eval-rounds", 2, "max eval rounds before code rerun")
+	f.evalRounds = fs.Int("eval-rounds", 2, "max eval send-backs to code")
 	f.agent = fs.String("agent", "", agentFlagHelp)
 	f.maxIssues = fs.Int("max-issues", defaultAutoMaxIssues, "plan up to this many issues (1-10)")
 	f.merge = &mergeFlag{value: "merge"}
 	fs.Var(f.merge, "merge", "how to merge each PR")
-	f.cont = fs.Bool("continue", false, "resume the saved run after approving")
+	f.cont = fs.Bool("continue", false, "approve the checkpoint and resume the run")
 	f.noCheckpoint = fs.Bool("no-checkpoint", false, "merge all issues without a checkpoint")
 	f.checkpointAfter = fs.Int("checkpoint-after", 1, "checkpoint after this many merges")
 	f.approve = fs.Bool("approve", false, "approve the checkpoint without prompting")
-	f.waitForChecks = fs.Bool("wait-for-checks", false, "5 minutes here, 30 minutes per PR merge")
+	f.waitForChecks = fs.Bool("wait-for-checks", false, "5 minutes at checkpoint, 30 minutes per merge")
 	f.abort = fs.Bool("abort", false, "abandon the saved run by removing its state")
 	f.closeIssues = fs.Bool("close-issues", false, "with --abort, close unmerged issues first")
 	f.dryRun = fs.Bool("dry-run", false, "plan only; create nothing")

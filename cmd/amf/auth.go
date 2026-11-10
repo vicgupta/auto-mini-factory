@@ -431,8 +431,7 @@ and otherwise stops, saying to run amf auth login or set GITHUB_TOKEN.
   login   log in with GitHub's device flow and save the token
   status  which token amf uses, its account, scopes and type (never the token)
   logout  delete the token amf auth login saved
-  token   print the token amf uses, only when stdout isn't a terminal or
-          with --force
+  token   print the token amf uses (only to a non-terminal, or with --force)
 
 The host defaults to the one AMF_API_URL points at (github.com).
 

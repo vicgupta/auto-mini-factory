@@ -174,4 +174,4 @@ func (r *Runner) waitMergeChecks(ctx context.Context, n int, pr PullRequest) err
 	return nil
 }
 
-const waitChecksFlagHelp = "wait for PR checks to pass"
+const waitChecksFlagHelp = "wait up to 30m for PR checks"

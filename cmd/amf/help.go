@@ -20,8 +20,8 @@ Commands:
   auth       get a GitHub token: login, status, logout, token
   issue      create, list, label, unlabel, close, reopen, view, run, watch
   pr         list, merge, sweep, view, diff, comment, close, reopen, ready/draft
-  tag        inspect tags (read-only): list, view
-  release    inspect releases (read-only): list, view, latest
+  tag        list, view and create tags at an exact commit
+  release    list, view, latest; create, stage and publish drafts
   run        process one issue into a PR (alias of issue run)
   watch      process amf:ready issues as they arrive (alias of issue watch)
   auto       plan one sentence into up to 5 issues and merge their PRs

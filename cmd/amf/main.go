@@ -306,7 +306,7 @@ type runFlags struct {
 func addRunFlags(fs *flag.FlagSet) runFlags {
 	var f runFlags
 	f.timeout, f.alias = addTimeoutFlags(fs)
-	f.evalRounds = fs.Int("eval-rounds", 2, "max eval rounds before code rerun")
+	f.evalRounds = fs.Int("eval-rounds", 2, "max eval send-backs to code")
 	f.agent = fs.String("agent", "", agentFlagHelp)
 	f.draft = fs.Bool("draft", false, draftFlagHelp)
 	f.merge = addMergeFlag(fs)
@@ -397,15 +397,15 @@ type watchFlags struct {
 func addWatchFlags(fs *flag.FlagSet) *watchFlags {
 	f := &watchFlags{}
 	f.interval = fs.Duration("interval", 60*time.Second, "poll interval as a Go duration")
-	f.label = fs.String("label", labelReady, "issues with this label")
+	f.label = fs.String("label", labelReady, "the label to process")
 	fs.Var(&f.exclude, "exclude-label", "skip issues with this `label` (repeatable)")
 	f.timeout, f.alias = addTimeoutFlags(fs)
-	f.evalRounds = fs.Int("eval-rounds", 2, "max eval rounds before code rerun")
+	f.evalRounds = fs.Int("eval-rounds", 2, "max eval send-backs to code")
 	f.agent = fs.String("agent", "", agentFlagHelp)
 	f.draft = fs.Bool("draft", false, draftFlagHelp)
 	f.merge = addMergeFlag(fs)
 	f.waitChecks = fs.Bool("wait-for-checks", true, waitChecksFlagHelp)
-	f.stale = fs.String("stale-timeout", "", "reset stale issues (default max(2x agent,2h))")
+	f.stale = fs.String("stale-timeout", "", "requeue stuck in-progress issues; off disables")
 	f.log = addLogFlags(fs)
 	f.memory = addMemoryFlags(fs)
 	return f
@@ -498,7 +498,7 @@ func (f *labelsFlag) Set(s string) error {
 var errDraftMerge = errors.New("--draft and --merge can't be used together: GitHub doesn't merge draft pull requests")
 
 // agentFlagHelp describes --agent for run and watch.
-const agentFlagHelp = "agent name (default: AMF_PRIMARY_AGENT)"
+const agentFlagHelp = "claudecode, codex or opencode; no fallback"
 
 // draftFlagHelp describes --draft for run and watch.
 const draftFlagHelp = "open new pull requests as drafts"
@@ -573,7 +573,7 @@ func validateAgentTimeout(d time.Duration, src string) error {
 func addLogFlags(fs *flag.FlagSet) *logOptions {
 	lo := &logOptions{}
 	fs.StringVar(&lo.Level, "log-level", "", "debug, info, warn or error (default: info)")
-	fs.StringVar(&lo.File, "log-file", "", "event log path (default .amf/runs/<id>, off)")
+	fs.StringVar(&lo.File, "log-file", "", "event log, or off (default .amf/runs/<id>)")
 	return lo
 }
 

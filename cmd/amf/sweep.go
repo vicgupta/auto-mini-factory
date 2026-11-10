@@ -323,7 +323,7 @@ func sweepBlockedError(res []sweptPR) error {
 // and watch, but it merges the PRs the sweep finds ready.
 func addSweepMergeFlag(fs *flag.FlagSet) *mergeFlag {
 	m := &mergeFlag{}
-	fs.Var(m, "merge", "merge ready PRs; method after = (default: no)")
+	fs.Var(m, "merge", "merge ready PRs: commit, squash or rebase")
 	return m
 }
 

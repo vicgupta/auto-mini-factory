@@ -477,10 +477,10 @@ Example output:
 
 | Flag | What it does |
 |---|---|
-| `-n, --dry-run` | only read from GitHub; print what it would do |
-| `-j, --json` | JSON: number, issue, url, action, reason, commit |
-| `-m, --merge[=<method>]` | merge ready PRs; method after = (default: no) |
-| `-w, --wait-for-checks` | wait for pending checks (up to 30m) |
+| `-n, --dry-run` | only read from GitHub and print what the sweep would do |
+| `-j, --json` | print a JSON array of number, issue, url, action, reason and commit |
+| `-m, --merge[=<method>]` | merge each ready PR: --merge (or -m) alone for a merge commit, or --merge=squash, -m squash, -m rebase (default: don't merge) |
+| `-w, --wait-for-checks` | wait for pending checks on each PR (up to 30 minutes) instead of leaving it for the next sweep |
 
 ### amf pr view
 
@@ -1142,10 +1142,10 @@ only `--json` and `--help`.
 
 | Flag | What it does |
 |---|---|
-| `-C, --client-id <id>` | OAuth client id (default: AMF_GITHUB_CLIENT_ID) |
+| `-C, --client-id <id>` | the OAuth app's client id (default: AMF_GITHUB_CLIENT_ID) |
 | `-H, --host <host>` | the GitHub host (default: AMF_API_URL's, github.com) |
 | `-B, --no-browser` | don't open the browser; just print the link |
-| `-o, --scopes <scopes>` | OAuth scopes, space/comma-separated (default repo) |
+| `-o, --scopes <scopes>` | the OAuth scopes to ask for, separated by spaces or commas (default repo) |
 
 ### amf auth status, amf auth logout
 
@@ -1173,7 +1173,7 @@ only `--json` and `--help`.
 
 | Flag | What it does |
 |---|---|
-| `-j, --json` | print a JSON array of number, title, state, url, labels |
+| `-j, --json` | print a JSON array of number, title, state, url and labels |
 | `-l, --label <name>` | only issues with this label, e.g. amf:ready |
 | `-L, --limit <n>` | print at most N issues, 0 means no limit |
 | `-S, --search <text>` | only issues whose title contains this text, ignoring case |
@@ -1184,7 +1184,7 @@ only `--json` and `--help`.
 | Flag | What it does |
 |---|---|
 | `-c, --comment <text>` | post a comment on the issue before closing |
-| `-d, --delete-branch` | delete this repo's amf/issue-N branch after closing |
+| `-d, --delete-branch` | delete this repository's amf/issue-N branch after closing |
 
 ### amf issue view
 
@@ -1199,7 +1199,7 @@ only `--json` and `--help`.
 | `-a, --add <value>` | add this label (repeatable, or comma-separated) |
 | `-l, --label <name>` | select issues with this label (bulk mode) |
 | `-R, --remove <value>` | remove this label (repeatable, or comma-separated) |
-| `-s, --state <state>` | select issues by state: open, closed, all (default open) |
+| `-s, --state <state>` | select issues by state: open, closed or all (bulk mode) (default open) |
 | `-U, --unlabeled` | select only issues with no labels (bulk mode) |
 
 ### amf issue unlabel
@@ -1207,109 +1207,109 @@ only `--json` and `--help`.
 | Flag | What it does |
 |---|---|
 | `-l, --label <name>` | select issues with this label (bulk mode) |
-| `-s, --state <state>` | select issues by state: open, closed, all (default open) |
+| `-s, --state <state>` | select issues by state: open, closed or all (bulk mode) (default open) |
 | `-U, --unlabeled` | select only issues with no labels (bulk mode) |
 
 ### amf doctor
 
 | Flag | What it does |
 |---|---|
-| `-F, --fix-labels` | relabel issues whose status disagrees with PRs |
+| `-F, --fix-labels` | relabel issues whose amf status label disagrees with their pull requests |
 
 ### amf run
 
 | Flag | What it does |
 |---|---|
-| `-a, --agent <name>` | agent name (default: AMF_PRIMARY_AGENT) |
-| `-t, --agent-timeout <duration>` | max agent run time (Go duration) (default 1h) |
-| `-D, --draft` | open new pull requests as drafts |
-| `-n, --dry-run` | make the change locally only; no push or PR |
-| `-e, --eval-rounds <n>` | max eval rounds before code rerun (default 2) |
-| `-f, --force` | run anyway; save replaced commits as backup |
-| `-W, --log-file <path>` | event log path (default .amf/runs/<id>, off) |
-| `-v, --log-level <level>` | debug, info, warn or error (default: info) |
-| `-b, --memory-backend <backend>` | sqlite, markdown or logfiles (default sqlite) |
-| `-p, --memory-dir <dir>` | amf-memory folder path (default: here) |
-| `-m, --merge[=<method>]` | merge each PR: commit, squash or rebase |
-| `-w, --wait-for-checks` | wait for PR checks to pass (default true) |
+| `-a, --agent <name>` | agent for issues without a pipeline: claudecode, codex or opencode with no fallback (default: AMF_PRIMARY_AGENT, codex, then AMF_SECONDARY_AGENT, claudecode, if it fails) |
+| `-t, --agent-timeout <duration>` | maximum time each agent run may take (Go duration, e.g. 90m or 1h30m) (default 1h) |
+| `-D, --draft` | open new pull requests as drafts (a retry leaves an open PR a draft or ready for review as it was) |
+| `-n, --dry-run` | make the change on the local branch only: no label, comment, push, PR or merge |
+| `-e, --eval-rounds <n>` | how many times a pipeline's eval stage may send the change back to code (default 2) |
+| `-f, --force` | run even if the issue already has an open PR or an amf/issue-N branch, updating that PR; this replaces the branch, first saving any commits it would drop to amf/backup/issue-N-<sha>-<time> |
+| `-W, --log-file <path>` | where the event log goes (default .amf/runs/<run_id>/events.jsonl; "off" for none) |
+| `-v, --log-level <level>` | debug, info, warn or error, for the terminal and the event log (default info, and debug in the event log) |
+| `-b, --memory-backend <backend>` | where amf keeps the repo's memory: sqlite, markdown or logfiles (default sqlite) |
+| `-p, --memory-dir <dir>` | directory the amf-memory folder goes in (default: the current directory) |
+| `-m, --merge[=<method>]` | merge each PR amf opens or updates: --merge (or -m) alone for a merge commit, or a method after = or as the next word: --merge=squash, -m squash, -m rebase |
+| `-w, --wait-for-checks` | with --merge, wait up to 30 minutes for the PR's checks to pass before merging (a head with no checks after 2 minutes is merged); --wait-for-checks=false merges at once (default true) |
 
 ### amf watch
 
 | Flag | What it does |
 |---|---|
-| `-a, --agent <name>` | agent name (default: AMF_PRIMARY_AGENT) |
-| `-t, --agent-timeout <duration>` | max agent run time (Go duration) (default 1h) |
-| `-D, --draft` | open new pull requests as drafts |
-| `-e, --eval-rounds <n>` | max eval rounds before code rerun (default 2) |
-| `-x, --exclude-label <name>` | skip issues with this label (repeatable) |
-| `-i, --interval <duration>` | poll interval as a Go duration (default 1m) |
-| `-l, --label <name>` | issues with this label (default amf:ready) |
-| `-W, --log-file <path>` | event log path (default .amf/runs/<id>, off) |
-| `-v, --log-level <level>` | debug, info, warn or error (default: info) |
-| `-b, --memory-backend <backend>` | sqlite, markdown or logfiles (default sqlite) |
-| `-p, --memory-dir <dir>` | amf-memory folder path (default: here) |
-| `-m, --merge[=<method>]` | merge each PR: commit, squash or rebase |
-| `-T, --stale-timeout <duration>` | reset stale issues (default max(2x agent,2h)) |
-| `-w, --wait-for-checks` | wait for PR checks to pass (default true) |
+| `-a, --agent <name>` | agent for issues without a pipeline: claudecode, codex or opencode with no fallback (default: AMF_PRIMARY_AGENT, codex, then AMF_SECONDARY_AGENT, claudecode, if it fails) |
+| `-t, --agent-timeout <duration>` | maximum time each agent run may take (Go duration, e.g. 90m or 1h30m) (default 1h) |
+| `-D, --draft` | open new pull requests as drafts (a retry leaves an open PR a draft or ready for review as it was) |
+| `-e, --eval-rounds <n>` | how many times a pipeline's eval stage may send the change back to code (default 2) |
+| `-x, --exclude-label <name>` | skip issues with this label, leaving them as they are (repeatable: any of them skips) |
+| `-i, --interval <duration>` | how often to poll GitHub (Go duration, e.g. 30s or 5m) (default 1m) |
+| `-l, --label <name>` | process open issues with this label (default amf:ready) |
+| `-W, --log-file <path>` | where the event log goes (default .amf/runs/<run_id>/events.jsonl; "off" for none) |
+| `-v, --log-level <level>` | debug, info, warn or error, for the terminal and the event log (default info, and debug in the event log) |
+| `-b, --memory-backend <backend>` | where amf keeps the repo's memory: sqlite, markdown or logfiles (default sqlite) |
+| `-p, --memory-dir <dir>` | directory the amf-memory folder goes in (default: the current directory) |
+| `-m, --merge[=<method>]` | merge each PR amf opens or updates: --merge (or -m) alone for a merge commit, or a method after = or as the next word: --merge=squash, -m squash, -m rebase |
+| `-T, --stale-timeout <duration>` | put amf:in-progress issues no amf works on back to amf:ready after this long, as a Go duration (default AMF_STALE_TIMEOUT, else max(2x agent timeout, 2h); off disables) |
+| `-w, --wait-for-checks` | with --merge, wait up to 30 minutes for the PR's checks to pass before merging (a head with no checks after 2 minutes is merged); --wait-for-checks=false merges at once (default true) |
 
 ### amf auto
 
 | Flag | What it does |
 |---|---|
 | `-A, --abort` | abandon the saved run by removing its state |
-| `-a, --agent <name>` | agent name (default: AMF_PRIMARY_AGENT) |
-| `-t, --agent-timeout <duration>` | max agent run time (Go duration) (default 1h) |
+| `-a, --agent <name>` | agent for issues without a pipeline: claudecode, codex or opencode with no fallback (default: AMF_PRIMARY_AGENT, codex, then AMF_SECONDARY_AGENT, claudecode, if it fails) |
+| `-t, --agent-timeout <duration>` | maximum time each agent run may take (Go duration, e.g. 90m or 1h30m) (default 1h) |
 | `-y, --approve` | approve the checkpoint without prompting |
-| `-P, --checkpoint-after <n>` | checkpoint after this many merges (default 1) |
-| `-X, --close-issues` | with --abort, close unmerged issues first |
-| `-c, --continue` | resume the saved run after approving |
-| `-n, --dry-run` | plan only; create nothing |
-| `-e, --eval-rounds <n>` | max eval rounds before code rerun (default 2) |
-| `-W, --log-file <path>` | event log path (default .amf/runs/<id>, off) |
-| `-v, --log-level <level>` | debug, info, warn or error (default: info) |
-| `-M, --max-issues <n>` | plan up to this many issues (1-10) (default 5) |
-| `-b, --memory-backend <backend>` | sqlite, markdown or logfiles (default sqlite) |
-| `-p, --memory-dir <dir>` | amf-memory folder path (default: here) |
-| `-m, --merge[=<method>]` | how to merge each PR (default merge) |
-| `-N, --no-checkpoint` | merge all issues without a checkpoint |
-| `-w, --wait-for-checks` | 5 minutes here, 30 minutes per PR merge |
+| `-P, --checkpoint-after <n>` | checkpoint after this many merges (must be positive) (default 1) |
+| `-X, --close-issues` | with --abort, close the created, unmerged issues first |
+| `-c, --continue` | approve the checkpoint and resume the saved amf auto run |
+| `-n, --dry-run` | plan only: print the issues amf would create, and create nothing |
+| `-e, --eval-rounds <n>` | how many times a pipeline's eval stage may send the change back to code (default 2) |
+| `-W, --log-file <path>` | where the event log goes (default .amf/runs/<run_id>/events.jsonl; "off" for none) |
+| `-v, --log-level <level>` | debug, info, warn or error, for the terminal and the event log (default info, and debug in the event log) |
+| `-M, --max-issues <n>` | plan at most this many issues (1 to 10) (default 5) |
+| `-b, --memory-backend <backend>` | where amf keeps the repo's memory: sqlite, markdown or logfiles (default sqlite) |
+| `-p, --memory-dir <dir>` | directory the amf-memory folder goes in (default: the current directory) |
+| `-m, --merge[=<method>]` | how to merge each PR: a merge commit, or a method after = or as the next word: --merge=squash, -m squash, -m rebase (default merge) |
+| `-N, --no-checkpoint` | merge all issues without a checkpoint or approval |
+| `-w, --wait-for-checks` | at the checkpoint, wait up to 5 minutes for checks on the merge commit (each PR merge already waits up to 30 minutes for head checks) |
 
 ### amf memory sync
 
 | Flag | What it does |
 |---|---|
-| `-F, --full` | with sync, reread everything |
+| `-F, --full` | with sync, reread every issue and PR instead of only what changed |
 | `-j, --json` | print JSON |
 | `-L, --limit <n>` | how many results similar prints (default 5) |
-| `-b, --memory-backend <backend>` | sqlite, markdown or logfiles (default sqlite) |
-| `-p, --memory-dir <dir>` | amf-memory folder path (default: here) |
+| `-b, --memory-backend <backend>` | where amf keeps the repo's memory: sqlite, markdown or logfiles (default sqlite) |
+| `-p, --memory-dir <dir>` | directory the amf-memory folder goes in (default: the current directory) |
 
 ### amf memory similar
 
 | Flag | What it does |
 |---|---|
-| `-F, --full` | with sync, reread everything |
+| `-F, --full` | with sync, reread every issue and PR instead of only what changed |
 | `-j, --json` | print JSON |
 | `-L, --limit <n>` | how many results similar prints (default 5) |
-| `-b, --memory-backend <backend>` | sqlite, markdown or logfiles (default sqlite) |
-| `-p, --memory-dir <dir>` | amf-memory folder path (default: here) |
+| `-b, --memory-backend <backend>` | where amf keeps the repo's memory: sqlite, markdown or logfiles (default sqlite) |
+| `-p, --memory-dir <dir>` | directory the amf-memory folder goes in (default: the current directory) |
 
 ### amf memory show
 
 | Flag | What it does |
 |---|---|
-| `-F, --full` | with sync, reread everything |
+| `-F, --full` | with sync, reread every issue and PR instead of only what changed |
 | `-j, --json` | print JSON |
 | `-L, --limit <n>` | how many results similar prints (default 5) |
-| `-b, --memory-backend <backend>` | sqlite, markdown or logfiles (default sqlite) |
-| `-p, --memory-dir <dir>` | amf-memory folder path (default: here) |
+| `-b, --memory-backend <backend>` | where amf keeps the repo's memory: sqlite, markdown or logfiles (default sqlite) |
+| `-p, --memory-dir <dir>` | directory the amf-memory folder goes in (default: the current directory) |
 
 ### amf pr list
 
 | Flag | What it does |
 |---|---|
 | `-i, --issue <n>` | only pull requests opened for issue N, 0 means no filter |
-| `-j, --json` | JSON: number, title, state, draft, url, head, base, issue |
+| `-j, --json` | print a JSON array of number, title, state, draft, url, head, base and issue |
 | `-L, --limit <n>` | print at most N pull requests, 0 means no limit |
 | `-s, --state <state>` | open, closed, merged or all (default open) |
 
@@ -1317,11 +1317,11 @@ only `--json` and `--help`.
 
 | Flag | What it does |
 |---|---|
-| `-d, --delete-branch` | delete head branch if in this repo |
+| `-d, --delete-branch` | delete the head branch after merging, if it is in this repository |
 | `-r, --rebase` | rebase and merge |
 | `-s, --squash` | squash and merge |
-| `-u, --update-branch` | merge the base into the head if it is behind |
-| `-w, --wait-for-checks` | wait for the head's checks (up to 30m) |
+| `-u, --update-branch` | first merge the base branch into the head if it is behind |
+| `-w, --wait-for-checks` | wait for the head's checks to pass before merging (up to 30 minutes) |
 
 ### amf pr view
 
@@ -1347,7 +1347,7 @@ only `--json` and `--help`.
 | Flag | What it does |
 |---|---|
 | `-c, --comment <text>` | post a comment on the pull request before closing |
-| `-d, --delete-branch` | delete head branch if in this repo |
+| `-d, --delete-branch` | delete the head branch after closing, if it is in this repository |
 
 ### amf tag list
 
@@ -1366,7 +1366,7 @@ only `--json` and `--help`.
 
 | Flag | What it does |
 |---|---|
-| `-j, --json` | JSON: tag, name, state, dates, url, assets |
+| `-j, --json` | print a JSON array of tag, name, state, target_commitish, dates, url and assets |
 | `-L, --limit <n>` | print at most N releases, 0 means no limit |
 | `-s, --state <state>` | all, published, draft or prerelease (default all) |
 
