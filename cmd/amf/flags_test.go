@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 // helpCommands is every command and subcommand with a FlagSet.
@@ -251,5 +252,29 @@ func TestPrettyDefault(t *testing.T) {
 		if got := prettyDefault(in); got != want {
 			t.Errorf("prettyDefault(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// watch polls every 10m unless --interval (or -i) overrides it.
+func TestWatchInterval(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		want time.Duration
+	}{
+		{"default", nil, 10 * time.Minute},
+		{"long", []string{"--interval", "30s"}, 30 * time.Second},
+		{"short", []string{"-i", "2m"}, 2 * time.Minute},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fs := flag.NewFlagSet("watch", flag.ContinueOnError)
+			f := addWatchFlags(fs)
+			if err := fs.Parse(expandShortFlags(fs, tc.args)); err != nil {
+				t.Fatal(err)
+			}
+			if *f.interval != tc.want {
+				t.Errorf("interval = %s, want %s", *f.interval, tc.want)
+			}
+		})
 	}
 }

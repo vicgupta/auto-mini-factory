@@ -396,7 +396,7 @@ type watchFlags struct {
 
 func addWatchFlags(fs *flag.FlagSet) *watchFlags {
 	f := &watchFlags{}
-	f.interval = fs.Duration("interval", 60*time.Second, "how often to poll GitHub (Go duration, e.g. 30s or 5m)")
+	f.interval = fs.Duration("interval", 10*time.Minute, "how often to poll GitHub (Go duration, e.g. 30s or 5m)")
 	f.label = fs.String("label", labelReady, "process open issues with this label")
 	fs.Var(&f.exclude, "exclude-label", "skip issues with this `label`, leaving them as they are (repeatable: any of them skips)")
 	f.timeout, f.alias = addTimeoutFlags(fs)

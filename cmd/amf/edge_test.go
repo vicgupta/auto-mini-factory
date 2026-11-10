@@ -1234,7 +1234,7 @@ func TestWatchHelp(t *testing.T) {
 					t.Fatalf("stdout = %q, want empty stdout", stdout.String())
 				}
 				if tc.want == nil {
-					for _, want := range []string{watchHelp, "Flags:", "-i, --interval <duration>", "-l, --label <name>"} {
+					for _, want := range []string{watchHelp, "Flags:", "-i, --interval <duration>", "(default 10m)", "-l, --label <name>"} {
 						if !strings.Contains(stderr.String(), want) {
 							t.Errorf("stderr = %q, want watch help containing %q", stderr.String(), want)
 						}

@@ -126,7 +126,8 @@ amf issue list --limit 5          # just the 5 newest
 amf issue list --json --label amf:failed | jq -r '.[].url'  # as JSON: number, title, state, url, labels
 
 amf run 42                  # process one issue now
-amf watch --interval 60s    # process issues labeled `amf:ready`, one at a time
+amf watch                   # process issues labeled `amf:ready`, one at a time, polling every 10m
+amf watch --interval 1m     # ...polling GitHub more often
 amf watch --agent codex     # without a pipeline, use Codex only, no fallback
 amf watch --exclude-label blocked --exclude-label needs-human  # ...leaving issues with either label alone until it's removed
 amf run 42 --draft          # open the PR as a draft (-D)
