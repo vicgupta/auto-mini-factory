@@ -396,7 +396,7 @@ type watchFlags struct {
 
 func addWatchFlags(fs *flag.FlagSet) *watchFlags {
 	f := &watchFlags{}
-	f.interval = fs.Duration("interval", 60*time.Second, "poll interval as a Go duration")
+	f.interval = fs.Duration("interval", 10*time.Minute, "poll interval as a Go duration")
 	f.label = fs.String("label", labelReady, "the label to process")
 	fs.Var(&f.exclude, "exclude-label", "skip issues with this `label` (repeatable)")
 	f.timeout, f.alias = addTimeoutFlags(fs)
