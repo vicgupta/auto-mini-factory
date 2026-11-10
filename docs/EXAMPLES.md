@@ -59,7 +59,7 @@ amf issue create "Document the build command" \
   --body "Add the project's existing build command to README.md and describe where its output goes."
 amf issue create "Document required environment variables" \
   --body "List the environment variables the application currently requires, with descriptions and no real secrets."
-amf watch --agent codex --interval 60s --draft
+amf watch --agent codex --interval 10m --draft
 ```
 
 Issue creation adds `amf:ready`. Watch processes open issues with that label,

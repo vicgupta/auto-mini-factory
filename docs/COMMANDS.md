@@ -947,7 +947,7 @@ terminal, debug in the event log, or `AMF_LOG_LEVEL`). `--log-file PATH`
 overrides the event log path; `off` disables it.
 
 Run alone takes `--dry-run` (default off), making only local changes.
-Watch alone takes `--interval` (default `60s`, must be positive), `--label` (default
+Watch alone takes `--interval` (default `10m`, must be positive), `--label` (default
 `amf:ready`) and repeatable `--exclude-label` (default none).
 Neither supports `--json`. Output includes progress and a final summary,
 for example `amf: summary: 1 issues (1 done, 0 failed, 0 skipped); 12 GitHub calls; log …`;
@@ -1242,7 +1242,7 @@ only `--json` and `--help`.
 | `-D, --draft` | open new pull requests as drafts (a retry leaves an open PR a draft or ready for review as it was) |
 | `-e, --eval-rounds <n>` | how many times a pipeline's eval stage may send the change back to code (default 2) |
 | `-x, --exclude-label <name>` | skip issues with this label, leaving them as they are (repeatable: any of them skips) |
-| `-i, --interval <duration>` | how often to poll GitHub (Go duration, e.g. 30s or 5m) (default 1m) |
+| `-i, --interval <duration>` | how often to poll GitHub (Go duration, e.g. 30s or 5m) (default 10m) |
 | `-l, --label <name>` | process open issues with this label (default amf:ready) |
 | `-W, --log-file <path>` | where the event log goes (default .amf/runs/<run_id>/events.jsonl; "off" for none) |
 | `-v, --log-level <level>` | debug, info, warn or error, for the terminal and the event log (default info, and debug in the event log) |
@@ -1433,7 +1433,7 @@ amf issue list --limit 5          # just the 5 newest
 amf issue list --json --label amf:failed | jq -r '.[].url'  # as JSON: number, title, state, url, labels
 
 amf run 42                  # process one issue now
-amf watch --interval 60s    # process issues labeled `amf:ready`, one at a time
+amf watch --interval 10m    # process issues labeled `amf:ready`, one at a time
 amf watch --agent codex     # without a pipeline, use Codex only, no fallback
 amf watch --exclude-label blocked --exclude-label needs-human  # ...leaving issues with either label alone until it's removed
 amf run 42 --draft          # open the PR as a draft
