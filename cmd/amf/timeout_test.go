@@ -674,3 +674,77 @@ func TestAgentIdleTimeoutSetting(t *testing.T) {
 		}
 	}
 }
+
+// TestKilledPrimaryKeepsWIPThroughFallback checks that a primary agent
+// stopped by the idle timeout keeps its edits on a local WIP branch even
+// though the fallback starts from a fresh worktree, and that none of them
+// reach the fallback's pull request or origin.
+func TestKilledPrimaryKeepsWIPThroughFallback(t *testing.T) {
+	root, origin := setupRepo(t)
+	gh, srv := newFakeGitHub(t)
+	gh.issues[1] = readyIssue(1, "Add feature file")
+	r, log := newTestRunner(t, srv, root, fakeAgent(t, "claude", cleanClaude))
+	r.Codex = fakeAgent(t, "codex", "cat >/dev/null; echo half > partial.txt; trap '' TERM; while :; do sleep 1; done")
+	r.OpenAIKey = "sk-openai-test"
+	r.Primary, r.Secondary = agentCodex, agentClaude
+	r.Timeout = 10 * time.Second
+	r.IdleTimeout = 300 * time.Millisecond
+	r.KillGrace = 100 * time.Millisecond
+	if err := r.Run(context.Background(), 1); err != nil {
+		t.Fatalf("Run: %v\nlog:\n%s", err, log)
+	}
+	branches := wipBranches(t, root)
+	if len(branches) != 1 || !strings.HasPrefix(branches[0], "amf/wip/issue-1-") {
+		t.Fatalf("WIP branches = %v, want one for the killed primary\nlog:\n%s", branches, log)
+	}
+	if got := mustGit(t, root, "show", branches[0]+":partial.txt"); got != "half" {
+		t.Errorf("%s:partial.txt = %q, want the primary's edit", branches[0], got)
+	}
+	if _, err := git(context.Background(), origin, "rev-parse", "--verify", branches[0]); err == nil {
+		t.Errorf("WIP branch %s was pushed to origin", branches[0])
+	}
+	if _, err := git(context.Background(), origin, "cat-file", "-e", "amf/issue-1:partial.txt"); err == nil {
+		t.Errorf("the pushed amf/issue-1 contains the killed primary's partial.txt")
+	}
+	if len(gh.prs) != 1 {
+		t.Errorf("PRs = %v, want the fallback's one", gh.prs)
+	}
+}
+
+// TestSaveWIPBranchLeavesIssueBranch checks that saving partial work moves
+// only the new WIP branch: the worktree's branch stays where it was.
+func TestSaveWIPBranchLeavesIssueBranch(t *testing.T) {
+	root, _ := setupRepo(t)
+	mustGit(t, root, "checkout", "-q", "-b", "amf/issue-7")
+	before := mustGit(t, root, "rev-parse", "HEAD")
+	if err := os.WriteFile(filepath.Join(root, "half.txt"), []byte("half\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	branch, err := saveWIPBranch(context.Background(), root, 7, "main")
+	if err != nil || !strings.HasPrefix(branch, "amf/wip/issue-7-") {
+		t.Fatalf("saveWIPBranch = %q, %v", branch, err)
+	}
+	if got := mustGit(t, root, "rev-parse", "HEAD"); got != before {
+		t.Errorf("amf/issue-7 moved to %s, want it left at %s", got, before)
+	}
+	if got := mustGit(t, root, "show", branch+":half.txt"); got != "half" {
+		t.Errorf("%s:half.txt = %q", branch, got)
+	}
+	again, err := saveWIPBranch(context.Background(), root, 7, "main")
+	if err != nil || again == branch || !strings.HasPrefix(again, "amf/wip/issue-7-") {
+		t.Errorf("second save = %q, %v; want a new branch beside %s", again, err, branch)
+	}
+}
+
+func TestFileActivityInterval(t *testing.T) {
+	for _, tc := range []struct{ limit, want time.Duration }{
+		{time.Millisecond, 10 * time.Millisecond},
+		{400 * time.Millisecond, 100 * time.Millisecond},
+		{time.Minute, 15 * time.Second},
+		{30 * time.Minute, 30 * time.Second},
+	} {
+		if got := fileActivityInterval(tc.limit); got != tc.want {
+			t.Errorf("fileActivityInterval(%s) = %s, want %s", tc.limit, got, tc.want)
+		}
+	}
+}

@@ -687,7 +687,13 @@ func (r *Runner) prepareWorktree(ctx context.Context, wt, branch, base string) e
 // saveWIPBranch commits what the agent changed so far on a local-only
 // amf/wip/issue-N-<UTC time> branch, with the same exclusions as a normal
 // commit, and returns its name. It returns "" when there is nothing to save.
+// The worktree's own branch is moved back where it was, with the changes
+// staged, so only the WIP branch holds the commit.
 func saveWIPBranch(ctx context.Context, wt string, n int, base string) (string, error) {
+	prev, err := git(ctx, wt, "rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
 	if _, err := git(ctx, wt, "add", "-A", "--", ".", memoryExclude, ":(exclude).amf"); err != nil {
 		return "", err
 	}
@@ -722,6 +728,9 @@ func saveWIPBranch(ctx context.Context, wt string, n int, base string) (string, 
 		branch = fmt.Sprintf("%s-%d", baseBranch, i)
 	}
 	if _, err := git(ctx, wt, "branch", branch, "HEAD"); err != nil {
+		return "", err
+	}
+	if _, err := git(ctx, wt, "reset", "-q", "--soft", prev); err != nil {
 		return "", err
 	}
 	return branch, nil

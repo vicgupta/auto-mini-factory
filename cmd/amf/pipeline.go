@@ -829,15 +829,15 @@ func (a activityWriter) Write(p []byte) (int, error) {
 }
 
 // fileActivityInterval is how often to scan the worktree for the idle
-// watcher: well under the limit, but never more often than every 10ms and
-// no more than every 5s.
+// watcher: a quarter of the limit, at least 10ms (for tests) and at most
+// 30s, so a big worktree isn't walked more often than that.
 func fileActivityInterval(limit time.Duration) time.Duration {
 	d := limit / 4
 	if d < 10*time.Millisecond {
 		d = 10 * time.Millisecond
 	}
-	if d > 5*time.Second {
-		d = 5 * time.Second
+	if d > 30*time.Second {
+		d = 30 * time.Second
 	}
 	return d
 }
