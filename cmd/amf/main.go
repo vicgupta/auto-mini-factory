@@ -312,7 +312,7 @@ func addRunFlags(fs *flag.FlagSet) runFlags {
 	f.merge = addMergeFlag(fs)
 	f.waitChecks = fs.Bool("wait-for-checks", true, waitChecksFlagHelp)
 	f.dryRun = fs.Bool("dry-run", false, "make the change locally only; no push or PR")
-	f.force = fs.Bool("force", false, "run anyway; save replaced commits as backup")
+	f.force = fs.Bool("force", false, "run anyway; force-push only a diverged branch")
 	f.log = addLogFlags(fs)
 	f.memory = addMemoryFlags(fs)
 	return f

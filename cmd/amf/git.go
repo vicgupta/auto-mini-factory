@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 )
@@ -63,8 +62,14 @@ func logGit(ctx context.Context, dir string, args []string, cmd *exec.Cmd, err e
 	}
 	callEvent(ctx, "git.exec", fmt.Sprintf("git %s: exit %d", sub, code), attrs...)
 	if sub == "push" {
+		forced := false
+		for _, a := range args {
+			if a == "--force" || a == "-f" || strings.HasPrefix(a, "--force-with-lease") {
+				forced = true
+			}
+		}
 		callEvent(ctx, "git.push", fmt.Sprintf("git push %s: exit %d", args[len(args)-1], code),
-			"branch", args[len(args)-1], "forced", slices.Contains(args, "--force"), "exit_code", code)
+			"branch", args[len(args)-1], "forced", forced, "exit_code", code)
 	}
 }
 

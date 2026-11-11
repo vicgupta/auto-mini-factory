@@ -30,10 +30,13 @@ amf:ready ──▶ amf:in-progress ──▶ amf:pr-open (PR opened, not merged
   merge failed.
 - `amf:done` means amf merged the issue's PR (with `--merge` or `amf pr merge`).
 - Before Claim, amf skips an issue with an open PR from `amf/issue-N`
-  (relabeling it `amf:pr-open`) or with an `amf/issue-N` branch on origin
-  (unless it is `amf:failed`); `amf run N --force`, and `amf auto`, skip
-  that guard. The skip is logged once as `issue.skip`; `amf run` prints
-  that reason once, counts the issue as skipped in its summary, and exits 3.
+  (relabeling it `amf:pr-open`) or with an unmerged `amf/issue-N` branch on
+  origin (unless it is `amf:failed`). A leftover branch whose tip is an
+  ancestor of `origin/<default>`, or is the head of a merged PR from that
+  branch, is reused: amf starts fresh from `origin/<default>` and logs
+  `issue.reuse`. `amf run N --force`, and `amf auto`, skip that guard. The
+  skip is logged once as `issue.skip`; `amf run` prints that reason once,
+  counts the issue as skipped in its summary, and exits 3.
   A failure never moves an issue from `amf:pr-open` or
   `amf:done` to `amf:failed`, but `amf:done` is kept only when GitHub lists
   a merged PR from `amf/issue-N`. After `--merge`, amf reads the PR back and
@@ -397,8 +400,9 @@ label commands also return stdout write failures. No git checkout is needed.
 an unknown one, a bad flag or the wrong arguments; no command or an unknown
 one also prints the usage to stderr; an unknown command close to a real
 one, such as `lst`, first prints `Did you mean "issue list"?`), and 3 when
-`amf run` skips an issue because of the pre-start guard (nothing changed;
-`--force` may run it). The README,
+`amf run` skips an issue because of the pre-start guard: an open PR, or an
+unmerged leftover `amf/issue-N` branch (nothing changed; `--force` may run
+it). The README,
 command reference and usage overview document these statuses, and `run`'s
 help repeats them. `amf --help` and `amf help <command>` exit 0; some
 command-specific `--help` and `-h` paths, including `amf run --help`,
@@ -1126,13 +1130,18 @@ and exit code are preserved.
    when any changed path is under `.github/`, where workflows and `CODEOWNERS` live;
    the error names the offending paths. Changes elsewhere, even under a
    directory whose name contains `.github`, are fine.
-8. **Push.** `git push --force -u origin amf/issue-N`, with the user's git
-   credentials. If `origin/amf/issue-N` already exists and has commits that
-   are neither on the base nor in the new head (a `--force` re-run that
-   starts over), amf first pushes its old tip to
+8. **Push.** If `origin/amf/issue-N` doesn't exist, or its tip is an
+   ancestor of the new head, amf runs `git push -u origin amf/issue-N` with
+   the user's git credentials. Otherwise it replaces the remote tip with
+   `git push --force-with-lease=amf/issue-N:<old-tip> -u origin amf/issue-N`,
+   pinned to the tip it just inspected, so it never clobbers a push it
+   didn't see. If `origin/amf/issue-N` has commits that are neither on the
+   base nor in the new head and aren't already merged (by ancestry or a
+   merged PR at that tip), amf first pushes its old tip to
    `amf/backup/issue-N-<shortsha>-<UTC time>`, logs it, and names it in the
    issue comment. If that backup push fails, amf stops without replacing
-   the branch.
+   the branch. A merged leftover is reused without a backup; when only a
+   merged PR proves the merge, the new head replaces its tip.
 9. **PR.** Open `amf/issue-N` → `<default>`, titled `Fix #N: <title>`. If
    the branch already has an open PR (a retry), the push has updated it, so
    amf replaces that PR's title and body instead. With `--draft`, the create
@@ -1416,6 +1425,7 @@ event log opens, are not. The fields of each event, besides those:
 | `watch.failed` | warn | `error`: an issue that failed (watch goes on) |
 | `watch.stop` | info | `reason` (the context's error, such as `context canceled`), `cycles` |
 | `issue.skip` | info | `reason` (`pr_open` or `branch_exists`), plus `pr` and `url` for `pr_open`, or `branch` for `branch_exists`; the message says how `--force` may run the issue |
+| `issue.reuse` | info | `branch`, `sha` (the old remote tip) and `reason` (`ancestor` or `merged_pr`): a leftover branch whose work is already merged is reused |
 | `issue.picked` | info | `title`, `author`, `labels` |
 | `issue.agent_ignored` | info | `agent`: the `--agent` a pipeline overrides |
 | `issue.author_check` | debug | `author`, `trusted`; an untrusted issue then fails |
@@ -1444,7 +1454,7 @@ event log opens, are not. The fields of each event, besides those:
 | `issue.failed` | debug, info | `reason` (`agent_timeout` at info, with `stage`, for the agent timeout or idle timeout; `stage` for a stage's own failure such as a blocked plan or an untrusted author; else `error`), `error`, and `dry_run: true` in a dry run |
 | `github.call` | debug | One per GitHub API request: `method`, `path` with `{repo}`, `{n}` and `{label}` in place of the repo, numbers and label names, `status` (0 when there was no response), `duration_ms`, `bytes_out` (request body), `bytes_in` (response body read), `ratelimit_remaining`, `ratelimit_reset`, `request_id` (GitHub's headers, `""` when absent), `page` for a later page of a list, and `error_body` (the first 512 bytes of an error response) or `error`. The token is never logged |
 | `git.exec` | debug | One per git command: `subcommand`, `args` (a commit message cut to 80 characters), `dir`, `exit_code` (-1 when git didn't start), `duration_ms`, `stdout_bytes`, `stderr_bytes`, and on failure `stderr` (its first 512 bytes) |
-| `git.push` | debug | After `git.exec` for a push: `branch`, `forced`, `exit_code` |
+| `git.push` | debug | After `git.exec` for a push: `branch`, `forced` (`--force` or `--force-with-lease`), `exit_code` |
 | `http.fetch` | debug | One per skill download: `url` (without any credentials), `status`, `redirects`, `duration_ms`, and `bytes` and `sha256` of the skill, or `error` |
 
 ## Logging to PostgreSQL

@@ -26,25 +26,29 @@ func (e *skipError) Error() string { return e.msg }
 // opened" comment. It runs before the issue is labeled amf:in-progress:
 //   - with an open PR from amf/issue-N, the issue is relabeled amf:pr-open
 //     (and loses amf:ready) and skipped;
-//   - with an amf/issue-N branch on origin but no open PR, it is skipped and
+//   - with an amf/issue-N branch on origin whose work is already merged into
+//     the default branch (by ancestry or a merged PR at its tip), amf reuses
+//     the branch and starts fresh from origin/<default>;
+//   - with an unmerged amf/issue-N branch and no open PR, it is skipped and
 //     left as it is: delete the branch, or run it with --force, to retry;
 //     an amf:failed issue labeled amf:ready again is retried, though.
 //
 // --force (Force) skips the guard, and amf then updates the open PR.
-func (r *Runner) guard(ctx context.Context, issue Issue) error {
+func (r *Runner) guard(ctx context.Context, issue Issue, base string) error {
 	if r.Force {
 		return nil
 	}
 	n, branch := issue.Number, issueBranch(issue.Number)
 	// ls-remote costs no API call, and without the branch no PR can be open
 	// from it (GitHub closes a PR whose head branch is deleted).
-	out, err := git(ctx, r.Root, "ls-remote", "--heads", "origin", "refs/heads/"+branch)
+	out, err := remoteTip(ctx, r.Root, branch)
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(out) == "" {
+	if out == "" {
 		return nil
 	}
+	tip := out
 	pr, open, err := r.GH.OpenPR(ctx, branch)
 	if err != nil {
 		return err
@@ -68,6 +72,18 @@ func (r *Runner) guard(ctx context.Context, issue Issue) error {
 	// A failed issue labeled amf:ready again is an explicit retry, which
 	// resets the branch its failed run left.
 	if issue.HasLabel(labelFailed) {
+		return nil
+	}
+	if _, err := git(ctx, r.Root, "fetch", "origin", branch, base); err != nil {
+		return fmt.Errorf("could not fetch origin/%s before reusing it: %w", branch, err)
+	}
+	merged, reason, err := r.mergedIntoBase(ctx, r.Root, branch, base, tip)
+	if err != nil {
+		return fmt.Errorf("could not check whether origin/%s is merged: %w", branch, err)
+	}
+	if merged {
+		r.event(slog.LevelInfo, "issue.reuse", n, fmt.Sprintf("#%d: reusing %s: its work is already merged into origin/%s", n, branch, base),
+			"branch", branch, "sha", tip, "reason", reason)
 		return nil
 	}
 	msg := fmt.Sprintf("#%d: branch %s already exists on origin, without an open pull request; delete it, or use amf run %d --force, to retry", n, branch, n)

@@ -434,7 +434,7 @@ func newFakeGitHub(t *testing.T) (*fakeGitHub, *httptest.Server) {
 					mergedAt = "2026-01-01T00:00:00Z"
 				}
 				draft := i < len(f.drafts) && f.drafts[i]
-				out = append(out, map[string]any{"number": n, "html_url": fmt.Sprintf("https://github.com/vic/demo/pull/%d", n), "title": pr["title"], "body": pr["body"], "state": pr["state"], "draft": draft, "merged_at": mergedAt, "head": map[string]any{"ref": pr["head"], "repo": map[string]string{"full_name": repoName}}, "base": map[string]string{"ref": pr["base"]}})
+				out = append(out, map[string]any{"number": n, "html_url": fmt.Sprintf("https://github.com/vic/demo/pull/%d", n), "title": pr["title"], "body": pr["body"], "state": pr["state"], "draft": draft, "merged_at": mergedAt, "head": map[string]any{"sha": cmp.Or(pr["head_sha"], "abc123"), "ref": pr["head"], "repo": map[string]string{"full_name": repoName}}, "base": map[string]string{"ref": pr["base"]}})
 			}
 		}
 		if q.Get("direction") == "desc" {
@@ -732,6 +732,22 @@ func mustGit(t *testing.T, dir string, args ...string) string {
 		t.Fatal(err)
 	}
 	return out
+}
+
+// pushUnmergedBranch leaves branch on origin with a commit main lacks.
+func pushUnmergedBranch(t *testing.T, root, branch string) string {
+	t.Helper()
+	mustGit(t, root, "checkout", "-q", "-b", branch)
+	if err := os.WriteFile(filepath.Join(root, "leftover.txt"), []byte("unmerged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, root, "add", "leftover.txt")
+	mustGit(t, root, "commit", "-qm", "unmerged leftover")
+	mustGit(t, root, "push", "-q", "origin", branch)
+	sha := mustGit(t, root, "rev-parse", "HEAD")
+	mustGit(t, root, "checkout", "-q", "main")
+	mustGit(t, root, "branch", "-q", "-D", branch)
+	return sha
 }
 
 // fakeClaude writes a shell script standing in for the claude CLI.

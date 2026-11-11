@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,8 +28,15 @@ func TestForceBacksUpReplacedBranch(t *testing.T) {
 	gh.issues[1] = &Issue{Number: 1, Title: "Add feature file", State: "open", Labels: []Label{{Name: "amf:ready"}}}
 	r, log := newTestRunner(t, srv, root, fakeClaude(t, `cat >/dev/null; echo hello > feature.txt; echo done`))
 	r.Force = true
+	var events bytes.Buffer
+	r.Events = newEventLogger(r.Log, slog.LevelInfo, &events, slog.LevelDebug, nil, "run")
 	if err := r.Run(context.Background(), 1); err != nil {
 		t.Fatalf("Run: %v\nlog:\n%s", err, log)
+	}
+	ev := eventsByName(eventLines(t, events.String()))
+	wantEvent(t, ev, "git.push", map[string]any{"branch": "amf/issue-1", "forced": true, "exit_code": float64(0)})
+	if cmd := pushCommand(t, ev, "amf/issue-1"); !strings.Contains(cmd, "--force-with-lease=amf/issue-1:"+old) {
+		t.Errorf("push command = %q, want a lease on %s", cmd, old)
 	}
 	heads := mustGit(t, root, "--git-dir", origin, "for-each-ref", "--format=%(refname:short) %(objectname)", "refs/heads/amf/backup/")
 	f := strings.Fields(heads)
