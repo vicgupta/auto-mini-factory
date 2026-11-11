@@ -185,9 +185,12 @@ Or run `amf watch` to process open issues labeled `amf:ready`, oldest first.
 saves a token; `amf auth status`, `amf auth logout` and `amf auth token` (with
 `-f, --force` to print to a terminal) manage it. Every flag has a long and a
 short form: `amf help flags` lists them, including `-D, --draft` and
-`-O, --color=auto|always|never`. An agent that prints no output for
-`AMF_AGENT_IDLE_TIMEOUT` (default 15m; `off` disables it) is stopped and the
-run fails, so the fallback agent can try.
+`-O, --color=auto|always|never`. An agent that prints no output and changes
+no file in the worktree for `AMF_AGENT_IDLE_TIMEOUT` (default 30m; `off`
+disables it) is stopped and the run fails, so the fallback agent can try.
+When amf kills an agent, it saves the agent's partial work on a local-only
+`amf/wip/issue-N-<UTC time>` branch (nothing is pushed); the failure comment
+names it and says how to inspect it.
 
 For all settings and defaults, run `amf help env` or see the
 [configuration guide](docs/CONFIGURATION.md).

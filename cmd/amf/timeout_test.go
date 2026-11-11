@@ -44,6 +44,19 @@ func (b *timeoutSyncBuffer) String() string {
 	return b.buf.String()
 }
 
+// wipBranches lists the local-only partial-work branches.
+func wipBranches(t *testing.T, root string) []string {
+	t.Helper()
+	out := mustGit(t, root, "for-each-ref", "--format=%(refname:short)", "refs/heads/amf/wip/")
+	var branches []string
+	for _, line := range strings.Split(out, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			branches = append(branches, line)
+		}
+	}
+	return branches
+}
+
 // sleepAgentScript is a fake agent that prints a greeting, spawns a child
 // and a grandchild, records all three PIDs in pids, and ignores SIGTERM, so
 // amf has to escalate to SIGKILL to end the process group.
@@ -255,6 +268,9 @@ func TestAgentIdleTimeout(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(root, ".amf", "worktrees", "issue-1")); !os.IsNotExist(err) {
 			t.Errorf("the worktree should be removed after an idle timeout, stat = %v", err)
 		}
+		if got := wipBranches(t, root); len(got) != 0 {
+			t.Errorf("an agent that changed nothing left WIP branches %v", got)
+		}
 	})
 
 	t.Run("lets the fallback agent run", func(t *testing.T) {
@@ -284,6 +300,94 @@ func TestAgentIdleTimeout(t *testing.T) {
 			t.Errorf("fallback error = %q, want %q", e["error"], want)
 		}
 	})
+}
+
+// TestAgentIdleTimeoutCountsFileActivity runs an agent that prints nothing
+// but keeps writing files, and checks that it outlives the idle limit.
+func TestAgentIdleTimeoutCountsFileActivity(t *testing.T) {
+	root, _ := setupRepo(t)
+	gh, srv := newFakeGitHub(t)
+	gh.issues[1] = readyIssue(1, "Writes quietly")
+	r, log := newTestRunner(t, srv, root, fakeAgent(t, "claude", `
+for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+  echo "$i" > "work-$i.txt"
+  sleep 0.1
+done
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"Wrote files."}'
+`))
+	r.IdleTimeout = 600 * time.Millisecond
+	r.Timeout = 10 * time.Second
+	r.KillGrace = 100 * time.Millisecond
+
+	begin := time.Now()
+	if err := r.Run(context.Background(), 1); err != nil {
+		t.Fatalf("Run: %v\nlog:\n%s", err, log.String())
+	}
+	if time.Since(begin) < r.IdleTimeout {
+		t.Errorf("the run ended before the idle limit; file writes should have reset it")
+	}
+	if len(gh.prs) != 1 {
+		t.Errorf("PRs = %v, want one from the agent's file changes", gh.prs)
+	}
+}
+
+// TestKilledAgentSavesWIP checks that both timeouts keep the agent's edits on
+// a local-only amf/wip/issue-N-* branch, name it in the comment, and push it
+// nowhere.
+func TestKilledAgentSavesWIP(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		idle bool
+	}{
+		{"idle timeout", true},
+		{"agent timeout", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, origin := setupRepo(t)
+			gh, srv := newFakeGitHub(t)
+			gh.issues[1] = readyIssue(1, "Partial work")
+			r, log := newTestRunner(t, srv, root, fakeAgent(t, "claude", `
+echo "partial work" > partial.txt
+trap '' TERM
+while :; do sleep 1; done
+`))
+			r.Timeout = 10 * time.Second
+			if tc.idle {
+				r.IdleTimeout = 300 * time.Millisecond
+			} else {
+				r.Timeout = 300 * time.Millisecond
+			}
+			r.KillGrace = 100 * time.Millisecond
+
+			err := r.Run(context.Background(), 1)
+			var ate *agentTimeoutError
+			if !errors.As(err, &ate) {
+				t.Fatalf("error = %v, want an agentTimeoutError\nlog:\n%s", err, log.String())
+			}
+			branches := wipBranches(t, root)
+			if len(branches) != 1 || !strings.HasPrefix(branches[0], "amf/wip/issue-1-") {
+				t.Fatalf("WIP branches = %v", branches)
+			}
+			branch := branches[0]
+			if got := mustGit(t, root, "show", branch+":partial.txt"); got != "partial work" {
+				t.Errorf("%s:partial.txt = %q", branch, got)
+			}
+			if _, err := git(context.Background(), origin, "rev-parse", "--verify", branch); err == nil {
+				t.Errorf("WIP branch %s was pushed to origin", branch)
+			}
+			if len(gh.prs) != 0 {
+				t.Errorf("PRs = %v", gh.prs)
+			}
+			comments := gh.comments[1]
+			if len(comments) != 1 || !strings.Contains(comments[0], branch) ||
+				!strings.Contains(comments[0], "git log -p main.."+branch) {
+				t.Errorf("comments = %q, want the WIP branch and how to inspect it", comments)
+			}
+			if b := mustRead(t, ate.LogPath); !strings.Contains(b, branch) {
+				t.Errorf("log missing the WIP branch %s:\n%s", branch, b)
+			}
+		})
+	}
 }
 
 // TestAgentTimeoutKeepsPartialMessage checks that codex's final message, cut
@@ -543,6 +647,9 @@ func TestKillAfter(t *testing.T) {
 }
 
 func TestAgentIdleTimeoutSetting(t *testing.T) {
+	if defaultAgentIdleTimeout != 30*time.Minute {
+		t.Errorf("defaultAgentIdleTimeout = %v, want 30m", defaultAgentIdleTimeout)
+	}
 	for _, tc := range []struct {
 		val  string
 		want time.Duration

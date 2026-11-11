@@ -90,8 +90,8 @@ type Runner struct {
 	// logins: agents run an issue's text with every permission check off.
 	Trusted []string
 	Timeout time.Duration // per agent run
-	// IdleTimeout is how long an agent may produce no output before amf
-	// stops it. 0 disables it.
+	// IdleTimeout is how long an agent may produce no output and change no
+	// file in the worktree before amf stops it. 0 disables it.
 	IdleTimeout time.Duration
 	// KillGrace is how long an agent gets to exit after SIGTERM before amf
 	// SIGKILLs its process group, in tests small. 0 means agentKillGrace.
@@ -556,7 +556,7 @@ func (r *Runner) buildOne(ctx context.Context, issue Issue, base, agent, log str
 	}
 	r.event(slog.LevelInfo, "issue.agent", n, text, "agent", agentName(agent), "model", model, "timeout", r.Timeout.String())
 	out := filepath.Join(wt, ".amf", "code.md") // for agents that write their final message to a file
-	if summary, err = r.runAgent(ctx, agent, "", model, wt, buildPrompt(r.Repo, branch, issue), log, out); err != nil {
+	if summary, err = r.runAgent(ctx, agent, "", model, wt, base, buildPrompt(r.Repo, branch, issue), log, out); err != nil {
 		return "", exitOf(err), err
 	}
 	if err := commitAll(ctx, wt, prTitle(issue), n, base, agent); err != nil {
@@ -682,6 +682,49 @@ func (r *Runner) prepareWorktree(ctx context.Context, wt, branch, base string) e
 	}
 	_, err := git(ctx, r.Root, "worktree", "add", "-B", branch, wt, "origin/"+base)
 	return err
+}
+
+// saveWIPBranch commits what the agent changed so far on a local-only
+// amf/wip/issue-N-<UTC time> branch, with the same exclusions as a normal
+// commit, and returns its name. It returns "" when there is nothing to save.
+func saveWIPBranch(ctx context.Context, wt string, n int, base string) (string, error) {
+	if _, err := git(ctx, wt, "add", "-A", "--", ".", memoryExclude, ":(exclude).amf"); err != nil {
+		return "", err
+	}
+	status, err := git(ctx, wt, "status", "--porcelain", "--", ".", memoryExclude, ":(exclude).amf")
+	if err != nil {
+		return "", err
+	}
+	if status != "" {
+		if _, err := git(ctx, wt, "commit", "-m", fmt.Sprintf("amf: partial work for #%d", n)); err != nil {
+			return "", err
+		}
+	}
+	changed, err := changedPaths(ctx, wt, base, "HEAD")
+	if err != nil {
+		return "", err
+	}
+	if len(changed) == 0 {
+		return "", nil
+	}
+	now := time.Now().UTC()
+	baseBranch := fmt.Sprintf("amf/wip/issue-%d-%s", n, now.Format("20060102T150405Z"))
+	existing, err := git(ctx, wt, "for-each-ref", "--format=%(refname:short)", "refs/heads/amf/wip/")
+	if err != nil {
+		return "", err
+	}
+	used := map[string]bool{}
+	for _, name := range strings.Split(existing, "\n") {
+		used[strings.TrimSpace(name)] = true
+	}
+	branch := baseBranch
+	for i := 2; used[branch]; i++ {
+		branch = fmt.Sprintf("%s-%d", baseBranch, i)
+	}
+	if _, err := git(ctx, wt, "branch", branch, "HEAD"); err != nil {
+		return "", err
+	}
+	return branch, nil
 }
 
 // commitAll commits whatever the agent changed and fails if the branch ends
