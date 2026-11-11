@@ -126,9 +126,11 @@ each, one at a time.
     the moment the pull request opens. This comes before the push, so no
     branch or PR is created; the issue prompt also tells the agent not to
     touch `.github/`.
-18. **Push.** `git push --force -u origin amf/issue-N`, using your own git
-    credentials, not `GITHUB_TOKEN`. amf owns `amf/issue-*` branches, so a
-    retry replaces the earlier push.
+18. **Push.** `git push -u origin amf/issue-N`, using your own git
+    credentials, not `GITHUB_TOKEN`, when the branch is new or its remote
+    tip is already in the new history. amf owns `amf/issue-*` branches, so
+    a retry replaces a diverged earlier push with `--force-with-lease`
+    pinned to the tip it inspected, after backing up commits it would drop.
 
 ## The PR
 

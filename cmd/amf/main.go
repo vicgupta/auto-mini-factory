@@ -41,9 +41,10 @@ func buildVersion() string {
 // permission, so a run without a limit could watch forever.
 const defaultAgentTimeout = 60 * time.Minute
 
-// defaultAgentIdleTimeout is how long an agent may produce no output before
-// amf stops it, without AMF_AGENT_IDLE_TIMEOUT saying otherwise.
-const defaultAgentIdleTimeout = 15 * time.Minute
+// defaultAgentIdleTimeout is how long an agent may produce no output and
+// change no file in the worktree before amf stops it, without
+// AMF_AGENT_IDLE_TIMEOUT saying otherwise.
+const defaultAgentIdleTimeout = 30 * time.Minute
 
 const troubleshootingURL = "https://github.com/vicgupta/auto-mini-factory/blob/main/docs/TROUBLESHOOTING.md"
 
@@ -313,7 +314,7 @@ func addRunFlags(fs *flag.FlagSet) runFlags {
 	f.merge = addMergeFlag(fs)
 	f.waitChecks = fs.Bool("wait-for-checks", true, waitChecksFlagHelp)
 	f.dryRun = fs.Bool("dry-run", false, "make the change locally only; no push or PR")
-	f.force = fs.Bool("force", false, "run anyway; save replaced commits as backup")
+	f.force = fs.Bool("force", false, "run anyway; force-push only a diverged branch")
 	f.part = fs.Bool("part", false, "treat the change as one part of the issue")
 	f.log = addLogFlags(fs)
 	f.memory = addMemoryFlags(fs)

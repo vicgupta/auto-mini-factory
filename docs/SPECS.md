@@ -33,10 +33,13 @@ amf:ready ──▶ amf:in-progress ──▶ amf:pr-open (PR opened, not merged
   closing keyword, so merging it leaves the issue open until the remaining
   work is done and the issue is marked `amf:ready` again.
 - Before Claim, amf skips an issue with an open PR from `amf/issue-N`
-  (relabeling it `amf:pr-open`) or with an `amf/issue-N` branch on origin
-  (unless it is `amf:failed`); `amf run N --force`, and `amf auto`, skip
-  that guard. The skip is logged once as `issue.skip`; `amf run` prints
-  that reason once, counts the issue as skipped in its summary, and exits 3.
+  (relabeling it `amf:pr-open`) or with an unmerged `amf/issue-N` branch on
+  origin (unless it is `amf:failed`). A leftover branch whose tip is an
+  ancestor of `origin/<default>`, or is the head of a merged PR from that
+  branch, is reused: amf starts fresh from `origin/<default>` and logs
+  `issue.reuse`. `amf run N --force`, and `amf auto`, skip that guard. The
+  skip is logged once as `issue.skip`; `amf run` prints that reason once,
+  counts the issue as skipped in its summary, and exits 3.
   A failure never moves an issue from `amf:pr-open` or
   `amf:done` to `amf:failed`, but `amf:done` is kept only when GitHub lists
   a merged PR from `amf/issue-N`. After `--merge`, amf reads the PR back and
@@ -244,15 +247,17 @@ label commands also return stdout write failures. No git checkout is needed.
   with `taskkill /T /F`, with no grace period. `--interval` also must be
   positive.
 - `AMF_AGENT_IDLE_TIMEOUT` stops an agent that produces no output, on stdout
-  or stderr, for that Go duration (default 15m); `off` disables it. Unlike
-  `AMF_AGENT_TIMEOUT` it has no flag. An unparsable, zero or negative value
-  fails `run` and `watch` at startup with `AMF_AGENT_IDLE_TIMEOUT="5x": not a
-  duration (use e.g. 15m, or off)`, and the default 15m applies when it is
-  unset. The timer resets on every write, so a long run that keeps printing
-  is not stopped. On expiry amf stops the run's process group just as the
-  agent timeout does, and fails the run with
-  `<agent> produced no output for <limit>; stopped it`; the fallback or the
-  next stage can then run.
+  or stderr, and changes no file in its worktree for that Go duration
+  (default 30m); `off` disables it. Unlike `AMF_AGENT_TIMEOUT` it has no
+  flag. An unparsable, zero or negative value fails `run` and `watch` at
+  startup with `AMF_AGENT_IDLE_TIMEOUT="5x": not a duration (use e.g. 30m,
+  or off)`, and the default 30m applies when it is unset. The timer resets on
+  every write and on every file created, changed or removed in the worktree
+  (amf scans it periodically, ignoring `.git/`, at an interval well under the
+  limit), so a long run that keeps printing or editing is not stopped. On
+  expiry amf stops the run's process group just as the agent timeout does,
+  and fails the run with `<agent> produced no output for <limit>; stopped
+  it`; the fallback or the next stage can then run.
 - `--label L` (`watch` only, default `amf:ready`) is the label `watch` polls
   for: each poll lists open issues with that exact label. An empty value
   (`amf watch --label ""`, such as an unset shell variable) fails `watch` at
@@ -365,7 +370,9 @@ label commands also return stdout write failures. No git checkout is needed.
     amf (Ctrl-C)
     is not a failure and falls back to nothing.
   - **Fallback** starts the secondary in a fresh worktree on `amf/issue-N`,
-    reset to `origin/<default>`, so nothing the primary left is kept. Its
+    reset to `origin/<default>`, so nothing the primary left in the worktree
+    is kept; a timed-out primary's changes were already saved on its
+    `amf/wip/issue-N-<UTC time>` branch. Its
     output goes to `.amf/logs/issue-N-<agent>.log`. amf logs an
     `agent.fallback` event (`from`, `to`, `reason`: `unusable`, `error` or
     `agent_timeout`, `error`). Its message names the agent that didn't run or
@@ -414,8 +421,9 @@ label commands also return stdout write failures. No git checkout is needed.
 an unknown one, a bad flag or the wrong arguments; no command or an unknown
 one also prints the usage to stderr; an unknown command close to a real
 one, such as `lst`, first prints `Did you mean "issue list"?`), and 3 when
-`amf run` skips an issue because of the pre-start guard (nothing changed;
-`--force` may run it). The README,
+`amf run` skips an issue because of the pre-start guard: an open PR, or an
+unmerged leftover `amf/issue-N` branch (nothing changed; `--force` may run
+it). The README,
 command reference and usage overview document these statuses, and `run`'s
 help repeats them. `amf --help` and `amf help <command>` exit 0; some
 command-specific `--help` and `-h` paths, including `amf run --help`,
@@ -991,7 +999,7 @@ space, a trailing comment. A leading byte order mark is ignored.
 | `AMF_PRIMARY_AGENT` | `codex` | The agent for issues without a pipeline: `claudecode` (or `claude`), `codex` or `opencode`, ignoring case. `--agent` and a pipeline override it |
 | `AMF_SECONDARY_AGENT` | `claudecode` | The agent amf falls back to when the primary fails, in a fresh worktree; the same values, or `none` for no fallback |
 | `AMF_AGENT_TIMEOUT` | `60m` | How long each agent run may take, as a Go duration; `--agent-timeout` (or its deprecated alias `--timeout`) overrides it. Must be at least 1m and at most 24h |
-| `AMF_AGENT_IDLE_TIMEOUT` | `15m` | How long an agent may produce no output on stdout or stderr before amf stops it and fails the run, as a Go duration; `off` disables it. Must be positive |
+| `AMF_AGENT_IDLE_TIMEOUT` | `30m` | How long an agent may produce no output on stdout or stderr, and change no file in the worktree, before amf stops it and fails the run, as a Go duration; `off` disables it. Must be positive |
 | `AMF_STALE_TIMEOUT` | `max(2x agent timeout, 2h)` | How long `watch` lets an issue stay `amf:in-progress` with no amf working on it before putting it back to `amf:ready`; `off` disables it. `--stale-timeout` overrides it |
 | `AMF_LOG_LEVEL` | `info` (terminal), `debug` (event log) | `debug`, `info`, `warn` or `error`, for both the terminal and the event log of `run` and `watch`; `--log-level` overrides it |
 | `AMF_CODEX` | `codex` | Path to the Codex CLI |
@@ -1113,25 +1121,36 @@ and exit code are preserved.
      time and redacted (see "Redaction" under "Security model").
    - **Timeout:** each run may take at most `--agent-timeout` (or
      `AMF_AGENT_TIMEOUT`; the default is 60m). It must also keep producing
-     output: when nothing is written to stdout or stderr for
-     `AMF_AGENT_IDLE_TIMEOUT` (default 15m; `off` disables it), amf stops
-     it. In either case amf signals the run's whole process group with
-     SIGTERM, then, if it is still there after a 15s grace period, SIGKILL:
-     the agent, the shells it spawns and their MCP servers are all stopped,
-     as on Ctrl-C (on Windows, `taskkill /T /F` ends the tree at once). The
-     run fails; whatever the agent printed stays in its log, ending with a
+     output or changing files: when nothing is written to stdout or stderr,
+     and no worktree file is created, changed or removed, for
+     `AMF_AGENT_IDLE_TIMEOUT` (default 30m; `off` disables it), amf stops
+     it. amf scans the worktree for changes (ignoring `.git/`) periodically,
+     at an interval well under the limit. In either case amf signals the
+     run's whole process group with SIGTERM, then, if it is still there
+     after a 15s grace period, SIGKILL: the agent, the shells it spawns and
+     their MCP servers are all stopped, as on Ctrl-C (on Windows,
+     `taskkill /T /F` ends the tree at once). The run fails; whatever the
+     agent printed stays in its log, ending with a
      `amf: killed after <elapsed> timeout (SIGTERM, then SIGKILL after 15s)`
      line for the agent timeout, or
      `amf: killed after <elapsed>: <agent> produced no output for <limit>;
      stopped it (SIGTERM, then SIGKILL after 15s)` for the idle timeout. An
      agent with a final-message file has what was written kept as
-     `.amf/logs/<log>.partial.md`. amf logs an `agent.timeout` event (with
-     `idle: true` for the idle timeout), and the issue's comment names the
-     agent, the stage and the limit, and how to retry with more time or a
-     longer idle limit. A timed-out run pushes nothing and opens or updates
-     no PR, and its worktree is removed; the logs and partial output stay,
-     as does the local `amf/issue-N` branch, which is never pushed and which
-     a retry resets to `origin/<default>`.
+     `.amf/logs/<log>.partial.md`. Before the worktree is removed or reset
+     for a fallback, amf commits whatever the agent changed, with the same
+     exclusions as a normal commit, on a local-only
+     `amf/wip/issue-N-<UTC time>` branch; it prints and logs the branch and
+     how to inspect it (`git log -p <default>..amf/wip/...`), and the
+     failure comment names it. Nothing is pushed and no PR is opened or
+     updated from that branch; an agent that changed nothing leaves no WIP
+     branch, and a failure to save one is only a warning. amf logs an
+     `agent.timeout` event (with `idle: true` for the idle timeout), an
+     `issue.wip` event when it saved partial work, and the issue's comment
+     names the agent, the stage and the limit, and how to retry with more
+     time or a longer idle limit. A timed-out run pushes nothing and opens
+     or updates no PR, and its worktree is removed; the logs, partial
+     output and WIP branch stay, as does the local `amf/issue-N` branch,
+     which is never pushed and which a retry resets to `origin/<default>`.
    - **Summary:** the final message becomes the summary. Its `amf-status:`
      line is removed; the last `complete` or `partial` value sets the run's
      partial flag, which `--part` also sets.
@@ -1149,13 +1168,18 @@ and exit code are preserved.
    when any changed path is under `.github/`, where workflows and `CODEOWNERS` live;
    the error names the offending paths. Changes elsewhere, even under a
    directory whose name contains `.github`, are fine.
-8. **Push.** `git push --force -u origin amf/issue-N`, with the user's git
-   credentials. If `origin/amf/issue-N` already exists and has commits that
-   are neither on the base nor in the new head (a `--force` re-run that
-   starts over), amf first pushes its old tip to
+8. **Push.** If `origin/amf/issue-N` doesn't exist, or its tip is an
+   ancestor of the new head, amf runs `git push -u origin amf/issue-N` with
+   the user's git credentials. Otherwise it replaces the remote tip with
+   `git push --force-with-lease=amf/issue-N:<old-tip> -u origin amf/issue-N`,
+   pinned to the tip it just inspected, so it never clobbers a push it
+   didn't see. If `origin/amf/issue-N` has commits that are neither on the
+   base nor in the new head and aren't already merged (by ancestry or a
+   merged PR at that tip), amf first pushes its old tip to
    `amf/backup/issue-N-<shortsha>-<UTC time>`, logs it, and names it in the
    issue comment. If that backup push fails, amf stops without replacing
-   the branch.
+   the branch. A merged leftover is reused without a backup; when only a
+   merged PR proves the merge, the new head replaces its tip.
 9. **PR.** Open `amf/issue-N` → `<default>`, titled `Fix #N: <title>`, or
    `Part of #N: <title>` for a partial change. If the branch already has an
    open PR (a retry), the push has updated it, so amf replaces that PR's
@@ -1288,7 +1312,8 @@ usual steps.
    - On `PASS`, continue to step 5.
    - On `FAIL`, go back to step 3 with the review, unless there have
      already been `--eval-rounds` code rounds after the first. In that case
-     amf pushes the branch for inspection and fails the issue. The comment
+     amf pushes the branch for inspection (plain, or with a lease when the
+     remote tip diverged, as in Push) and fails the issue. The comment
      names the eval agent, the number of rounds and the branch, and puts the
      last review in a collapsed block.
 5. **Squash.** Replace the round commits with one commit, as in step 7,
@@ -1332,7 +1357,8 @@ amf only reads from GitHub: the issue, the repo and the branch's open PR.
 
 A dry run that fails exits 1 with the error, and leaves the issue as it
 was: no label and no comment. Its worktree is kept for inspection, except
-after the agent timeout or idle timeout, which remove it as usual.
+after the agent timeout or idle timeout, which remove it as usual; partial
+work is still saved on an `amf/wip/issue-N-<UTC time>` branch.
 
 **On failure** in any step after Claim, up to opening the PR (a failed
 merge doesn't count; see step 11): set `amf:failed` (or keep `amf:pr-open`
@@ -1341,8 +1367,9 @@ comment the error on the issue (each agent tried with its exit code and
 duration, whether the fallback ran and why not, and the redacted last 40
 lines of the log), and keep the worktree and logs for inspection. This also happens if
 the run is interrupted — except that a run that hit the agent timeout or
-idle timeout leaves the worktree (removed, with its branch unpushed) and
-keeps only the logs and partial output. If Claim itself fails, the issue can be left on
+idle timeout leaves the worktree (removed, with its branch unpushed), keeps
+only the logs and partial output, and saves the agent's changes on an
+`amf/wip/issue-N-<UTC time>` branch. If Claim itself fails, the issue can be left on
 `amf:in-progress`, which `watch` skips until the stale sweep puts it back
 to `amf:ready`; `amf run N` recovers it too.
 
@@ -1408,6 +1435,7 @@ redirect to a URL ending in the tag, and serve the archive and
 | `.env`, `.env.NNNN` | Configuration and its backups (permissions 0600, git-excluded) |
 | `.amf/auto/state.json` | Versioned full `amf auto` plan and progress, saved before creation and after each created or processed issue |
 | `.amf/worktrees/issue-N/` | Working copy for an issue in progress or failed |
+| `amf/wip/issue-N-<UTC time>` (local branch) | A killed agent's partial work, committed and never pushed |
 | `.amf/logs/issue-N.log` | The agent's output for the latest run of issue N, without a pipeline (stream-json for Claude) |
 | `.amf/logs/issue-N-<agent>.log` | The secondary agent's output, when amf fell back to it |
 | `.amf/logs/issue-N[-<stage>].partial.md` | An agent's final-message file, kept (redacted) after a timeout cut the run short |
@@ -1450,6 +1478,7 @@ event log opens, are not. The fields of each event, besides those:
 | `watch.failed` | warn | `error`: an issue that failed (watch goes on) |
 | `watch.stop` | info | `reason` (the context's error, such as `context canceled`), `cycles` |
 | `issue.skip` | info | `reason` (`pr_open` or `branch_exists`), plus `pr` and `url` for `pr_open`, or `branch` for `branch_exists`; the message says how `--force` may run the issue |
+| `issue.reuse` | info | `branch`, `sha` (the old remote tip) and `reason` (`ancestor` or `merged_pr`): a leftover branch whose work is already merged is reused |
 | `issue.picked` | info | `title`, `author`, `labels` |
 | `issue.agent_ignored` | info | `agent`: the `--agent` a pipeline overrides |
 | `issue.author_check` | debug | `author`, `trusted`; an untrusted issue then fails |
@@ -1457,6 +1486,7 @@ event log opens, are not. The fields of each event, besides those:
 | `issue.pipeline` | info / debug | `declared` (true, info, for a pipeline; false, debug, for one agent run), `stages`, `agents`, `models` |
 | `issue.skill` | info | `stage`, `url` |
 | `issue.worktree` | info | `path`, and `branch` and `base`, or `stale: true` when an old one is removed |
+| `issue.wip` | info, warn | Saved a killed agent's partial work: `branch` and `base`; warn with `error` when saving it failed |
 | `issue.agent` | info | `agent`, `model`, `timeout`: the one run without a pipeline |
 | `issue.stage` | info | `stage` (`plan`, `code-K`, `eval-K`), `agent`, `model`, `timeout` |
 | `issue.plan.done` | debug | `bytes`: the plan's length |
@@ -1478,7 +1508,7 @@ event log opens, are not. The fields of each event, besides those:
 | `issue.failed` | debug, info | `reason` (`agent_timeout` at info, with `stage`, for the agent timeout or idle timeout; `stage` for a stage's own failure such as a blocked plan or an untrusted author; else `error`), `error`, and `dry_run: true` in a dry run |
 | `github.call` | debug | One per GitHub API request: `method`, `path` with `{repo}`, `{n}` and `{label}` in place of the repo, numbers and label names, `status` (0 when there was no response), `duration_ms`, `bytes_out` (request body), `bytes_in` (response body read), `ratelimit_remaining`, `ratelimit_reset`, `request_id` (GitHub's headers, `""` when absent), `page` for a later page of a list, and `error_body` (the first 512 bytes of an error response) or `error`. The token is never logged |
 | `git.exec` | debug | One per git command: `subcommand`, `args` (a commit message cut to 80 characters), `dir`, `exit_code` (-1 when git didn't start), `duration_ms`, `stdout_bytes`, `stderr_bytes`, and on failure `stderr` (its first 512 bytes) |
-| `git.push` | debug | After `git.exec` for a push: `branch`, `forced`, `exit_code` |
+| `git.push` | debug | After `git.exec` for a push: `branch`, `forced` (`--force` or `--force-with-lease`), `exit_code` |
 | `http.fetch` | debug | One per skill download: `url` (without any credentials), `status`, `redirects`, `duration_ms`, and `bytes` and `sha256` of the skill, or `error` |
 
 ## Logging to PostgreSQL

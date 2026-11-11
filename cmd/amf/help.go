@@ -76,7 +76,7 @@ const runHelp = `Usage:
 Processes one issue into a pull request (alias of amf issue run).
 
 Exit status: 0 success, 1 command failed, 2 usage error (also --help),
-3 the issue was skipped: it already has an open PR or an amf/issue-N branch
+3 the issue was skipped: an open PR, or an unmerged amf/issue-N branch
 (nothing changed; --force may run it). Use amf help run for help that exits 0.
 
 --merge makes run and watch merge each PR they open or update, without
@@ -89,6 +89,11 @@ amf run --dry-run makes the change on the local amf/issue-N branch and prints
 the pull request it would open, without labeling, commenting, pushing,
 opening a PR or merging.
 
+If amf stops an agent at the agent timeout or idle timeout, it keeps what the
+agent changed on a local-only amf/wip/issue-N-<UTC time> branch, pushed
+nowhere, and the failure comment names it; an agent that changed nothing gets
+no WIP branch.
+
 --part (-P) marks the change as one part of a larger issue: the commit and PR
 say Part of #N instead of Fix #N and Closes #N, so merging the PR does not
 close the issue. An agent or pipeline can say the same by ending its final
@@ -96,8 +101,11 @@ message with amf-status: partial; amf-status: complete confirms the issue is
 finished. Without either signal, a run is complete, as before.
 
 An issue that already has an open amf pull request is labeled amf:pr-open
-and skipped, and one whose amf/issue-N branch is on origin without an open
-PR is skipped: --force runs it anyway, updating the open PR.
+and skipped. A leftover amf/issue-N branch whose work is already merged
+into the default branch (by ancestry or a merged PR at its tip) is reused:
+amf starts from origin/<default> and pushes normally. An unmerged leftover
+branch is skipped, and --force runs it anyway, replacing the branch and
+updating any open PR.
 A --force run on an open PR that is behind the default branch first merges
 the default branch into it: a clean merge is pushed without an agent; on
 conflicts one agent resolves only the conflicted files; with no usable
@@ -271,9 +279,10 @@ Placeholders ending in ..., and owner/name, count as unset.
     How long each agent run may take, as a Go duration; --agent-timeout (or
     its deprecated alias --timeout) overrides it. Must be at least 1m and at
     most 24h
-  AMF_AGENT_IDLE_TIMEOUT (default: 15m)
-    How long an agent may produce no output on stdout or stderr before amf
-    stops it and fails the run, as a Go duration; off disables it
+  AMF_AGENT_IDLE_TIMEOUT (default: 30m)
+    How long an agent may produce no output, and change no file in the
+    worktree, before amf stops it and fails the run, as a Go duration; off
+    disables it
   AMF_STALE_TIMEOUT (default: max(2x agent timeout, 2h))
     How long watch lets an issue stay amf:in-progress with no amf working on
     it before putting it back to amf:ready; off disables it. --stale-timeout

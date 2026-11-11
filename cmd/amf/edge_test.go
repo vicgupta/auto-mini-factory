@@ -4264,7 +4264,7 @@ func TestRunSkipOutputAndExitCode(t *testing.T) {
 	root, origin := setupRepo(t)
 	gh, srv := newFakeGitHub(t)
 	gh.issues[1] = readyIssue(1, "Add feature file")
-	mustGit(t, root, "push", "origin", "main:refs/heads/amf/issue-1")
+	pushUnmergedBranch(t, root, "amf/issue-1")
 	t.Chdir(root)
 	t.Setenv("GITHUB_TOKEN", "test-token")
 	t.Setenv("GITHUB_REPO", "vic/demo")
@@ -4282,7 +4282,7 @@ func TestRunSkipOutputAndExitCode(t *testing.T) {
 	}
 	want := "amf: #1: Add feature file\n" +
 		"amf: #1: branch amf/issue-1 already exists on origin, without an open pull request; delete it, or use amf run 1 --force, to retry\n" +
-		"amf: summary: 0 issues (0 done, 0 failed, 1 skipped); 3 GitHub calls\n"
+		"amf: summary: 0 issues (0 done, 0 failed, 1 skipped); 4 GitHub calls\n"
 	if got := stderr.String(); got != want {
 		t.Errorf("stderr = %q, want %q", got, want)
 	}

@@ -144,7 +144,7 @@ amf auto --continue        # approve the checkpoint and resume
 amf auto status            # inspect saved progress
 amf auto --abort           # forget the saved run, leaving GitHub issues and PRs unchanged
 amf run 42 --dry-run        # make the change locally and show the PR, touching nothing on GitHub
-amf run 42 --force          # rerun an issue with an open PR; dropped commits are saved on amf/backup/issue-42-<sha>-<time> (-f)
+amf run 42 --force          # rerun an issue with an open PR or unmerged leftover branch; dropped commits are saved on amf/backup/issue-42-<sha>-<time> (-f)
 
 amf issue label 42 --add bug --remove needs-triage  # change labels by hand (-a/-R); select a set with --state/--label/--unlabeled
 amf pr view 57              # state, branch, author, checks, mergeability and diff stats
@@ -172,6 +172,13 @@ amf memory show 42          # issue 42's PRs and every run
 amf watch --memory-backend markdown --memory-dir ~/amf-notes  # keep memory as Markdown files elsewhere
 ```
 
+A leftover `amf/issue-N` branch whose work is already merged into the default
+branch is reused without `--force`: amf starts fresh from `origin/<default>`.
+An unmerged leftover branch is skipped unless you pass `--force`. amf pushes
+a new branch, or one whose tip is already in the new history, normally; only
+a diverged branch is replaced, with a lease pinned to the tip it inspected,
+after saving the commits the push would drop to `amf/backup/issue-N-<sha>-<time>`.
+
 A complete run opens a PR titled `Fix #N: <title>` that closes the issue. With
 `--part`, or when an agent ends its final message with `amf-status: partial`,
 the title and commit say `Part of #N`, so merging does not close the issue;
@@ -193,9 +200,12 @@ Or run `amf watch` to process open issues labeled `amf:ready`, oldest first.
 saves a token; `amf auth status`, `amf auth logout` and `amf auth token` (with
 `-f, --force` to print to a terminal) manage it. Every flag has a long and a
 short form: `amf help flags` lists them, including `-D, --draft` and
-`-O, --color=auto|always|never`. An agent that prints no output for
-`AMF_AGENT_IDLE_TIMEOUT` (default 15m; `off` disables it) is stopped and the
-run fails, so the fallback agent can try.
+`-O, --color=auto|always|never`. An agent that prints no output and changes
+no file in the worktree for `AMF_AGENT_IDLE_TIMEOUT` (default 30m; `off`
+disables it) is stopped and the run fails, so the fallback agent can try.
+When amf kills an agent, it saves the agent's partial work on a local-only
+`amf/wip/issue-N-<UTC time>` branch (nothing is pushed); the failure comment
+names it and says how to inspect it.
 
 For all settings and defaults, run `amf help env` or see the
 [configuration guide](docs/CONFIGURATION.md).

@@ -96,7 +96,7 @@ The binary installer and `amf update` do not install the man page.
 - `0` — success.
 - `1` — a command failed (for example, a GitHub error, agent failure, or refused merge).
 - `2` — a usage error (for example, no command, an unknown command or flag, or missing arguments).
-- `3` — `amf run` skipped the issue because it already has an open PR or an `amf/issue-N` branch. Nothing changed; `--force` may run it.
+- `3` — `amf run` skipped the issue because it already has an open PR or an unmerged `amf/issue-N` branch. A merged leftover branch is reused instead. Nothing changed; `--force` may run it.
 
 `amf --help` and `amf help <command>` exit `0`; unknown commands exit `2`.
 Some commands currently return `2` for `amf <command> --help` (or `-h`),
@@ -934,8 +934,11 @@ Shared flags: `--agent claudecode|codex|opencode` selects one agent with no
 fallback (default uses configured selection); `--agent-timeout` sets a Go
 duration per agent run (default `AMF_AGENT_TIMEOUT` or `60m`, range `1m` to
 `24h`), with deprecated alias `--timeout`. An agent that produces no output
-for `AMF_AGENT_IDLE_TIMEOUT` (default `15m`; `off` disables it) is stopped and
-the run fails, so the fallback can run. `--eval-rounds` defaults to 2 and accepts nonnegative integers.
+and changes no worktree file for `AMF_AGENT_IDLE_TIMEOUT` (default `30m`;
+`off` disables it) is stopped and the run fails, so the fallback can run.
+When amf kills an agent, it saves the agent's partial work on a local-only
+`amf/wip/issue-N-<UTC time>` branch (nothing is pushed), and the failure
+comment names it. `--eval-rounds` defaults to 2 and accepts nonnegative integers.
 `--draft` defaults off and cannot be combined with `--merge`.
 `--merge[=merge|squash|rebase]` defaults off; bare `--merge` uses a merge
 commit. With `--merge`, `--wait-for-checks` (`-w`, default on) waits up to
@@ -1228,7 +1231,7 @@ only `--json` and `--help`.
 | `-n, --dry-run` | make the change on the local branch only: no label, comment, push, PR or merge |
 | `-P, --part` | treat the change as one part of the issue: the commit and PR say `Part of #N`, so merging it does not close the issue; an agent can also mark a run partial with `amf-status: partial` |
 | `-e, --eval-rounds <n>` | how many times a pipeline's eval stage may send the change back to code (default 2) |
-| `-f, --force` | run even if the issue already has an open PR or an amf/issue-N branch, updating that PR; this replaces the branch, first saving any commits it would drop to amf/backup/issue-N-<sha>-<time> |
+| `-f, --force` | run even if the issue already has an open PR or an unmerged amf/issue-N branch, updating that PR; this replaces the branch, first saving any commits it would drop to amf/backup/issue-N-<sha>-<time> (a merged leftover needs no --force and is reused) |
 | `-W, --log-file <path>` | where the event log goes (default .amf/runs/<run_id>/events.jsonl; "off" for none) |
 | `-v, --log-level <level>` | debug, info, warn or error, for the terminal and the event log (default info, and debug in the event log) |
 | `-b, --memory-backend <backend>` | where amf keeps the repo's memory: sqlite, markdown or logfiles (default sqlite) |
@@ -1574,11 +1577,14 @@ subscribed to Go. A repo with a pipeline ignores
 Without a pipeline (see below), amf runs one agent once. With Claude Code:
 
 1. Checks the issue isn't already turned into a PR: with an open PR from
-   `amf/issue-N` it labels the issue `amf:pr-open` and stops; with an
-   `amf/issue-N` branch on origin and no open PR it stops too (unless the
-   issue is `amf:failed`, which is a retry). `--force` skips this check.
-   A skip prints its reason once, counts as one skipped in the summary, and
-   exits 3. Then labels the issue `amf:in-progress` and removes `amf:ready`.
+   `amf/issue-N` it labels the issue `amf:pr-open` and stops. A leftover
+   `amf/issue-N` branch whose work is already merged into the default branch
+   (its tip is an ancestor, or it is the head of a merged PR) is reused:
+   amf starts fresh from `origin/<default>` and pushes normally. An unmerged
+   leftover branch with no open PR stops too (unless the issue is
+   `amf:failed`, which is a retry). `--force` skips this check. A skip
+   prints its reason once, counts as one skipped in the summary, and exits
+   3. Then labels the issue `amf:in-progress` and removes `amf:ready`.
 2. Fetches the default branch and creates a worktree at
    `.amf/worktrees/issue-N` on branch `amf/issue-N` from `origin/<default>`.
 3. Runs `claude -p --dangerously-skip-permissions --output-format stream-json --verbose` in the
@@ -1587,17 +1593,25 @@ Without a pipeline (see below), amf runs one agent once. With Claude Code:
    `.amf/logs/issue-N.log` as it works, one JSON message per line
    (`tail -f` it to follow along). Each agent run may take at most 60 minutes
    (`--agent-timeout`; amf then kills the agent and everything it spawned, or
-   `AMF_AGENT_TIMEOUT` sets it without a flag), and it must keep printing: no
-   output on stdout or stderr for `AMF_AGENT_IDLE_TIMEOUT` (default `15m`;
-   `off` disables it) also stops it, with the error
-   `<agent> produced no output for <limit>; stopped it`. See
+   `AMF_AGENT_TIMEOUT` sets it without a flag), and it must keep printing or
+   editing: no output on stdout or stderr, and no worktree file created,
+   changed or removed, for `AMF_AGENT_IDLE_TIMEOUT` (default `30m`; `off`
+   disables it) also stops it, with the error
+   `<agent> produced no output for <limit>; stopped it`. Before removing the
+   worktree or resetting it for a fallback, amf saves whatever the agent
+   changed on a local-only `amf/wip/issue-N-<UTC time>` branch, pushed
+   nowhere; the failure comment names it. See
    [Configuration (.env)](CONFIGURATION.md#configuration-env).
    Codex and opencode run the same way, with the commands in
    [docs/SPECS.md](SPECS.md#agents).
 4. Commits the changes as `Fix #N: <title>` (`Part of #N: <title>` with
    `--part`, or when the agent ends its final message with
-   `amf-status: partial`), fails if there are none, and runs
-   `git push --force -u origin amf/issue-N` with your own git credentials.
+   `amf-status: partial`), fails if there are none, and pushes
+   `amf/issue-N` with your own git credentials. A new branch, or one whose
+   tip is already in the new history, is a plain
+   `git push -u origin amf/issue-N`; a diverged branch is replaced with
+   `--force-with-lease` pinned to the tip amf inspected, after saving any
+   commits the push would lose as `amf/backup/issue-N-<sha>-<time>`.
    If the change touches anything under `.github/`, amf refuses to push it
    and the issue fails, since a pushed workflow change runs with your
    Actions secrets before anyone reviews it.
@@ -1655,7 +1669,8 @@ keeps `amf:pr-open` instead (and one whose PR GitHub shows merged, `amf:done`): 
 never marks it `amf:failed`.
 The worktree is kept for inspection. A run that hit the agent timeout or
 idle timeout loses only the worktree: amf comments with how to retry with
-more time and keeps the logs and partial output. Re-running `amf run N`
+more time, keeps the logs and partial output, and saves the agent's changes
+on a local-only `amf/wip/issue-N-<UTC time>` branch. Re-running `amf run N`
 starts again from a fresh worktree.
 
 ## Merge methods
