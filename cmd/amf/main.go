@@ -299,6 +299,7 @@ type runFlags struct {
 	waitChecks *bool
 	dryRun     *bool
 	force      *bool
+	part       *bool
 	log        *logOptions
 	memory     *memoryOptions
 }
@@ -313,6 +314,7 @@ func addRunFlags(fs *flag.FlagSet) runFlags {
 	f.waitChecks = fs.Bool("wait-for-checks", true, waitChecksFlagHelp)
 	f.dryRun = fs.Bool("dry-run", false, "make the change locally only; no push or PR")
 	f.force = fs.Bool("force", false, "run anyway; save replaced commits as backup")
+	f.part = fs.Bool("part", false, "treat the change as one part of the issue")
 	f.log = addLogFlags(fs)
 	f.memory = addMemoryFlags(fs)
 	return f
@@ -366,6 +368,7 @@ func cmdRun(ctx context.Context, args []string, stderr io.Writer) (err error) {
 	r.MergeSkipChecks = !*f.waitChecks
 	r.DryRun = *f.dryRun
 	r.Force = *f.force
+	r.Part = *f.part
 	if err := r.lockRepo("run"); err != nil {
 		return err
 	}

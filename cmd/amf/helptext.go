@@ -415,6 +415,7 @@ var helpExamples = map[string]string{
 `,
 	"run": `  amf run 42
   amf run 42 --agent claudecode --agent-timeout 90m
+  amf run 42 --part                 # ...one part of a larger issue: Part of #42
   amf run 42 --dry-run
   amf run 42 --merge=squash          # or: -m squash
 `,
@@ -509,6 +510,7 @@ command has two flags with the same letter.
   -O  --color            every command
   -p  --memory-dir       run, watch, auto, memory
   -P  --checkpoint-after auto
+  -P  --part             run
   -q  --quiet            every command
   -r  --rebase           pr merge
   -R  --remove           issue label

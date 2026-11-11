@@ -131,6 +131,7 @@ amf watch --interval 1m     # ...polling GitHub more often
 amf watch --agent codex     # without a pipeline, use Codex only, no fallback
 amf watch --exclude-label blocked --exclude-label needs-human  # ...leaving issues with either label alone until it's removed
 amf run 42 --draft          # open the PR as a draft (-D)
+amf run 42 --part           # ...one part of a larger issue: Part of #42, no auto-close (-P)
 amf watch --draft           # ...opening each new PR as a draft
 amf run 42 --merge          # ...and merge its PR with a merge commit
 amf run 42 --merge --wait-for-checks  # ...after waiting for CI (-w)
@@ -170,6 +171,13 @@ amf memory similar "flaky login test" --json
 amf memory show 42          # issue 42's PRs and every run
 amf watch --memory-backend markdown --memory-dir ~/amf-notes  # keep memory as Markdown files elsewhere
 ```
+
+A complete run opens a PR titled `Fix #N: <title>` that closes the issue. With
+`--part`, or when an agent ends its final message with `amf-status: partial`,
+the title and commit say `Part of #N`, so merging does not close the issue;
+`amf-status: complete`, or no signal at all, keeps the complete form. The PR
+body starts with the diffstat and changed files amf read from git, then the
+agent's summary clearly marked as agent-written and unverified.
 
 Native writes require a reviewed `amf-release-policy.json` committed at the exact
 target SHA, with required check names/app IDs and status contexts/creator IDs.

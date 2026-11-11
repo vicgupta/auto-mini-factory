@@ -67,6 +67,7 @@ var shortFlags = map[string]string{
 	"no-browser":       "B",
 	"no-checkpoint":    "N",
 	"no-label":         "N",
+	"part":             "P",
 	"plan":             "p",
 	"quiet":            "q",
 	"rebase":           "r",

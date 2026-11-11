@@ -344,8 +344,32 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"A
 		t.Fatalf("Run: %v\nlog:\n%s", err, log)
 	}
 	body := gh.prs[0]["body"]
-	if !strings.HasPrefix(body, "Added it.\n\nCloses #1") || strings.Contains(body, "Evaluation") {
+	if !strings.Contains(body, "Added it.") || !strings.Contains(body, "Closes #1") || strings.Contains(body, "Evaluation") {
 		t.Fatalf("PR body = %q", body)
+	}
+}
+
+func TestPipelinePartialStatus(t *testing.T) {
+	root, origin := setupPipelineRepo(t, "## amf\n\n| Stage | Agent |\n|---|---|\n| code | claudecode |\n")
+	gh, srv := newFakeGitHub(t)
+	gh.issues[1] = &Issue{Number: 1, Title: "Add it", State: "open"}
+	r, log := newTestRunner(t, srv, root, fakeAgent(t, "claude", shResult+`cat >/dev/null
+echo hi > it.txt
+result 'Added the first half.\n\nFixes #1\n\namf-status: partial'
+`))
+	if err := r.Run(context.Background(), 1); err != nil {
+		t.Fatalf("Run: %v\nlog:\n%s", err, log)
+	}
+	pr := gh.prs[0]
+	if pr["title"] != "Part of #1: Add it" {
+		t.Errorf("title = %q", pr["title"])
+	}
+	body := pr["body"]
+	if !strings.Contains(body, "Part of #1") || strings.Contains(body, "Fixes #1") || strings.Contains(body, "amf-status") {
+		t.Errorf("PR body = %q", body)
+	}
+	if commit := mustGit(t, root, "--git-dir", origin, "log", "-1", "--format=%B", "amf/issue-1"); !strings.HasPrefix(commit, "Part of #1: Add it\n\nPart of #1") {
+		t.Errorf("commit = %q", commit)
 	}
 }
 

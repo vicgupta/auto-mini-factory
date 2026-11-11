@@ -946,7 +946,8 @@ checks after 2 minutes is merged. `--wait-for-checks=false` merges at once.
 terminal, debug in the event log, or `AMF_LOG_LEVEL`). `--log-file PATH`
 overrides the event log path; `off` disables it.
 
-Run alone takes `--dry-run` (default off), making only local changes.
+Run alone takes `--dry-run` (default off), making only local changes, and
+`--part` (`-P`, default off), marking the change as one piece of the issue.
 Watch alone takes `--interval` (default `10m`, must be positive), `--label` (default
 `amf:ready`) and repeatable `--exclude-label` (default none).
 Neither supports `--json`. Output includes progress and a final summary,
@@ -1014,6 +1015,7 @@ Durations are Go durations: `30s`, `5m`, `1h30m`, `2h`.
 | `-p` | `--memory-dir` | run, watch, auto, memory |
 | `-p` | `--plan` | release create, release stage, release publish |
 | `-P` | `--checkpoint-after` | auto |
+| `-P` | `--part` | run |
 | `-q` | `--quiet` | every command |
 | `-r` | `--rebase` | pr merge |
 | `-R` | `--release` | release stage, release publish |
@@ -1224,6 +1226,7 @@ only `--json` and `--help`.
 | `-t, --agent-timeout <duration>` | maximum time each agent run may take (Go duration, e.g. 90m or 1h30m) (default 1h) |
 | `-D, --draft` | open new pull requests as drafts (a retry leaves an open PR a draft or ready for review as it was) |
 | `-n, --dry-run` | make the change on the local branch only: no label, comment, push, PR or merge |
+| `-P, --part` | treat the change as one part of the issue: the commit and PR say `Part of #N`, so merging it does not close the issue; an agent can also mark a run partial with `amf-status: partial` |
 | `-e, --eval-rounds <n>` | how many times a pipeline's eval stage may send the change back to code (default 2) |
 | `-f, --force` | run even if the issue already has an open PR or an amf/issue-N branch, updating that PR; this replaces the branch, first saving any commits it would drop to amf/backup/issue-N-<sha>-<time> |
 | `-W, --log-file <path>` | where the event log goes (default .amf/runs/<run_id>/events.jsonl; "off" for none) |
@@ -1591,17 +1594,24 @@ Without a pipeline (see below), amf runs one agent once. With Claude Code:
    [Configuration (.env)](CONFIGURATION.md#configuration-env).
    Codex and opencode run the same way, with the commands in
    [docs/SPECS.md](SPECS.md#agents).
-4. Commits the changes (`Fix #N: <title>`), fails if there are none, and runs
+4. Commits the changes as `Fix #N: <title>` (`Part of #N: <title>` with
+   `--part`, or when the agent ends its final message with
+   `amf-status: partial`), fails if there are none, and runs
    `git push --force -u origin amf/issue-N` with your own git credentials.
    If the change touches anything under `.github/`, amf refuses to push it
    and the issue fails, since a pushed workflow change runs with your
    Actions secrets before anyone reviews it.
-5. Opens a PR with the agent's final message as the body plus `Closes #N`, as
-   a draft with `--draft` (default off; `amf run` and `amf watch` take it). On
-   a `--force` retry whose PR is still open, it updates that PR's title and body
-   instead, and leaves it a draft or ready for review as it was.
+5. Opens a PR whose body starts with the diffstat and changed files amf read
+   from git, then the agent's final message under an "Agent summary" heading
+   marked as unverified, as a draft with `--draft` (default off; `amf run` and
+   `amf watch` take it). The body ends with `Closes #N`, or `Part of #N` for a
+   partial change. On a `--force` retry whose PR is still open, it updates
+   that PR's title and body instead, and leaves it a draft or ready for review
+   as it was.
 6. Comments the PR link on the issue, labels it `amf:pr-open` (a draft PR
    counts; `amf:done` once `--merge` merged it), removes the worktree.
+   A partial PR that is merged leaves the issue open: `Part of #N` is not a
+   closing keyword. Add `amf:ready` again when the rest of the issue is ready.
 
 A `--force` run (or `amf auto`) on an issue whose open PR is behind the
 default branch (GitHub's compare reports `behind_by` > 0) doesn't rebuild the

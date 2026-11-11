@@ -113,7 +113,10 @@ each, one at a time.
 ## Commit and push
 
 17. **Commit** (`commitAll`). amf stages everything and commits it as
-    `Fix #N: <title>`, with `Closes #N` in the message body. Then it compares
+    `Fix #N: <title>`, with `Closes #N` in the message body. With `--part`, or
+    when the agent ends its final message with `amf-status: partial`, the
+    subject is `Part of #N: <title>` and the body is `Part of #N`, so merging
+    the PR will not close the issue. Then it compares
     the branch with `origin/<default>`. If no file changed, the issue fails
     with "claude finished without making any changes". That includes the case
     where Claude made commits of its own that cancel out. If any changed path
@@ -129,15 +132,20 @@ each, one at a time.
 
 ## The PR
 
-19. **The PR description** starts with Claude's final message, cleaned up:
+19. **The PR description** starts with the diffstat and changed paths amf
+    read from git, then Claude's final message, cleaned up:
     - "Generated with Claude Code" and `Co-Authored-By` lines are removed.
     - Claude's own `Closes`/`Fixes`/`Resolves #N` line is removed.
+    - An `amf-status: complete` or `amf-status: partial` line is removed.
 
     If nothing is left, the description is "Resolves #N.". amf then adds
-    `Closes #N` and an "Opened by amf" footer.
+    `Closes #N` and an "Opened by amf" footer. A partial change says
+    `Part of #N` instead, and any closing keyword for the issue in Claude's
+    text is rewritten to `Part of`.
 20. **The PR is opened** from `amf/issue-N` to the default branch, titled
-    `Fix #N: <title>`. If GitHub refuses because that branch already has an
-    open PR (a retry), amf updates that PR's title and description instead.
+    `Fix #N: <title>`, or `Part of #N: <title>` for a partial change. If
+    GitHub refuses because that branch already has an open PR (a retry), amf
+    updates that PR's title and description instead.
 21. **The worktree is removed.** The branch and the log are kept.
 
 ## Finish

@@ -89,6 +89,12 @@ amf run --dry-run makes the change on the local amf/issue-N branch and prints
 the pull request it would open, without labeling, commenting, pushing,
 opening a PR or merging.
 
+--part (-P) marks the change as one part of a larger issue: the commit and PR
+say Part of #N instead of Fix #N and Closes #N, so merging the PR does not
+close the issue. An agent or pipeline can say the same by ending its final
+message with amf-status: partial; amf-status: complete confirms the issue is
+finished. Without either signal, a run is complete, as before.
+
 An issue that already has an open amf pull request is labeled amf:pr-open
 and skipped, and one whose amf/issue-N branch is on origin without an open
 PR is skipped: --force runs it anyway, updating the open PR.

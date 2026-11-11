@@ -29,6 +29,9 @@ amf:ready ──▶ amf:in-progress ──▶ amf:pr-open (PR opened, not merged
   (`--draft`) included, that is open and not merged: no `--merge`, or the
   merge failed.
 - `amf:done` means amf merged the issue's PR (with `--merge` or `amf pr merge`).
+  A partial change (`--part` or `amf-status: partial`) is never linked with a
+  closing keyword, so merging it leaves the issue open until the remaining
+  work is done and the issue is marked `amf:ready` again.
 - Before Claim, amf skips an issue with an open PR from `amf/issue-N`
   (relabeling it `amf:pr-open`) or with an `amf/issue-N` branch on origin
   (unless it is `amf:failed`); `amf run N --force`, and `amf auto`, skip
@@ -91,7 +94,7 @@ on amf's output. Users can opt into paging with `amf pr diff 42 | less` or
 | `amf release create <tag> --plan <file> --manifest <file>` | Creates an unpublished draft release (POST `/releases` with `draft: true`) pinned to the plan's tag, full commit SHA and exact artifact set. The tag must already exist and recursively peel to that SHA. The required policy is read through the contents API pinned to `ref=<sha>` and must parse as strict, versioned JSON with at least one nonempty check or status; absent, empty, malformed or duplicate-key policy fails closed. The draft body stores a versioned ownership record binding repository, tag, SHA, policy path and contents, and each artifact's name, SHA-256 and size; human notes follow the marker. An existing draft is reused only when its record matches the requested plan, tag, SHA, policy and artifact set exactly. An unrelated draft or published release is never modified. Prints `Created draft release <id> for tag <tag> at <sha>.` or an already-matches message so the ID can be used by stage and publish. Never uploads or publishes. |
 | `amf release stage <tag> --release <id> --plan <file> --manifest <file>` | Stages the plan's files on the pinned draft release ID. Every local path must resolve inside the plan file's directory, be regular (symlinks are rejected), and be named by exactly one safe single-segment asset name covered exactly once by the `sha256sum`-style manifest; duplicates, extras, missing entries, traversal and ambiguous names are errors. amf copies each file into a bounded temporary snapshot while hashing it, verifies the manifest checksum and records the size, then uploads only the verified snapshot, so a later rename or replacement cannot substitute bytes. Each existing asset is accepted only when its state is `uploaded` and its remote size and downloaded bytes match the record; otherwise, including an unfinished/open asset, an unexpected asset or a publication claim, amf fails closed and never deletes, overwrites or steals it. A lost upload response is resolved by re-listing and verifying the completed remote asset. Rerunning a successful or interrupted stage is safe. Never publishes. |
 | `amf release publish <tag> --release <id> --plan <file> --manifest <file>` | Publishes only the pinned draft after rechecking the tag's actually peeled SHA, the exact recorded plan, release identity and policy, every expected artifact's remote size and downloaded bytes, and required CI on the exact commit. Required policy comes from the target commit's policy file and is compared with the durable record. CI follows every page of check runs (including older attempts) and commit statuses; the latest attempt per required name/context must be completed `success` from the recorded app ID or creator ID, and wrong-SHA, missing, pending, failed, inconclusive and wrong-source results fail. amf creates a create-only publication claim asset to serialize cooperating publishers, then sends one PATCH that only clears draft. There is no GitHub CAS or transaction; a lost create response fails closed, and an uncertain PATCH outcome is re-read and verified, otherwise amf refuses and documents manual operator recovery. An already published identical retry verifies and returns without modification. It never modifies an unrelated release. |
-| `amf run <N> [--agent A] [--agent-timeout 60m] [--eval-rounds 2] [--dry-run] [--draft] [--merge[=squash\|rebase] [--wait-for-checks[=false]]] [--log-level L] [--log-file P]` | Processes issue N (`42` or `#42`, surrounding whitespace trimmed) once. Anything else, or `0`, fails with `invalid issue number "X"; use a positive number such as 42 or #42` (exit 1). |
+| `amf run <N> [--agent A] [--agent-timeout 60m] [--eval-rounds 2] [--dry-run] [--draft] [--part] [--merge[=squash\|rebase] [--wait-for-checks[=false]]] [--log-level L] [--log-file P]` | Processes issue N (`42` or `#42`, surrounding whitespace trimmed) once. Anything else, or `0`, fails with `invalid issue number "X"; use a positive number such as 42 or #42` (exit 1). |
 | `amf watch [--agent A] [--interval 10m] [--label amf:ready] [--exclude-label L]... [--agent-timeout 60m] [--eval-rounds 2] [--draft] [--merge[=squash\|rebase]] [--log-level L] [--log-file P]` | Polls open issues with the label (every page), oldest first by issue number (GitHub's `created_at` can tie for issues opened in the same second), and processes them one at a time until interrupted, skipping any issue that has one of the `--exclude-label` labels. `-h` and `--help`, including in the `amf issue watch` form, print the existing watch help and flags to stderr, leave stdout empty, and exit 0 before reading configuration, resolving a checkout, contacting GitHub or starting a runner. Unknown flags and missing flag values remain usage errors (exit 2); help follows normal argument parsing, so an unknown flag before `--help` remains an error. |
 | `amf pipeline [--fetch]` | Checks the pipeline in `AGENTS.md` of the enclosing checkout, as it is on disk. See below. |
 | `amf doctor [--fix-labels]` | Checks the whole setup, one line per check, changing nothing unless `--fix-labels` is given. See below. |
@@ -294,6 +297,18 @@ label commands also return stdout write failures. No git checkout is needed.
   merge draft pull requests`.
   The `run`, `watch` and `auto` help texts link to
   [Merge methods](COMMANDS.md#merge-methods) for history diagrams and tradeoffs.
+- `--part` (`-P`, `run` only; default off) treats the change as one part of a
+  larger issue. The commit and PR title are `Part of #N: <title>` instead of
+  `Fix #N: <title>`, and their closing line is `Part of #N` instead of
+  `Closes #N`, so merging the PR never closes the issue. Any
+  `Fix`/`Fixes`/`Fixed`, `Close`/`Closes`/`Closed` or
+  `Resolve`/`Resolves`/`Resolved` before `#N` or `owner/repo#N` in the agent's
+  summary or the issue title is rewritten to `Part of`, and `amf-status:`
+  lines are removed from the PR body. A pipeline's code stage can mark the
+  same thing by ending its final message with `amf-status: partial`; an
+  `amf-status: complete` line confirms a complete change. Without a
+  recognized signal, a run is complete, as before. `--part` always wins over
+  an `amf-status: complete` line.
 - `--dry-run` (`run` only; default off) makes the change on the local
   `amf/issue-N` branch and prints the pull request amf would open, without
   changing anything on GitHub: no label, comment, push, PR or merge. See
@@ -1079,7 +1094,8 @@ and exit code are preserved.
    (with opencode's model in parentheses).
    - **Prompt:** the issue's title and body, plus instructions to make the
      smallest complete change, run the project's tests and build, not touch
-     `.github/`, git or GitHub, and reply with only a PR description.
+     `.github/`, git or GitHub, and reply with only a PR description ending
+     with `amf-status: complete` or `amf-status: partial`.
    - **Environment:** `PWD` is the worktree, and no agent gets
      `GITHUB_TOKEN` or `GH_TOKEN`. Only Claude gets `CLAUDE_CODE_OAUTH_TOKEN`, and only
      opencode gets `OPENCODE_API_KEY`: amf removes each from the other
@@ -1114,12 +1130,15 @@ and exit code are preserved.
      no PR, and its worktree is removed; the logs and partial output stay,
      as does the local `amf/issue-N` branch, which is never pushed and which
      a retry resets to `origin/<default>`.
-   - **Summary:** the final message becomes the summary.
+   - **Summary:** the final message becomes the summary. Its `amf-status:`
+     line is removed; the last `complete` or `partial` value sets the run's
+     partial flag, which `--part` also sets.
 
    With a pipeline, this step and the next are replaced by the steps in
    "With a pipeline" below.
 7. **Commit.** Stage everything and commit as `Fix #N: <title>` with the body
-   `Closes #N`. Fail with `<claude|codex|opencode> finished without making
+   `Closes #N`, or as `Part of #N: <title>` with the body `Part of #N` for a
+   partial change. Fail with `<claude|codex|opencode> finished without making
    any changes` if the branch doesn't change any file compared with
    `origin/<default>`, even if the agent made commits of its own. The run
    also fails — before the push, so nothing is pushed and no PR is created —
@@ -1133,19 +1152,26 @@ and exit code are preserved.
    `amf/backup/issue-N-<shortsha>-<UTC time>`, logs it, and names it in the
    issue comment. If that backup push fails, amf stops without replacing
    the branch.
-9. **PR.** Open `amf/issue-N` → `<default>`, titled `Fix #N: <title>`. If
-   the branch already has an open PR (a retry), the push has updated it, so
-   amf replaces that PR's title and body instead. With `--draft`, the create
-   request sends `"draft": true`, so a new PR opens as a draft; without it
-   the request has no `draft` field and the PR is ready for review. An
-   updated PR keeps its draft or ready state: the update sends only the
-   title and body. The
-   body is the summary (or `Resolves #N.` if there isn't one), then any
-   pipeline sections, then `Closes #N` and an "Opened by amf" footer. amf
+9. **PR.** Open `amf/issue-N` → `<default>`, titled `Fix #N: <title>`, or
+   `Part of #N: <title>` for a partial change. If the branch already has an
+   open PR (a retry), the push has updated it, so amf replaces that PR's
+   title and body instead. With `--draft`, the create request sends
+   `"draft": true`, so a new PR opens as a draft; without it the request has
+   no `draft` field and the PR is ready for review. An updated PR keeps its
+   draft or ready state: the update sends only the title and body.
+   The body starts with `## Changes` and, in a line marked as git-observed
+   rather than agent-written, a fenced `git diff --stat origin/<default>
+   HEAD`, then `Changed files:` and one backticked path per changed file. It
+   then has `## Agent summary`, a line saying the agent wrote it and amf has
+   not verified it, the summary (or `Resolves #N.` / `Part of #N.` if there
+   isn't one), and any pipeline sections. It ends with `Closes #N` (or
+   `Part of #N` for a partial change) and an "Opened by amf" footer. amf
    first removes Claude attribution lines ("Generated with Claude Code",
    `Co-Authored-By`) and the agent's own `Closes`/`Fixes`/`Resolves #N` line
    from the summary, and the attribution lines from the plan and review too.
-   That way each PR is credited to the user alone and closes the issue once.
+   For a partial change it rewrites any other closing keyword for the issue
+   to `Part of`. That way each PR is credited to the user alone and closes
+   the issue once, and a partial PR never closes it.
 10. **Clean up.** Remove the worktree. The branch and logs are kept.
 11. **Merge** (with `--merge` only). Merge the PR with the method `--merge`
     names, through GitHub's merge API, pinned to the commit amf pushed
@@ -1170,7 +1196,7 @@ and exit code are preserved.
       for a retry's PR);
     - merged: `amf opened <PR URL> for this issue and merged it.` (`squashed
       and merged`, `rebased and merged`); the PR's `Closes #N` then closes
-      the issue;
+      the issue (a partial PR's `Part of #N` does not);
     - not merged: `amf opened <PR URL> for this issue, but could not merge
       it:`, the reason in a code block, and that the PR is still open for
       review. The issue is `amf:pr-open`, and `run` exits 1 with `opened
@@ -1242,7 +1268,9 @@ usual steps.
      branch doesn't change any file compared with `origin/<default>`, such
      as when a round undoes the one before. amf refuses `.github/` changes
      as in step 7, before any push.
-   - The final message becomes the summary.
+   - The final message becomes the summary. Its `amf-status:` line is
+     removed; the last `complete` or `partial` value sets the run's partial
+     flag, which `--part` also sets.
 4. **Eval, round K** (if declared). The prompt has the issue, the plan, the
    code stage's summary, the skill, and `git diff origin/<default> HEAD`
    (cut at 100 KB, without splitting a character, and with a note). It tells the agent to run the tests, change
@@ -1259,13 +1287,15 @@ usual steps.
      amf pushes the branch for inspection and fails the issue. The comment
      names the eval agent, the number of rounds and the branch, and puts the
      last review in a collapsed block.
-5. **Squash.** Replace the round commits with one commit, as in step 7, and
+5. **Squash.** Replace the round commits with one commit, as in step 7,
+   including the `Part of #N` title and body when the run is partial, and
    continue with Push.
 
 **Pipeline sections in the PR body:** with an eval stage, an
 `## Evaluation` section saying `PASS`, the eval agent and model, and the
 number of code rounds, with the review in a collapsed block. With a plan
-stage, the plan in a collapsed block.
+stage, the plan in a collapsed block. They appear under `## Agent summary`,
+which still says amf has not verified the agent text.
 
 ### Dry run (`amf run --dry-run`)
 
@@ -1289,10 +1319,10 @@ amf only reads from GitHub: the issue, the repo and the branch's open PR.
    for a retry. With `--merge` it adds `, and merge it (<method>) if GitHub
    allows`, or `, but not merge it: <reason>` for a change to the
    top-level `AGENTS.md`. Then it prints the change's `git diff --stat`
-   against `origin/<default>`, `Title: Fix #N: <title>`, the PR body as
-   step 9 would post it, and `Nothing was pushed, and the issue and GitHub
-   are unchanged. To see the change: git diff origin/<default>
-   amf/issue-N`.
+   against `origin/<default>`, `Title: Fix #N: <title>` (or
+   `Part of #N: <title>` for a partial change), the PR body as step 9 would
+   post it, and `Nothing was pushed, and the issue and GitHub are unchanged.
+   To see the change: git diff origin/<default> amf/issue-N`.
 5. **Clean up.** The worktree is removed. The local branch and the logs are
    kept. A later run, dry or not, resets the branch to `origin/<default>`.
 
