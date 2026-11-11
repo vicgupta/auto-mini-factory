@@ -787,7 +787,31 @@ func commitAll(ctx context.Context, wt, title string, n int, base, agent string,
 	if len(changed) == 0 {
 		return fmt.Errorf("%s finished without making any changes", agentName(agent))
 	}
-	return pathRefusal(changed)
+	if err := pathRefusal(changed); err != nil {
+		return err
+	}
+	if len(part) > 0 && part[0] {
+		return squashClosingCommits(ctx, wt, title, closing, n, base)
+	}
+	return nil
+}
+
+// squashClosingCommits keeps a partial change from closing issue n through
+// a commit the agent made itself: when any commit on the branch would close
+// the issue, the branch becomes one commit with amf's title and message.
+func squashClosingCommits(ctx context.Context, wt, title, closing string, n int, base string) error {
+	msgs, err := git(ctx, wt, "log", "--format=%B", "origin/"+base+"..HEAD")
+	if err != nil {
+		return err
+	}
+	if rewriteClosingKeywords(msgs, n) == msgs {
+		return nil
+	}
+	if _, err := git(ctx, wt, "reset", "--soft", "origin/"+base); err != nil {
+		return err
+	}
+	_, err = git(ctx, wt, "commit", "-m", title, "-m", closing)
+	return err
 }
 
 // changedPaths lists the paths rev changes relative to origin/base. -z
@@ -908,10 +932,10 @@ func splitAgentStatus(summary string) (text, status string) {
 }
 
 // rewriteClosingKeywords replaces Fix/Fixes/Fixed, Close/Closes/Closed and
-// Resolve/Resolves/Resolved before a reference to issue n (also owner/repo#n)
-// with "Part of", so a partial change can never make GitHub close the issue.
+// Resolve/Resolves/Resolved before a reference to issue n (also owner/repo#n
+// or the issue's github.com URL) with "Part of", so a partial change can never make GitHub close the issue.
 func rewriteClosingKeywords(text string, n int) string {
-	re := regexp.MustCompile(fmt.Sprintf(`(?i)\b(?:fix(?:es|ed)?|clos(?:e|es|ed)|resolv(?:e|es|ed))\b[ \t]*:?[ \t]*((?:[\w.-]+/[\w.-]+)?#%d\b)`, n))
+	re := regexp.MustCompile(fmt.Sprintf(`(?i)\b(?:fix(?:es|ed)?|clos(?:e|es|ed)|resolv(?:e|es|ed))\b[ \t]*:?[ \t]*((?:[\w.-]+/[\w.-]+)?#%d\b|https?://github\.com/[\w.-]+/[\w.-]+/issues/%d\b)`, n, n))
 	return re.ReplaceAllString(text, "Part of ${1}")
 }
 

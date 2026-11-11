@@ -302,10 +302,12 @@ label commands also return stdout write failures. No git checkout is needed.
   `Fix #N: <title>`, and their closing line is `Part of #N` instead of
   `Closes #N`, so merging the PR never closes the issue. Any
   `Fix`/`Fixes`/`Fixed`, `Close`/`Closes`/`Closed` or
-  `Resolve`/`Resolves`/`Resolved` before `#N` or `owner/repo#N` in the agent's
-  summary or the issue title is rewritten to `Part of`, and `amf-status:`
-  lines are removed from the PR body. A pipeline's code stage can mark the
-  same thing by ending its final message with `amf-status: partial`; an
+  `Resolve`/`Resolves`/`Resolved` before `#N`, `owner/repo#N` or the issue's
+  `https://github.com/<owner>/<repo>/issues/N` URL in the agent's summary or
+  the issue title is rewritten to `Part of`, and `amf-status:` lines are
+  removed from the PR body. If a commit the agent made itself would close
+  the issue, amf squashes the branch into its own single `Part of #N`
+  commit. The agent (or a pipeline's code stage) can mark the same thing by ending its final message with `amf-status: partial`; an
   `amf-status: complete` line confirms a complete change. Without a
   recognized signal, a run is complete, as before. `--part` always wins over
   an `amf-status: complete` line.
@@ -1138,7 +1140,9 @@ and exit code are preserved.
    "With a pipeline" below.
 7. **Commit.** Stage everything and commit as `Fix #N: <title>` with the body
    `Closes #N`, or as `Part of #N: <title>` with the body `Part of #N` for a
-   partial change. Fail with `<claude|codex|opencode> finished without making
+   partial change; for a partial change, a branch where any commit message
+   would close the issue (an agent's own commit) is squashed into that one
+   commit. Fail with `<claude|codex|opencode> finished without making
    any changes` if the branch doesn't change any file compared with
    `origin/<default>`, even if the agent made commits of its own. The run
    also fails — before the push, so nothing is pushed and no PR is created —

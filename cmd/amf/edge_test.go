@@ -1723,6 +1723,31 @@ func TestRewriteClosingKeywords(t *testing.T) {
 	if got := rewriteClosingKeywords("Fix #70 and Fix #7.", 7); strings.Contains(got, "Part of #70") {
 		t.Errorf("rewrote another issue: %q", got)
 	}
+	url := "Fixes https://github.com/o/r/issues/7 but not https://github.com/o/r/issues/70."
+	if got, want := rewriteClosingKeywords(url, 7), "Part of https://github.com/o/r/issues/7 but not https://github.com/o/r/issues/70."; got != want {
+		t.Errorf("URL form = %q, want %q", got, want)
+	}
+}
+
+// TestPartialSquashesAgentClosingCommit checks that a partial change can't
+// close the issue through a commit the agent made on its own: the branch is
+// squashed into amf's single "Part of" commit.
+func TestPartialSquashesAgentClosingCommit(t *testing.T) {
+	root, origin := setupRepo(t)
+	gh, srv := newFakeGitHub(t)
+	gh.issues[1] = readyIssue(1, "Add feature file")
+	r, log := newTestRunner(t, srv, root, fakeClaude(t, `cat >/dev/null; echo hello > feature.txt; git add feature.txt; git commit -qm "Fixes #1"; echo done`))
+	r.Part = true
+	if err := r.Run(context.Background(), 1); err != nil {
+		t.Fatalf("Run: %v\nlog:\n%s", err, log)
+	}
+	msgs := mustGit(t, root, "--git-dir", origin, "log", "--format=%B", "main..amf/issue-1")
+	if strings.Contains(msgs, "Fixes #1") || !strings.Contains(msgs, "Part of #1: Add feature file") {
+		t.Errorf("pushed commit messages = %q, want only amf's Part of #1 commit", msgs)
+	}
+	if got := mustGit(t, root, "--git-dir", origin, "show", "amf/issue-1:feature.txt"); got != "hello" {
+		t.Errorf("feature.txt = %q, want the agent's change kept", got)
+	}
 }
 
 func TestRunAgentCommitsItself(t *testing.T) {
