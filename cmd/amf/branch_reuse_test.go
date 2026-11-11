@@ -167,3 +167,40 @@ func TestPushLeaseRefusesWhenRemoteMoved(t *testing.T) {
 		t.Errorf("PRs = %v, want none", gh.prs)
 	}
 }
+
+// TestPushArgsFetchesUnseenRemoteTip covers the pipeline's eval-failure
+// push, which runs without backupBranch: in a clone that has never seen the
+// remote tip, pushArgs fetches it before deciding, and still picks a plain
+// push for a tip already in HEAD's history and a leased one otherwise.
+func TestPushArgsFetchesUnseenRemoteTip(t *testing.T) {
+	root, origin := setupRepo(t)
+	diverged := pushUnmergedBranch(t, root, "amf/issue-1")
+	mustGit(t, root, "push", "-q", "origin", "main:refs/heads/amf/issue-2")
+	ancestor := mustGit(t, root, "rev-parse", "main")
+
+	fresh := filepath.Join(t.TempDir(), "fresh")
+	mustGit(t, t.TempDir(), "clone", "-q", "--no-local", "--single-branch", "-b", "main", "file://"+origin, fresh)
+	if _, err := git(context.Background(), fresh, "cat-file", "-e", diverged+"^{commit}"); err == nil {
+		t.Fatalf("fresh clone already has %s", diverged)
+	}
+	if err := os.WriteFile(filepath.Join(fresh, "new.txt"), []byte("new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, fresh, "add", "new.txt")
+	mustGit(t, fresh, "commit", "-qm", "new head")
+
+	args, err := pushArgs(context.Background(), fresh, "amf/issue-1", diverged)
+	if err != nil {
+		t.Fatalf("pushArgs(diverged): %v", err)
+	}
+	if want := "--force-with-lease=amf/issue-1:" + diverged; !strings.Contains(strings.Join(args, " "), want) {
+		t.Errorf("pushArgs(diverged) = %q, want %s", args, want)
+	}
+	args, err = pushArgs(context.Background(), fresh, "amf/issue-2", ancestor)
+	if err != nil {
+		t.Fatalf("pushArgs(ancestor): %v", err)
+	}
+	if strings.Contains(strings.Join(args, " "), "force") {
+		t.Errorf("pushArgs(ancestor) = %q, want a plain push", args)
+	}
+}

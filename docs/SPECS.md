@@ -1265,7 +1265,8 @@ usual steps.
    - On `PASS`, continue to step 5.
    - On `FAIL`, go back to step 3 with the review, unless there have
      already been `--eval-rounds` code rounds after the first. In that case
-     amf pushes the branch for inspection and fails the issue. The comment
+     amf pushes the branch for inspection (plain, or with a lease when the
+     remote tip diverged, as in Push) and fails the issue. The comment
      names the eval agent, the number of rounds and the branch, and puts the
      last review in a collapsed block.
 5. **Squash.** Replace the round commits with one commit, as in step 7, and

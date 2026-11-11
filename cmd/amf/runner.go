@@ -1095,6 +1095,13 @@ func pushArgs(ctx context.Context, dir, branch, old string) ([]string, error) {
 	if old == "" {
 		return args, nil
 	}
+	// The eval-failure push in a pipeline gets here without backupBranch,
+	// so the remote tip may not be in this clone yet.
+	if _, err := git(ctx, dir, "cat-file", "-e", old+"^{commit}"); err != nil {
+		if _, err := git(ctx, dir, "fetch", "origin", old); err != nil {
+			return nil, fmt.Errorf("could not fetch origin/%s before pushing: %w", branch, err)
+		}
+	}
 	head, err := git(ctx, dir, "rev-parse", "HEAD")
 	if err != nil {
 		return nil, err
