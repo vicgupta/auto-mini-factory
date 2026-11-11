@@ -698,24 +698,56 @@ func (g *GitHub) OpenPR(ctx context.Context, head string) (pr PullRequest, ok bo
 	return prs[0], true, nil
 }
 
+// mergedPR is a closed pull request from head, with the tip it was merged
+// from.
+type mergedPR struct {
+	Number   int     `json:"number"`
+	HTMLURL  string  `json:"html_url"`
+	MergedAt *string `json:"merged_at"`
+	Head     struct {
+		SHA string `json:"sha"`
+	} `json:"head"`
+}
+
+// mergedPRs lists closed pull requests from head, a branch in this
+// repository, newest first.
+func (g *GitHub) mergedPRs(ctx context.Context, head string) ([]mergedPR, error) {
+	owner, _, _ := strings.Cut(g.repo, "/")
+	q := url.Values{"head": {owner + ":" + head}, "state": {"closed"}, "per_page": {"30"}}
+	var prs []mergedPR
+	err := g.do(ctx, "GET", g.repoPath("/pulls?%s", q.Encode()), nil, &prs)
+	return prs, err
+}
+
 // MergedPR reports whether a pull request from head, a branch in this
 // repository, was merged, returning the most recent merged one.
 func (g *GitHub) MergedPR(ctx context.Context, head string) (pr PullRequest, ok bool, err error) {
-	owner, _, _ := strings.Cut(g.repo, "/")
-	q := url.Values{"head": {owner + ":" + head}, "state": {"closed"}, "per_page": {"30"}}
-	var prs []struct {
-		PullRequest
-		MergedAt *string `json:"merged_at"`
-	}
-	if err := g.do(ctx, "GET", g.repoPath("/pulls?%s", q.Encode()), nil, &prs); err != nil {
+	prs, err := g.mergedPRs(ctx, head)
+	if err != nil {
 		return PullRequest{}, false, err
 	}
 	for _, p := range prs {
 		if p.MergedAt != nil {
-			return p.PullRequest, true, nil
+			return PullRequest{Number: p.Number, HTMLURL: p.HTMLURL}, true, nil
 		}
 	}
 	return PullRequest{}, false, nil
+}
+
+// MergedPRAt reports whether a merged pull request from head has tip as its
+// head commit, as a squash or rebase merge leaves the branch tip out of the
+// default branch's ancestry.
+func (g *GitHub) MergedPRAt(ctx context.Context, head, tip string) (bool, error) {
+	prs, err := g.mergedPRs(ctx, head)
+	if err != nil {
+		return false, err
+	}
+	for _, p := range prs {
+		if p.MergedAt != nil && p.Head.SHA == tip {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // MergePR merges pull request n with method (merge, squash or rebase) and

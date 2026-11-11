@@ -76,7 +76,7 @@ const runHelp = `Usage:
 Processes one issue into a pull request (alias of amf issue run).
 
 Exit status: 0 success, 1 command failed, 2 usage error (also --help),
-3 the issue was skipped: it already has an open PR or an amf/issue-N branch
+3 the issue was skipped: an open PR, or an unmerged amf/issue-N branch
 (nothing changed; --force may run it). Use amf help run for help that exits 0.
 
 --merge makes run and watch merge each PR they open or update, without
@@ -95,8 +95,11 @@ nowhere, and the failure comment names it; an agent that changed nothing gets
 no WIP branch.
 
 An issue that already has an open amf pull request is labeled amf:pr-open
-and skipped, and one whose amf/issue-N branch is on origin without an open
-PR is skipped: --force runs it anyway, updating the open PR.
+and skipped. A leftover amf/issue-N branch whose work is already merged
+into the default branch (by ancestry or a merged PR at its tip) is reused:
+amf starts from origin/<default> and pushes normally. An unmerged leftover
+branch is skipped, and --force runs it anyway, replacing the branch and
+updating any open PR.
 A --force run on an open PR that is behind the default branch first merges
 the default branch into it: a clean merge is pushed without an agent; on
 conflicts one agent resolves only the conflicted files; with no usable

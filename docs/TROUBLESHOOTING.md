@@ -21,7 +21,8 @@ conflicts during the merge step.
 Resolve conflicts on its branch and push the resolution, then run
 `amf pr merge 101`. Alternatively, `amf run 42 --merge --force` regenerates the
 change from the latest default branch and updates the open PR. A rerun starts
-with a fresh worktree and force-pushes the branch, replacing manual edits.
+with a fresh worktree and replaces the branch (a leased force-push), saving
+the replaced manual edits to `amf/backup/issue-42-<sha>-<time>` first.
 
 ## PR won't merge: required checks
 

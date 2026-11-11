@@ -242,7 +242,7 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 	if r.DryRun {
 		return r.dryRun(ctx, issue, base, pipeline, agent)
 	}
-	if err := r.guard(ctx, issue); err != nil {
+	if err := r.guard(ctx, issue, base); err != nil {
 		return err
 	}
 	wasDone := issue.HasLabel(labelDone)
@@ -447,10 +447,18 @@ func (r *Runner) process(ctx context.Context, issue Issue, base string, p *Pipel
 	// amf owns amf/issue-* branches, so a re-run may replace an earlier push.
 	// Any commits on it that the new push would drop are saved first.
 	r.backupNote = ""
-	if err := r.backupBranch(ctx, wt, n, branch, base); err != nil {
+	old, err := remoteTip(ctx, wt, branch)
+	if err != nil {
 		return PullRequest{}, false, err
 	}
-	if _, err := git(ctx, wt, "push", "--force", "-u", "origin", branch); err != nil {
+	if err := r.backupBranch(ctx, wt, n, branch, base, old); err != nil {
+		return PullRequest{}, false, err
+	}
+	args, err := pushArgs(ctx, wt, branch, old)
+	if err != nil {
+		return PullRequest{}, false, err
+	}
+	if _, err := git(ctx, wt, args...); err != nil {
 		return PullRequest{}, false, err
 	}
 	head, err := git(ctx, wt, "rev-parse", "HEAD")
@@ -1085,21 +1093,91 @@ func (r *Runner) confirmMerged(ctx context.Context, n int) bool {
 	return pr.Merged
 }
 
-// backupBranch saves the remote branch before process force-pushes over it:
-// when origin/branch has commits that are neither on origin/base nor in the
-// new local head, they are pushed to amf/backup/issue-N-<sha>-<time> first.
-// A failed backup is an error, so amf never overwrites commits it could not
-// save.
-func (r *Runner) backupBranch(ctx context.Context, wt string, n int, branch, base string) error {
-	out, err := git(ctx, wt, "ls-remote", "--heads", "origin", "refs/heads/"+branch)
+// remoteTip is the commit origin/branch points at, or "" when the branch
+// does not exist there.
+func remoteTip(ctx context.Context, dir, branch string) (string, error) {
+	out, err := git(ctx, dir, "ls-remote", "--heads", "origin", "refs/heads/"+branch)
 	if err != nil {
-		return fmt.Errorf("could not check origin/%s before replacing it: %w", branch, err)
+		return "", fmt.Errorf("could not check origin/%s: %w", branch, err)
 	}
 	fields := strings.Fields(out)
 	if len(fields) == 0 {
+		return "", nil
+	}
+	return fields[0], nil
+}
+
+// mergedIntoBase reports whether tip is already in origin/base: a commit on
+// it (a merge-commit or fast-forward merge), or the head of a merged pull
+// request from branch (a squash or rebase merge leaves no ancestry). It
+// assumes origin/base and tip's commit are available locally.
+func (r *Runner) mergedIntoBase(ctx context.Context, dir, branch, base, tip string) (merged bool, reason string, err error) {
+	ancestor, err := isAncestor(ctx, dir, tip, "origin/"+base)
+	if err != nil {
+		return false, "", err
+	}
+	if ancestor {
+		return true, "ancestor", nil
+	}
+	mergedPR, err := r.GH.MergedPRAt(ctx, branch, tip)
+	if err != nil {
+		return false, "", err
+	}
+	if mergedPR {
+		return true, "merged_pr", nil
+	}
+	return false, "", nil
+}
+
+// isAncestor reports whether commit a is an ancestor of b.
+func isAncestor(ctx context.Context, dir, a, b string) (bool, error) {
+	out, err := git(ctx, dir, "rev-list", "--count", a, "^"+b)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(out) == "0", nil
+}
+
+// pushArgs builds the git push for branch. When old, the remote tip just
+// inspected, is missing or an ancestor of the new head, the push is plain.
+// Otherwise it replaces the remote tip, but only with a lease pinned to the
+// tip amf inspected, so it cannot clobber a push it did not see.
+func pushArgs(ctx context.Context, dir, branch, old string) ([]string, error) {
+	args := []string{"push", "-u", "origin", branch}
+	if old == "" {
+		return args, nil
+	}
+	// The eval-failure push in a pipeline gets here without backupBranch,
+	// so the remote tip may not be in this clone yet.
+	if _, err := git(ctx, dir, "cat-file", "-e", old+"^{commit}"); err != nil {
+		if _, err := git(ctx, dir, "fetch", "origin", old); err != nil {
+			return nil, fmt.Errorf("could not fetch origin/%s before pushing: %w", branch, err)
+		}
+	}
+	head, err := git(ctx, dir, "rev-parse", "HEAD")
+	if err != nil {
+		return nil, err
+	}
+	ancestor, err := isAncestor(ctx, dir, old, head)
+	if err != nil {
+		return nil, err
+	}
+	if ancestor {
+		return args, nil
+	}
+	return []string{"push", "--force-with-lease=" + branch + ":" + old, "-u", "origin", branch}, nil
+}
+
+// backupBranch saves the remote branch before process replaces it: when
+// origin/branch has commits that are neither on origin/base nor in the new
+// local head, they are pushed to amf/backup/issue-N-<sha>-<time> first. A
+// merged branch, including a squash- or rebase-merged one, loses nothing and
+// is not backed up. A failed backup is an error, so amf never overwrites
+// commits it could not save.
+func (r *Runner) backupBranch(ctx context.Context, wt string, n int, branch, base, old string) error {
+	if old == "" {
 		return nil // a new branch: nothing to replace
 	}
-	old := fields[0]
 	if _, err := git(ctx, wt, "fetch", "origin", old); err != nil {
 		return fmt.Errorf("could not fetch origin/%s before replacing it: %w", branch, err)
 	}
@@ -1108,6 +1186,13 @@ func (r *Runner) backupBranch(ctx context.Context, wt string, n int, branch, bas
 		return fmt.Errorf("could not compare origin/%s before replacing it: %w", branch, err)
 	}
 	if strings.TrimSpace(lost) == "0" {
+		return nil
+	}
+	merged, _, err := r.mergedIntoBase(ctx, wt, branch, base, old)
+	if err != nil {
+		return fmt.Errorf("could not check whether origin/%s is merged: %w", branch, err)
+	}
+	if merged {
 		return nil
 	}
 	backup := fmt.Sprintf("amf/backup/issue-%d-%s-%s", n, shortSHA(old), time.Now().UTC().Format("20060102T150405Z"))

@@ -448,7 +448,15 @@ func (r *Runner) runPipeline(ctx context.Context, wt string, issue Issue, branch
 			r.event(slog.LevelInfo, "issue.eval.verdict", n, fmt.Sprintf("#%d: eval still failing after %s; pushing %s for inspection", n, tried, branch),
 				"round", k, "pass", false, "parsed", ok, "final", true)
 			if !r.DryRun {
-				if _, err := git(ctx, wt, "push", "--force", "-u", "origin", branch); err != nil {
+				old, err := remoteTip(ctx, wt, branch)
+				if err != nil {
+					return "", "", err
+				}
+				args, err := pushArgs(ctx, wt, branch, old)
+				if err != nil {
+					return "", "", err
+				}
+				if _, err := git(ctx, wt, args...); err != nil {
 					return "", "", err
 				}
 			}

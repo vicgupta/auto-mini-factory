@@ -143,7 +143,7 @@ amf auto --continue        # approve the checkpoint and resume
 amf auto status            # inspect saved progress
 amf auto --abort           # forget the saved run, leaving GitHub issues and PRs unchanged
 amf run 42 --dry-run        # make the change locally and show the PR, touching nothing on GitHub
-amf run 42 --force          # rerun an issue with an open PR; dropped commits are saved on amf/backup/issue-42-<sha>-<time> (-f)
+amf run 42 --force          # rerun an issue with an open PR or unmerged leftover branch; dropped commits are saved on amf/backup/issue-42-<sha>-<time> (-f)
 
 amf issue label 42 --add bug --remove needs-triage  # change labels by hand (-a/-R); select a set with --state/--label/--unlabeled
 amf pr view 57              # state, branch, author, checks, mergeability and diff stats
@@ -170,6 +170,13 @@ amf memory similar "flaky login test" --json
 amf memory show 42          # issue 42's PRs and every run
 amf watch --memory-backend markdown --memory-dir ~/amf-notes  # keep memory as Markdown files elsewhere
 ```
+
+A leftover `amf/issue-N` branch whose work is already merged into the default
+branch is reused without `--force`: amf starts fresh from `origin/<default>`.
+An unmerged leftover branch is skipped unless you pass `--force`. amf pushes
+a new branch, or one whose tip is already in the new history, normally; only
+a diverged branch is replaced, with a lease pinned to the tip it inspected,
+after saving the commits the push would drop to `amf/backup/issue-N-<sha>-<time>`.
 
 Native writes require a reviewed `amf-release-policy.json` committed at the exact
 target SHA, with required check names/app IDs and status contexts/creator IDs.
