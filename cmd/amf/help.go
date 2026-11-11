@@ -89,6 +89,11 @@ amf run --dry-run makes the change on the local amf/issue-N branch and prints
 the pull request it would open, without labeling, commenting, pushing,
 opening a PR or merging.
 
+If amf stops an agent at the agent timeout or idle timeout, it keeps what the
+agent changed on a local-only amf/wip/issue-N-<UTC time> branch, pushed
+nowhere, and the failure comment names it; an agent that changed nothing gets
+no WIP branch.
+
 An issue that already has an open amf pull request is labeled amf:pr-open
 and skipped. A leftover amf/issue-N branch whose work is already merged
 into the default branch (by ancestry or a merged PR at its tip) is reused:
@@ -268,9 +273,10 @@ Placeholders ending in ..., and owner/name, count as unset.
     How long each agent run may take, as a Go duration; --agent-timeout (or
     its deprecated alias --timeout) overrides it. Must be at least 1m and at
     most 24h
-  AMF_AGENT_IDLE_TIMEOUT (default: 15m)
-    How long an agent may produce no output on stdout or stderr before amf
-    stops it and fails the run, as a Go duration; off disables it
+  AMF_AGENT_IDLE_TIMEOUT (default: 30m)
+    How long an agent may produce no output, and change no file in the
+    worktree, before amf stops it and fails the run, as a Go duration; off
+    disables it
   AMF_STALE_TIMEOUT (default: max(2x agent timeout, 2h))
     How long watch lets an issue stay amf:in-progress with no amf working on
     it before putting it back to amf:ready; off disables it. --stale-timeout

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -378,7 +379,7 @@ func (r *Runner) runPipeline(ctx context.Context, wt string, issue Issue, branch
 
 	var plan string
 	if p.Plan != nil {
-		out, err := r.runReadOnly(ctx, p.Plan, n, "plan", wt, planPrompt(r.Repo, branch, issue, p.Plan))
+		out, err := r.runReadOnly(ctx, p.Plan, n, "plan", wt, base, planPrompt(r.Repo, branch, issue, p.Plan))
 		if err != nil {
 			return "", "", err
 		}
@@ -406,7 +407,7 @@ func (r *Runner) runPipeline(ctx context.Context, wt string, issue Issue, branch
 		rounds = k
 		r.event(slog.LevelDebug, "issue.code.round", n, fmt.Sprintf("#%d: code round %d", n, k), "round", k)
 		name := fmt.Sprintf("code-%d", k)
-		out, err := r.runStage(ctx, p.Code, n, name, wt, codePrompt(r.Repo, branch, issue, p.Code, plan, review))
+		out, err := r.runStage(ctx, p.Code, n, name, wt, base, codePrompt(r.Repo, branch, issue, p.Code, plan, review))
 		if err != nil {
 			return "", "", err
 		}
@@ -423,7 +424,7 @@ func (r *Runner) runPipeline(ctx context.Context, wt string, issue Issue, branch
 			return "", "", err
 		}
 		name = fmt.Sprintf("eval-%d", k)
-		out, err = r.runReadOnly(ctx, p.Eval, n, name, wt, evalPrompt(r.Repo, branch, base, issue, p.Eval, plan, summary, diff))
+		out, err = r.runReadOnly(ctx, p.Eval, n, name, wt, base, evalPrompt(r.Repo, branch, base, issue, p.Eval, plan, summary, diff))
 		if err != nil {
 			return "", "", err
 		}
@@ -500,12 +501,12 @@ func blocked(plan string) (string, bool) {
 
 // runReadOnly runs a stage that must not change the branch, then discards
 // whatever it changed anyway.
-func (r *Runner) runReadOnly(ctx context.Context, s *Stage, n int, name, wt, prompt string) (string, error) {
+func (r *Runner) runReadOnly(ctx context.Context, s *Stage, n int, name, wt, base, prompt string) (string, error) {
 	head, err := git(ctx, wt, "rev-parse", "HEAD")
 	if err != nil {
 		return "", err
 	}
-	out, runErr := r.runStage(ctx, s, n, name, wt, prompt)
+	out, runErr := r.runStage(ctx, s, n, name, wt, base, prompt)
 	if _, err := git(ctx, wt, "reset", "--hard", head); err != nil {
 		return "", err
 	}
@@ -515,7 +516,7 @@ func (r *Runner) runReadOnly(ctx context.Context, s *Stage, n int, name, wt, pro
 	return out, runErr
 }
 
-func (r *Runner) runStage(ctx context.Context, s *Stage, n int, name, wt, prompt string) (string, error) {
+func (r *Runner) runStage(ctx context.Context, s *Stage, n int, name, wt, base, prompt string) (string, error) {
 	model := r.agentModel(s.Agent, s.Model)
 	shown := model
 	if shown == "" {
@@ -524,7 +525,7 @@ func (r *Runner) runStage(ctx context.Context, s *Stage, n int, name, wt, prompt
 	r.event(slog.LevelInfo, "issue.stage", n, fmt.Sprintf("#%d: %s: running %s (%s, timeout %s)", n, name, s.Agent, shown, r.Timeout),
 		"stage", name, "agent", s.Agent, "model", shown, "timeout", r.Timeout.String())
 	log := filepath.Join(r.Root, ".amf", "logs", fmt.Sprintf("issue-%d-%s.log", n, name))
-	return r.runAgent(ctx, s.Agent, s.Name, model, wt, prompt, log, filepath.Join(wt, ".amf", name+".md"))
+	return r.runAgent(ctx, s.Agent, s.Name, model, wt, base, prompt, log, filepath.Join(wt, ".amf", name+".md"))
 }
 
 // logIssue is the issue number in a log file's name, issue-N.log or
@@ -569,7 +570,7 @@ func commitRound(ctx context.Context, wt string, k int, base string, s *Stage) e
 // message write it to outPath instead. Claude doesn't need outPath. stage
 // names the run for timeout errors: plan, code or eval, or "" without a
 // pipeline.
-func (r *Runner) runAgent(ctx context.Context, agent, stage, model, wt, prompt, logPath, outPath string) (summary string, err error) {
+func (r *Runner) runAgent(ctx context.Context, agent, stage, model, wt, base, prompt, logPath, outPath string) (summary string, err error) {
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
 		return "", err
 	}
@@ -650,6 +651,12 @@ func (r *Runner) runAgent(ctx context.Context, agent, stage, model, wt, prompt, 
 	activity := make(chan struct{}, 1)
 	cmd.Stdout = io.MultiWriter(&stdout, outLog, activityWriter(activity))
 	cmd.Stderr = io.MultiWriter(&stderrBytes, errLog, activityWriter(activity))
+	// An agent that edits files without printing still counts as active:
+	// scan the worktree for changes while it runs, ignoring .git.
+	filesDone := make(chan struct{})
+	if r.IdleTimeout > 0 {
+		go watchFileActivity(wt, fileActivityInterval(r.IdleTimeout), activity, filesDone)
+	}
 
 	// The agent runs in its own process group, so a deadline or Ctrl-C can
 	// stop it and everything it spawned, not just the direct child. The kill
@@ -713,6 +720,7 @@ func (r *Runner) runAgent(ctx context.Context, agent, stage, model, wt, prompt, 
 		callEvent(ctx, "agent.exit", fmt.Sprintf("%s: %s exited %d", stageName(stage), agentName(agent), code), attrs...)
 	}()
 	runErr := cmd.Run()
+	close(filesDone)
 	close(exited)
 	stopIdle()
 	outLog.Flush()
@@ -739,6 +747,7 @@ func (r *Runner) runAgent(ctx context.Context, agent, stage, model, wt, prompt, 
 			"agent", agentName(agent), "stage", stageName(stage), "limit", r.IdleTimeout.String(), "elapsed", elapsed.String(),
 			"grace", grace.String(), "pgid", cmd.Process.Pid, "bytes", stdout.Len(), "log", logPath, "idle", true)
 		partial := keepPartial(logPath, outPath, r.Redact)
+		wip := r.saveWIP(ctx, wt, logIssue(logPath), base, logOut)
 		return "", &agentTimeoutError{
 			Agent:   agentName(agent),
 			Stage:   stage,
@@ -746,6 +755,8 @@ func (r *Runner) runAgent(ctx context.Context, agent, stage, model, wt, prompt, 
 			Elapsed: elapsed,
 			LogPath: logPath,
 			Partial: partial,
+			WIP:     wip,
+			Base:    base,
 			Idle:    true,
 		}
 	} else if runErr != nil || ctx.Err() != nil {
@@ -767,6 +778,7 @@ func (r *Runner) runAgent(ctx context.Context, agent, stage, model, wt, prompt, 
 				"agent", agentName(agent), "stage", stageName(stage), "limit", r.Timeout.String(), "elapsed", elapsed.String(),
 				"grace", grace.String(), "pgid", cmd.Process.Pid, "bytes", stdout.Len(), "log", logPath)
 			partial := keepPartial(logPath, outPath, r.Redact)
+			wip := r.saveWIP(ctx, wt, logIssue(logPath), base, logOut)
 			return "", &agentTimeoutError{
 				Agent:   agentName(agent),
 				Stage:   stage,
@@ -774,6 +786,8 @@ func (r *Runner) runAgent(ctx context.Context, agent, stage, model, wt, prompt, 
 				Elapsed: elapsed,
 				LogPath: logPath,
 				Partial: partial,
+				WIP:     wip,
+				Base:    base,
 			}
 		}
 		if runErr == nil { // ctx was cancelled and the agent still exited cleanly
@@ -820,6 +834,89 @@ func (a activityWriter) Write(p []byte) (int, error) {
 	default:
 	}
 	return len(p), nil
+}
+
+// fileActivityInterval is how often to scan the worktree for the idle
+// watcher: a quarter of the limit, at least 10ms (for tests) and at most
+// 30s, so a big worktree isn't walked more often than that.
+func fileActivityInterval(limit time.Duration) time.Duration {
+	d := limit / 4
+	if d < 10*time.Millisecond {
+		d = 10 * time.Millisecond
+	}
+	if d > 30*time.Second {
+		d = 30 * time.Second
+	}
+	return d
+}
+
+// fileState is a file's mtime and size, enough to see it change cheaply.
+type fileState struct {
+	mod  time.Time
+	size int64
+}
+
+// watchFileActivity reports activity whenever a file in root is created,
+// changed or removed, ignoring .git. It ends when done is closed.
+func watchFileActivity(root string, interval time.Duration, activity chan<- struct{}, done <-chan struct{}) {
+	last := scanWorktree(root)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			now := scanWorktree(root)
+			if filesChanged(last, now) {
+				select {
+				case activity <- struct{}{}:
+				default:
+				}
+			}
+			last = now
+		}
+	}
+}
+
+// scanWorktree records the mtime and size of every file under root, leaving
+// out .git.
+func scanWorktree(root string) map[string]fileState {
+	files := map[string]fileState{}
+	filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.Name() == ".git" {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		files[path] = fileState{mod: info.ModTime(), size: info.Size()}
+		return nil
+	})
+	return files
+}
+
+// filesChanged reports whether any file was created, changed or removed.
+func filesChanged(before, after map[string]fileState) bool {
+	if len(before) != len(after) {
+		return true
+	}
+	for path, state := range before {
+		if after[path] != state {
+			return true
+		}
+	}
+	return false
 }
 
 // watchIdle closes the returned channel and calls stop when nothing is
@@ -942,15 +1039,43 @@ func killAfter(d time.Duration, done <-chan struct{}, kill func()) {
 	}()
 }
 
+// saveWIP commits whatever the agent changed so far on a local-only branch
+// and returns its name, or "" when it changed nothing. A failure is only
+// logged as a warning, so it never replaces the agent's timeout.
+func (r *Runner) saveWIP(ctx context.Context, wt string, n int, base string, log io.Writer) string {
+	if n <= 0 {
+		return ""
+	}
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	branch, err := saveWIPBranch(cctx, wt, n, base)
+	if err != nil {
+		fmt.Fprintf(log, "amf: could not save partial work: %v\n", err)
+		r.event(slog.LevelWarn, "issue.wip", n, fmt.Sprintf("#%d: could not save partial work: %v", n, err), "error", err)
+		return ""
+	}
+	if branch == "" {
+		return ""
+	}
+	fmt.Fprintf(log, "amf: saved partial work on %s (to inspect: git log -p %s..%s)\n", branch, base, branch)
+	r.event(slog.LevelInfo, "issue.wip", n, fmt.Sprintf("#%d: saved partial work on %s (git log -p %s..%s)", n, branch, base, branch),
+		"branch", branch, "base", base)
+	return branch
+}
+
 // agentTimeoutError is a run that hit the agent timeout, or produced no
 // output for its idle timeout: amf killed the agent's whole process group.
-// Such a run has no branch worth pushing, so no push is made and no PR is
-// opened or updated, and the worktree is removed.
+// Such a run pushes nothing and opens or updates no PR, and its worktree is
+// removed; its changes are kept on a local-only WIP branch when there are
+// any.
 type agentTimeoutError struct {
 	Agent, Stage   string
 	Limit, Elapsed time.Duration
 	LogPath        string
 	Partial        string // where the agent's final message so far is kept, or ""
+	// WIP is the local-only branch holding the agent's partial work, or "";
+	// Base is the branch it was compared with, for how to inspect it.
+	WIP, Base string
 	// Idle says amf stopped the run because it produced no output for Limit,
 	// not because the run took longer than the agent timeout.
 	Idle bool
@@ -982,6 +1107,11 @@ func (e *agentTimeoutError) comment(root string) string {
 	if e.Partial != "" {
 		kept += fmt.Sprintf(" (its final message so far: `%s`)", relLog(root, e.Partial))
 	}
+	wip := ""
+	if e.WIP != "" {
+		wip = fmt.Sprintf(" Its partial work is on the local branch `%s`; inspect it with `git log -p %s..%s`.",
+			e.WIP, e.Base, e.WIP)
+	}
 	before := ""
 	if e.Before != "" {
 		before = fmt.Sprintf("First %s; amf fell back to **%s**. ", e.Before, e.Agent)
@@ -989,11 +1119,11 @@ func (e *agentTimeoutError) comment(root string) string {
 	retry := "To retry with more time, set `AMF_AGENT_TIMEOUT` or `--agent-timeout` and re-add the `" + labelReady + "` label."
 	if e.Idle {
 		retry = "To allow more time without output, set `AMF_AGENT_IDLE_TIMEOUT` (or `off` to disable it) and re-add the `" + labelReady + "` label."
-		return fmt.Sprintf("%samf stopped **%s** %s and opened no pull request: `%s produced no output for %s; stopped it`. %s. %s",
-			before, e.Agent, when, e.Agent, e.Limit, kept, retry)
+		return fmt.Sprintf("%samf stopped **%s** %s and opened no pull request: `%s produced no output for %s; stopped it`. %s.%s %s",
+			before, e.Agent, when, e.Agent, e.Limit, kept, wip, retry)
 	}
-	return fmt.Sprintf("%samf stopped **%s** %s and opened no pull request. %s. %s",
-		before, e.Agent, when, kept, retry)
+	return fmt.Sprintf("%samf stopped **%s** %s and opened no pull request. %s.%s %s",
+		before, e.Agent, when, kept, wip, retry)
 }
 
 // relLog is a log path relative to the checkout, as one would type it.

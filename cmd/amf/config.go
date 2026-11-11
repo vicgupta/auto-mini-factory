@@ -69,8 +69,9 @@ type Config struct {
 	AgentTimeout string
 
 	// AgentIdleTimeout is AMF_AGENT_IDLE_TIMEOUT as written: how long an
-	// agent may produce no output before amf stops it. "" means the default,
-	// "off" disables it. newRunner parses it, like AgentTimeout.
+	// agent may produce no output and change no worktree file before amf
+	// stops it. "" means the default, "off" disables it. newRunner parses
+	// it, like AgentTimeout.
 	AgentIdleTimeout string
 
 	// LogLevel is AMF_LOG_LEVEL as written; newRunner parses it, like
@@ -199,7 +200,7 @@ func parseAgentIdleTimeout(v string) (time.Duration, error) {
 	}
 	d, err := time.ParseDuration(v)
 	if err != nil {
-		return 0, fmt.Errorf("AMF_AGENT_IDLE_TIMEOUT=%q: not a duration (use e.g. 15m, or off)", v)
+		return 0, fmt.Errorf("AMF_AGENT_IDLE_TIMEOUT=%q: not a duration (use e.g. 30m, or off)", v)
 	}
 	if d <= 0 {
 		return 0, fmt.Errorf("AMF_AGENT_IDLE_TIMEOUT: the idle timeout must be positive, got %s (use off to disable it)", d)

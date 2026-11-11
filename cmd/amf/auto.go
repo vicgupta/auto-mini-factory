@@ -317,7 +317,7 @@ func (r *Runner) autoPlan(ctx context.Context, sentence string, max int) ([]plan
 		r.event(slog.LevelInfo, "auto.plan", 0, fmt.Sprintf("planning with %s (timeout %s)", agentName(agent), r.Timeout),
 			"action", "planning", "agent", agentName(agent), "model", model, "sentence", sentence, "max_issues", max)
 		log := filepath.Join(r.Root, ".amf", "logs", fmt.Sprintf("auto-plan-%s.log", agentName(agent)))
-		out, err := r.runAgent(ctx, agent, "", model, wt, autoPlanPrompt(r.Repo, sentence, max), log, filepath.Join(wt, ".amf", "plan.md"))
+		out, err := r.runAgent(ctx, agent, "", model, wt, base, autoPlanPrompt(r.Repo, sentence, max), log, filepath.Join(wt, ".amf", "plan.md"))
 		if err == nil {
 			var issues []plannedIssue
 			if issues, err = parsePlan(out, max); err == nil {

@@ -127,7 +127,7 @@ func (r *Runner) resolveConflicts(ctx context.Context, issue Issue, pr PullReque
 		"agent", agentName(agent), "model", model, "files", files)
 	log := filepath.Join(r.Root, ".amf", "logs", fmt.Sprintf("issue-%d-conflicts.log", n))
 	out := filepath.Join(wt, ".amf", "code.md")
-	if _, err := r.runAgent(ctx, agent, "", model, wt, conflictPrompt(r.Repo, branch, base, issue, files), log, out); err != nil {
+	if _, err := r.runAgent(ctx, agent, "", model, wt, base, conflictPrompt(r.Repo, branch, base, issue, files), log, out); err != nil {
 		return err
 	}
 	os.RemoveAll(filepath.Join(wt, ".amf"))

@@ -68,7 +68,7 @@ placeholders ending in `...`, and `owner/name`, count as unset.
 | `AMF_PRIMARY_AGENT` | `codex` | The agent for issues without a pipeline: `claudecode` (or `claude`), `codex` or `opencode`, ignoring case. `--agent` and a pipeline override it |
 | `AMF_SECONDARY_AGENT` | `claudecode` | The agent amf falls back to when the primary fails, in a fresh worktree; the same values, or `none` for no fallback |
 | `AMF_AGENT_TIMEOUT` | `60m` | How long each agent run may take, as a Go duration; `--agent-timeout` (or its deprecated alias `--timeout`) overrides it. Must be at least 1m and at most 24h |
-| `AMF_AGENT_IDLE_TIMEOUT` | `15m` | How long an agent may produce no output on stdout or stderr before amf stops it and fails the run, as a Go duration; `off` disables it. Must be positive |
+| `AMF_AGENT_IDLE_TIMEOUT` | `30m` | How long an agent may produce no output on stdout or stderr, and change no file in the worktree, before amf stops it and fails the run, as a Go duration; `off` disables it. Must be positive |
 | `AMF_STALE_TIMEOUT` | `max(2x agent timeout, 2h)` | How long `watch` lets an issue stay `amf:in-progress` with no amf working on it before putting it back to `amf:ready`; `off` disables it. `--stale-timeout` overrides it |
 | `AMF_LOG_LEVEL` | `info` (terminal), `debug` (event log) | `debug`, `info`, `warn` or `error`, for both the terminal and the event log of `run` and `watch`; `--log-level` overrides it |
 | `AMF_CODEX` | `codex` | Path to the Codex CLI |
@@ -91,7 +91,7 @@ OPENAI_API_KEY=sk-proj-...   # optional: OpenAI API key for codex
 # AMF_PRIMARY_AGENT=codex   # optional: claudecode, codex or opencode; the agent for issues without a pipeline
 # AMF_SECONDARY_AGENT=claudecode   # optional: claudecode, codex, opencode or none; runs when the primary fails
 # AMF_AGENT_TIMEOUT=60m   # optional: how long each agent run may take (--agent-timeout overrides it)
-# AMF_AGENT_IDLE_TIMEOUT=15m   # optional: stop an agent that produces no output for this long (off disables it)
+# AMF_AGENT_IDLE_TIMEOUT=30m   # optional: stop an agent that produces no output or changes no worktree file for this long (off disables it)
 # AMF_LOG_LEVEL=info   # optional: debug, info, warn or error, for the terminal and the event log in .amf/runs/
 AMF_TRUSTED=login1,login2...   # optional: only work on issues opened by these GitHub users
 # AMF_POSTGRES_URL=postgres://user:password@localhost:5432/postgres   # optional: also save the logs to database amflogs on this PostgreSQL server

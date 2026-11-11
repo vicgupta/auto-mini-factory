@@ -75,16 +75,22 @@ against `opencode models`. A pipeline selects each stage's agent and ignores
 ## Agent stops producing output
 
 **Symptom:** The failure comment says
-`<agent> produced no output for 15m; stopped it`, or a fallback agent ran
+`<agent> produced no output for 30m; stopped it`, or a fallback agent ran
 because the first one went quiet.
 
-**Cause:** The agent wrote nothing to stdout or stderr for
-`AMF_AGENT_IDLE_TIMEOUT` (default `15m`), so amf stopped it and its process
-group instead of waiting for the full `AMF_AGENT_TIMEOUT`.
+**Cause:** The agent wrote nothing to stdout or stderr, and changed no file
+in its worktree, for `AMF_AGENT_IDLE_TIMEOUT` (default `30m`), so amf stopped
+it and its process group instead of waiting for the full `AMF_AGENT_TIMEOUT`.
+File edits count as activity, so an agent that works quietly is not stopped.
 
-**Fix:** Check the agent's log in `.amf/logs/` for where it stopped. Rerun
-the issue with more time by setting `AMF_AGENT_IDLE_TIMEOUT=30m` (or another
-Go duration) in `.env` or the environment, then add `amf:ready` again. Set
+**Fix:** Check the agent's log in `.amf/logs/` for where it stopped. If amf
+saved partial work, the failure comment names the local-only
+`amf/wip/issue-N-<UTC time>` branch; inspect it with
+`git log -p <default>..<branch>` (for example
+`git log -p main..amf/wip/issue-42-20261110T120000Z`). Nothing from that
+branch was pushed and no PR was opened from it. Rerun the issue with more
+time by setting `AMF_AGENT_IDLE_TIMEOUT=1h` (or another Go duration) in
+`.env` or the environment, then add `amf:ready` again. Set
 `AMF_AGENT_IDLE_TIMEOUT=off` to disable the idle timeout. The regular agent
 timeout still applies.
 
