@@ -36,7 +36,7 @@ func TestGuardSkipsExistingBranch(t *testing.T) {
 	root, _ := setupRepo(t)
 	gh, srv := newFakeGitHub(t)
 	gh.issues[1] = readyIssue(1, "Add feature file")
-	mustGit(t, root, "push", "origin", "main:refs/heads/amf/issue-1")
+	pushUnmergedBranch(t, root, "amf/issue-1")
 	r, _ := newTestRunner(t, srv, root, fakeAgent(t, "claude", "echo must not run >&2; exit 9"))
 	err := r.Run(context.Background(), 1)
 	var skip *skipError
