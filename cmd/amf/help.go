@@ -94,6 +94,12 @@ agent changed on a local-only amf/wip/issue-N-<UTC time> branch, pushed
 nowhere, and the failure comment names it; an agent that changed nothing gets
 no WIP branch.
 
+--part (-P) marks the change as one part of a larger issue: the commit and PR
+say Part of #N instead of Fix #N and Closes #N, so merging the PR does not
+close the issue. An agent or pipeline can say the same by ending its final
+message with amf-status: partial; amf-status: complete confirms the issue is
+finished. Without either signal, a run is complete, as before.
+
 An issue that already has an open amf pull request is labeled amf:pr-open
 and skipped. A leftover amf/issue-N branch whose work is already merged
 into the default branch (by ancestry or a merged PR at its tip) is reused:

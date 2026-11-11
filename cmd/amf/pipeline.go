@@ -411,7 +411,9 @@ func (r *Runner) runPipeline(ctx context.Context, wt string, issue Issue, branch
 		if err != nil {
 			return "", "", err
 		}
-		summary = out
+		var status string
+		summary, status = splitAgentStatus(out)
+		r.partial = r.Part || status == "partial"
 		if err := commitRound(ctx, wt, k, base, p.Code); err != nil {
 			return "", "", err
 		}
@@ -475,7 +477,11 @@ func (r *Runner) runPipeline(ctx context.Context, wt string, issue Issue, branch
 	if _, err := git(ctx, wt, "reset", "--soft", "origin/"+base); err != nil {
 		return "", "", err
 	}
-	if _, err := git(ctx, wt, "commit", "-m", prTitle(issue), "-m", fmt.Sprintf("Closes #%d", n)); err != nil {
+	closing := fmt.Sprintf("Closes #%d", n)
+	if r.partial {
+		closing = fmt.Sprintf("Part of #%d", n)
+	}
+	if _, err := git(ctx, wt, "commit", "-m", prTitle(issue, r.partial), "-m", closing); err != nil {
 		return "", "", err
 	}
 	if p.Eval == nil {
@@ -1258,6 +1264,9 @@ Instructions:
 - Do not commit, push, create branches or open pull requests. amf handles git and GitHub.
 - When you are done, reply with only a pull request description in Markdown:
   a short summary of what changed and why, and how you verified it.
+- End the final message with exactly one line: amf-status: complete if the
+  change finishes the issue, or amf-status: partial if it is only one slice
+  of it.
 `)
 	b.WriteString(skillText(s))
 	return b.String()

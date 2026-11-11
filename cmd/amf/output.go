@@ -102,6 +102,8 @@ func flagNeedsValue(name, command, subcommand string) bool {
 		case "s": // --state or --squash
 			return command == "list" || subcommand == "list" ||
 				command == "issue" && (subcommand == "label" || subcommand == "unlabel")
+		case "P": // --checkpoint-after takes a value; --part does not
+			return command == "auto"
 		}
 		for long, short := range shortFlags {
 			if short == name {

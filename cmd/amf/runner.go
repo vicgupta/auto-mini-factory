@@ -154,6 +154,14 @@ type Runner struct {
 	// pre-start guard: amf runs the issue even though it already has an
 	// open PR or an amf/issue-N branch, and updates that PR.
 	Force bool
+	// Part, from run's --part, says this run is only one slice of the
+	// issue: the PR and commit say "Part of #N" and never close it. The
+	// agent can also say so with an amf-status: partial line.
+	Part bool
+	// partial is whether the change for the latest build is a slice: Part,
+	// or the agent's amf-status: partial. It is set by buildOne or
+	// runPipeline and used for the commit and PR title and body.
+	partial bool
 	// backupNote tells the issue comment where process saved the commits
 	// a force push replaced, "" when it saved none.
 	backupNote string
@@ -201,6 +209,7 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 	ctx = withEvents(ctx, r.Events, n) // git, GitHub and skill calls log there
 	r.lastPR, r.lastCommit, r.lastAgent = PullRequest{}, "", ""
 	r.attempts, r.noFallback = nil, ""
+	r.partial = r.Part
 	r.working = n
 	defer func() { r.working = 0 }()
 	issue, err := r.GH.GetIssue(ctx, n)
@@ -442,6 +451,10 @@ func (r *Runner) process(ctx context.Context, issue Issue, base string, p *Pipel
 	if err != nil {
 		return PullRequest{}, false, err
 	}
+	facts, err := r.changeFacts(ctx, wt, base)
+	if err != nil {
+		return PullRequest{}, false, err
+	}
 
 	r.event(slog.LevelInfo, "issue.push", n, fmt.Sprintf("#%d: pushing %s", n, branch), "branch", branch)
 	// amf owns amf/issue-* branches, so a re-run may replace an earlier push.
@@ -466,7 +479,7 @@ func (r *Runner) process(ctx context.Context, issue Issue, base string, p *Pipel
 		return PullRequest{}, false, err
 	}
 
-	title, body := prTitle(issue), r.prBody(summary, extra, n)
+	title, body := prTitle(issue, r.partial), r.prBody(summary, extra, n, facts)
 	pr, err = r.GH.CreatePR(ctx, title, branch, base, body, r.Draft)
 	if isStatus(err, http.StatusUnprocessableEntity) {
 		// A retry of an issue whose PR is still open: the push updated it,
@@ -482,7 +495,7 @@ func (r *Runner) process(ctx context.Context, issue Issue, base string, p *Pipel
 	if err != nil {
 		return PullRequest{}, false, err
 	}
-	pr.Head = head
+	pr.Head, pr.Title = head, title
 
 	if _, err := git(ctx, r.Root, "worktree", "remove", wt); err != nil {
 		r.event(slog.LevelWarn, "issue.cleanup", n, fmt.Sprintf("#%d: could not remove worktree: %v", n, err), "error", err)
@@ -498,20 +511,79 @@ func (r *Runner) worktreePath(n int) string {
 	return filepath.Join(r.Root, ".amf", "worktrees", fmt.Sprintf("issue-%d", n))
 }
 
-// prTitle is the title of the PR, and of the commit, for an issue.
-func prTitle(issue Issue) string { return fmt.Sprintf("Fix #%d: %s", issue.Number, issue.Title) }
+// changeFacts is what amf observed in git for a change: the diffstat, the
+// changed paths and whether the change is only one part of the issue.
+type changeFacts struct {
+	Diffstat string
+	Files    []string
+	Part     bool
+}
 
-// prBody is the redacted PR description: the agent's summary, cleaned, then
-// the pipeline's sections and amf's footer.
-func (r *Runner) prBody(summary, extra string, n int) string {
+// changeFacts reads the diffstat and changed paths of HEAD against
+// origin/base in wt. Facts come from git, never from the agent.
+func (r *Runner) changeFacts(ctx context.Context, wt, base string) (changeFacts, error) {
+	stat, err := git(ctx, wt, "diff", "--stat", "origin/"+base, "HEAD")
+	if err != nil {
+		return changeFacts{}, err
+	}
+	files, err := changedPaths(ctx, wt, base, "HEAD")
+	if err != nil {
+		return changeFacts{}, err
+	}
+	return changeFacts{Diffstat: stat, Files: files, Part: r.partial}, nil
+}
+
+// prTitle is the title of the PR, and of the commit, for an issue. A partial
+// change says "Part of #N" and never uses a closing keyword.
+func prTitle(issue Issue, part ...bool) string {
+	if len(part) > 0 && part[0] {
+		return fmt.Sprintf("Part of #%d: %s", issue.Number, rewriteClosingKeywords(issue.Title, issue.Number))
+	}
+	return fmt.Sprintf("Fix #%d: %s", issue.Number, issue.Title)
+}
+
+// prBody is the redacted PR description. It starts with the facts amf read
+// from git, then the agent's summary under a heading that says amf did not
+// verify it, the pipeline's sections and amf's footer.
+func (r *Runner) prBody(summary, extra string, n int, facts ...changeFacts) string {
+	var f changeFacts
+	if len(facts) > 0 {
+		f = facts[0]
+	}
 	summary = cleanSummary(summary, n)
+	if f.Part {
+		summary = rewriteClosingKeywords(summary, n)
+		extra = rewriteClosingKeywords(extra, n)
+	}
 	if summary == "" {
-		summary = fmt.Sprintf("Resolves #%d.", n)
+		if f.Part {
+			summary = fmt.Sprintf("Part of #%d.", n)
+		} else {
+			summary = fmt.Sprintf("Resolves #%d.", n)
+		}
 	}
 	if extra != "" {
 		summary += "\n\n" + extra
 	}
-	return r.Redact.Redact(fmt.Sprintf("%s\n\nCloses #%d\n\n---\n_Opened by amf._", summary, n))
+	var b strings.Builder
+	b.WriteString("## Changes\n\n_What amf observed in git, not the agent._\n\n")
+	if f.Diffstat != "" {
+		b.WriteString("```\n" + strings.TrimRight(f.Diffstat, "\n") + "\n```\n\n")
+	}
+	b.WriteString("Changed files:\n")
+	for _, path := range f.Files {
+		b.WriteString("- `" + path + "`\n")
+	}
+	b.WriteString("\n## Agent summary\n\n")
+	b.WriteString("_Written by the agent; amf has not verified it._\n\n")
+	b.WriteString(summary + "\n\n")
+	if f.Part {
+		b.WriteString(fmt.Sprintf("Part of #%d", n))
+	} else {
+		b.WriteString(fmt.Sprintf("Closes #%d", n))
+	}
+	b.WriteString("\n\n---\n_Opened by amf._")
+	return r.Redact.Redact(b.String())
 }
 
 // build makes the change on the issue's branch in a fresh worktree, with
@@ -567,7 +639,10 @@ func (r *Runner) buildOne(ctx context.Context, issue Issue, base, agent, log str
 	if summary, err = r.runAgent(ctx, agent, "", model, wt, base, buildPrompt(r.Repo, branch, issue), log, out); err != nil {
 		return "", exitOf(err), err
 	}
-	if err := commitAll(ctx, wt, prTitle(issue), n, base, agent); err != nil {
+	var status string
+	summary, status = splitAgentStatus(summary)
+	r.partial = r.Part || status == "partial"
+	if err := commitAll(ctx, wt, prTitle(issue, r.partial), n, base, agent, r.partial); err != nil {
 		return "", "0", err
 	}
 	return summary, "0", nil
@@ -746,7 +821,11 @@ func saveWIPBranch(ctx context.Context, wt string, n int, base string) (string, 
 
 // commitAll commits whatever the agent changed and fails if the branch ends
 // up changing nothing relative to base.
-func commitAll(ctx context.Context, wt, title string, n int, base, agent string) error {
+func commitAll(ctx context.Context, wt, title string, n int, base, agent string, part ...bool) error {
+	closing := fmt.Sprintf("Closes #%d", n)
+	if len(part) > 0 && part[0] {
+		closing = fmt.Sprintf("Part of #%d", n)
+	}
 	if _, err := git(ctx, wt, "add", "-A", "--", ".", memoryExclude); err != nil {
 		return err
 	}
@@ -755,7 +834,7 @@ func commitAll(ctx context.Context, wt, title string, n int, base, agent string)
 		return err
 	}
 	if status != "" {
-		if _, err := git(ctx, wt, "commit", "-m", title, "-m", fmt.Sprintf("Closes #%d", n)); err != nil {
+		if _, err := git(ctx, wt, "commit", "-m", title, "-m", closing); err != nil {
 			return err
 		}
 	}
@@ -768,7 +847,31 @@ func commitAll(ctx context.Context, wt, title string, n int, base, agent string)
 	if len(changed) == 0 {
 		return fmt.Errorf("%s finished without making any changes", agentName(agent))
 	}
-	return pathRefusal(changed)
+	if err := pathRefusal(changed); err != nil {
+		return err
+	}
+	if len(part) > 0 && part[0] {
+		return squashClosingCommits(ctx, wt, title, closing, n, base)
+	}
+	return nil
+}
+
+// squashClosingCommits keeps a partial change from closing issue n through
+// a commit the agent made itself: when any commit on the branch would close
+// the issue, the branch becomes one commit with amf's title and message.
+func squashClosingCommits(ctx context.Context, wt, title, closing string, n int, base string) error {
+	msgs, err := git(ctx, wt, "log", "--format=%B", "origin/"+base+"..HEAD")
+	if err != nil {
+		return err
+	}
+	if rewriteClosingKeywords(msgs, n) == msgs {
+		return nil
+	}
+	if _, err := git(ctx, wt, "reset", "--soft", "origin/"+base); err != nil {
+		return err
+	}
+	_, err = git(ctx, wt, "commit", "-m", title, "-m", closing)
+	return err
 }
 
 // changedPaths lists the paths rev changes relative to origin/base. -z
@@ -832,6 +935,9 @@ Instructions:
 - Do not commit, push, create branches or open pull requests. amf handles git and GitHub.
 - When you are done, reply with only a pull request description in Markdown:
   a short summary of what changed and why, and how you verified it.
+- End the final message with exactly one line: amf-status: complete if the
+  change finishes the issue, or amf-status: partial if it is only one slice
+  of it.
 `, repo, branch, issue.Number, issue.Title, body)
 }
 
@@ -845,7 +951,8 @@ func cleanSummary(summary string, n int) string {
 	for _, line := range strings.Split(summary, "\n") {
 		t := strings.TrimSpace(line)
 		low := strings.ToLower(t)
-		if strings.Contains(low, "generated with [claude code]") || strings.Contains(low, "generated with claude code") ||
+		if _, ok := agentStatusValue(line); ok ||
+			strings.Contains(low, "generated with [claude code]") || strings.Contains(low, "generated with claude code") ||
 			strings.HasPrefix(low, "co-authored-by:") || closes.MatchString(t) {
 			continue
 		}
@@ -853,6 +960,43 @@ func cleanSummary(summary string, n int) string {
 	}
 	out := strings.TrimSpace(strings.Join(keep, "\n"))
 	return regexp.MustCompile(`\n{3,}`).ReplaceAllString(out, "\n\n")
+}
+
+// agentStatusValue reads an agent's completion signal line, such as
+// "amf-status: partial". ok is true for any spelling of the line; value is
+// lower-cased and may be an unrecognized word.
+func agentStatusValue(line string) (value string, ok bool) {
+	m := regexp.MustCompile(`(?i)^\s*amf-status\s*:\s*(\S*)\s*$`).FindStringSubmatch(line)
+	if m == nil {
+		return "", false
+	}
+	return strings.ToLower(m[1]), true
+}
+
+// splitAgentStatus removes amf-status lines from an agent's final message and
+// returns the last recognized status: "complete", "partial", or "" when the
+// agent didn't say. A missing or unrecognized signal is complete.
+func splitAgentStatus(summary string) (text, status string) {
+	var keep []string
+	for _, line := range strings.Split(summary, "\n") {
+		value, ok := agentStatusValue(line)
+		if !ok {
+			keep = append(keep, line)
+			continue
+		}
+		if value == "complete" || value == "partial" {
+			status = value
+		}
+	}
+	return strings.Join(keep, "\n"), status
+}
+
+// rewriteClosingKeywords replaces Fix/Fixes/Fixed, Close/Closes/Closed and
+// Resolve/Resolves/Resolved before a reference to issue n (also owner/repo#n
+// or the issue's github.com URL) with "Part of", so a partial change can never make GitHub close the issue.
+func rewriteClosingKeywords(text string, n int) string {
+	re := regexp.MustCompile(fmt.Sprintf(`(?i)\b(?:fix(?:es|ed)?|clos(?:e|es|ed)|resolv(?:e|es|ed))\b[ \t]*:?[ \t]*((?:[\w.-]+/[\w.-]+)?#%d\b|https?://github\.com/[\w.-]+/[\w.-]+/issues/%d\b)`, n, n))
+	return re.ReplaceAllString(text, "Part of ${1}")
 }
 
 // claudeResult is the final message Claude prints in its JSON output formats.

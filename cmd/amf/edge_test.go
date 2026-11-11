@@ -1621,11 +1621,132 @@ func TestRunOddTitleAndEmptyBody(t *testing.T) {
 	if got := mustGit(t, root, "--git-dir", origin, "log", "-1", "--format=%s", "amf/issue-1"); got != "Fix #1: "+title {
 		t.Errorf("commit subject = %q", got)
 	}
-	if pr := gh.prs[0]; pr["title"] != "Fix #1: "+title || !strings.HasPrefix(pr["body"], "Resolves #1.\n\nCloses #1") {
+	if pr := gh.prs[0]; pr["title"] != "Fix #1: "+title || !strings.Contains(pr["body"], "Resolves #1.") || !strings.Contains(pr["body"], "## Agent summary") || !strings.Contains(pr["body"], "Closes #1") {
 		t.Errorf("PR = %q", pr)
 	}
 	if _, err := os.Stat(filepath.Join(root, "pwned")); err == nil {
 		t.Error("the title was run by a shell")
+	}
+}
+
+func TestRunPartialChange(t *testing.T) {
+	for _, tc := range []struct {
+		name, summary, wantTitle string
+		part, wantPartial        bool
+	}{
+		{"flag", "Done.\n\nCloses #1", "Part of #1: Add a file", true, true},
+		{"agent status", "Done.\n\namf-status: partial\n\nFixes vic/demo#1", "Part of #1: Add a file", false, true},
+		{"explicit complete", "Done.\n\namf-status: complete", "Fix #1: Add a file", false, false},
+		{"flag wins over complete", "Done.\n\namf-status: complete", "Part of #1: Add a file", true, true},
+		{"missing status", "Done.", "Fix #1: Add a file", false, false},
+		{"unknown status is complete", "Done.\n\namf-status: probably", "Fix #1: Add a file", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, origin := setupRepo(t)
+			gh, srv := newFakeGitHub(t)
+			gh.issues[1] = readyIssue(1, "Add a file")
+			script := shResult + "cat >/dev/null\necho x > x.txt\nresult \"" + tc.summary + "\"\n"
+			r, log := newTestRunner(t, srv, root, fakeAgent(t, "claude", script))
+			r.Part = tc.part
+			r.openMemory(memoryOptions{Backend: backendLogfiles, Dir: t.TempDir()})
+			if err := r.Run(context.Background(), 1); err != nil {
+				t.Fatalf("Run: %v\nlog:\n%s", err, log)
+			}
+			if h, err := r.Memory.History(1); err != nil || len(h.PRs) != 1 || h.PRs[0].Title != tc.wantTitle {
+				t.Errorf("memory PR = %+v, %v; want title %q", h.PRs, err, tc.wantTitle)
+			}
+			r.Close()
+			pr := gh.prs[0]
+			if pr["title"] != tc.wantTitle {
+				t.Errorf("title = %q, want %q", pr["title"], tc.wantTitle)
+			}
+			body := pr["body"]
+			for _, want := range []string{"## Changes", "x.txt | 1 +", "Changed files:\n- `x.txt`", "## Agent summary", "Done."} {
+				if !strings.Contains(body, want) {
+					t.Errorf("body lacks %q:\n%s", want, body)
+				}
+			}
+			if strings.Contains(body, "amf-status") {
+				t.Errorf("body kept the status line:\n%s", body)
+			}
+			closing, unwanted := "Closes #1", []string{"Fixes", "Resolves", "Part of #1"}
+			if tc.wantPartial {
+				closing, unwanted = "Part of #1", []string{"Closes #1", "Fixes #1", "Resolves #1", "Fixes vic/demo#1"}
+			}
+			if !strings.HasSuffix(body, closing+"\n\n---\n_Opened by amf._") {
+				t.Errorf("body does not end with %q:\n%s", closing, body)
+			}
+			for _, bad := range unwanted {
+				if strings.Contains(body, bad) {
+					t.Errorf("body contains %q:\n%s", bad, body)
+				}
+			}
+			commit := mustGit(t, root, "--git-dir", origin, "log", "-1", "--format=%B", "amf/issue-1")
+			if !strings.HasPrefix(commit, tc.wantTitle+"\n\n"+closing) {
+				t.Errorf("commit = %q", commit)
+			}
+		})
+	}
+}
+
+func TestChangeFacts(t *testing.T) {
+	root, _ := setupRepo(t)
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "b.txt"), []byte("one\ntwo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, root, "add", "a.txt", "b.txt")
+	mustGit(t, root, "commit", "-m", "add files")
+	facts, err := (&Runner{}).changeFacts(context.Background(), root, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := mustGit(t, root, "diff", "--stat", "origin/main", "HEAD"); facts.Diffstat != want {
+		t.Errorf("diffstat = %q, want %q", facts.Diffstat, want)
+	}
+	if want := []string{"a.txt", "b.txt"}; !reflect.DeepEqual(facts.Files, want) {
+		t.Errorf("files = %v, want %v", facts.Files, want)
+	}
+	if !strings.Contains(facts.Diffstat, "2 files changed, 3 insertions(+)") {
+		t.Errorf("diffstat = %q", facts.Diffstat)
+	}
+}
+
+func TestRewriteClosingKeywords(t *testing.T) {
+	got := rewriteClosingKeywords("Fix #7, fixes: #7.\nClose owner/repo#7 and Resolved #7; done #7.", 7)
+	want := "Part of #7, Part of #7.\nPart of owner/repo#7 and Part of #7; done #7."
+	if got != want {
+		t.Errorf("rewriteClosingKeywords() = %q, want %q", got, want)
+	}
+	if got := rewriteClosingKeywords("Fix #70 and Fix #7.", 7); strings.Contains(got, "Part of #70") {
+		t.Errorf("rewrote another issue: %q", got)
+	}
+	url := "Fixes https://github.com/o/r/issues/7 but not https://github.com/o/r/issues/70."
+	if got, want := rewriteClosingKeywords(url, 7), "Part of https://github.com/o/r/issues/7 but not https://github.com/o/r/issues/70."; got != want {
+		t.Errorf("URL form = %q, want %q", got, want)
+	}
+}
+
+// TestPartialSquashesAgentClosingCommit checks that a partial change can't
+// close the issue through a commit the agent made on its own: the branch is
+// squashed into amf's single "Part of" commit.
+func TestPartialSquashesAgentClosingCommit(t *testing.T) {
+	root, origin := setupRepo(t)
+	gh, srv := newFakeGitHub(t)
+	gh.issues[1] = readyIssue(1, "Add feature file")
+	r, log := newTestRunner(t, srv, root, fakeClaude(t, `cat >/dev/null; echo hello > feature.txt; git add feature.txt; git commit -qm "Fixes #1"; echo done`))
+	r.Part = true
+	if err := r.Run(context.Background(), 1); err != nil {
+		t.Fatalf("Run: %v\nlog:\n%s", err, log)
+	}
+	msgs := mustGit(t, root, "--git-dir", origin, "log", "--format=%B", "main..amf/issue-1")
+	if strings.Contains(msgs, "Fixes #1") || !strings.Contains(msgs, "Part of #1: Add feature file") {
+		t.Errorf("pushed commit messages = %q, want only amf's Part of #1 commit", msgs)
+	}
+	if got := mustGit(t, root, "--git-dir", origin, "show", "amf/issue-1:feature.txt"); got != "hello" {
+		t.Errorf("feature.txt = %q, want the agent's change kept", got)
 	}
 }
 
@@ -1769,7 +1890,7 @@ func TestRerunUpdatesOpenPR(t *testing.T) {
 	if len(gh.prs) != 1 {
 		t.Fatalf("expected the one PR to be reused, got %v", gh.prs)
 	}
-	if body := gh.prs[0]["body"]; !strings.HasPrefix(body, "Second try.") {
+	if body := gh.prs[0]["body"]; !strings.Contains(body, "Second try.") || !strings.Contains(body, "Closes #1") {
 		t.Errorf("PR body wasn't updated: %q", body)
 	}
 	if got := mustGit(t, root, "--git-dir", origin, "show", "amf/issue-1:f.txt"); got != "two" {
@@ -2031,7 +2152,7 @@ echo "Summary from stdout."
 	if err := r.Run(context.Background(), 1); err != nil {
 		t.Fatal(err)
 	}
-	if body := gh.prs[0]["body"]; !strings.HasPrefix(body, "Summary from stdout.\n\nCloses #1") {
+	if body := gh.prs[0]["body"]; !strings.Contains(body, "Summary from stdout.") || !strings.Contains(body, "Closes #1") {
 		t.Errorf("PR body = %q", body)
 	}
 }
@@ -3368,7 +3489,7 @@ func TestDraftFlag(t *testing.T) {
 				}
 				// A draft PR is done like any other: linked, labeled and cleaned up.
 				n := i + 1
-				if pr := gh.prs[i]; pr["title"] != fmt.Sprintf("Fix #%d: %s", n, gh.issues[n].Title) || !strings.HasPrefix(pr["body"], fmt.Sprintf("Done.\n\nCloses #%d", n)) {
+				if pr := gh.prs[i]; pr["title"] != fmt.Sprintf("Fix #%d: %s", n, gh.issues[n].Title) || !strings.Contains(pr["body"], "Done.") || !strings.Contains(pr["body"], fmt.Sprintf("Closes #%d", n)) {
 					t.Errorf("PR %d = %v", i, pr)
 				}
 				if c := gh.comments[n]; len(c) != 1 || c[0] != fmt.Sprintf("amf opened https://github.com/vic/demo/pull/%d for this issue.", 100+n) {
@@ -3430,6 +3551,29 @@ func TestPipelineDraftPR(t *testing.T) {
 
 // TestRetryKeepsDraftState checks that a retry updates the branch's open PR
 // and leaves it a draft or ready for review, whatever --draft says.
+func TestPartFlag(t *testing.T) {
+	for _, args := range [][]string{
+		{"run", "1", "--part"},
+		{"run", "-P", "1"},
+		{"run", "1", "--part=true"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			gh, _ := draftCLI(t, append(args, "--log-file", "off")...)
+			if len(gh.prs) != 1 || gh.prs[0]["title"] != "Part of #1: One" {
+				t.Fatalf("PRs = %v", gh.prs)
+			}
+			body := gh.prs[0]["body"]
+			if !strings.HasSuffix(body, "Part of #1\n\n---\n_Opened by amf._") || strings.Contains(body, "Closes #1") {
+				t.Errorf("body = %q", body)
+			}
+		})
+	}
+	gh, _ := draftCLI(t, "run", "1", "--part=false", "--log-file", "off")
+	if title := gh.prs[0]["title"]; title != "Fix #1: One" {
+		t.Errorf("--part=false title = %q", title)
+	}
+}
+
 func TestRetryKeepsDraftState(t *testing.T) {
 	for _, tc := range []struct{ existing, flag bool }{{true, false}, {true, true}, {false, true}, {false, false}} {
 		t.Run(fmt.Sprintf("draft=%t/--draft=%t", tc.existing, tc.flag), func(t *testing.T) {
@@ -3446,7 +3590,7 @@ func TestRetryKeepsDraftState(t *testing.T) {
 			if len(gh.prs) != 1 || gh.drafts[0] != tc.existing {
 				t.Fatalf("PRs = %v, drafts = %v, want the one PR with draft %t", gh.prs, gh.drafts, tc.existing)
 			}
-			if pr := gh.prs[0]; pr["title"] != "Fix #1: Add a file" || !strings.HasPrefix(pr["body"], "Second try.\n\nCloses #1") {
+			if pr := gh.prs[0]; pr["title"] != "Fix #1: Add a file" || !strings.Contains(pr["body"], "Second try.") || !strings.Contains(pr["body"], "Closes #1") {
 				t.Errorf("PR = %v", pr)
 			}
 			// One update, of the title and body only: no conversion either way.

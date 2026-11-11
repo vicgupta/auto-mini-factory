@@ -67,6 +67,7 @@ func (is Issue) HasLabel(name string) bool {
 type PullRequest struct {
 	Number  int    `json:"number"`
 	HTMLURL string `json:"html_url"`
+	Title   string `json:"title"`
 	// Head is the commit amf pushed, which --merge pins the merge to; amf
 	// sets it from git rather than reading GitHub's head.sha.
 	Head string `json:"-"`

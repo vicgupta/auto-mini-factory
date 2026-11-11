@@ -81,7 +81,7 @@ func (r *Runner) dryRun(ctx context.Context, issue Issue, base string, p *Pipeli
 			would += fmt.Sprintf(", and merge it (%s) if GitHub allows", r.Merge)
 		}
 	}
-	title, body := prTitle(issue), r.prBody(summary, extra, n)
+	title, body := prTitle(issue, r.partial), r.prBody(summary, extra, n, changeFacts{Diffstat: stat, Files: changed, Part: r.partial})
 	r.event(slog.LevelInfo, "issue.dry_run", n, fmt.Sprintf("#%d: dry run: committed %s on the local branch %s; amf would push it and %s", n, short(head), branch, would),
 		"branch", branch, "base", base, "head", head, "files", changed, "action", action, "url", url,
 		"draft", r.Draft && !hasPR, "merge", merge, "merge_error", mergeErr, "title", title, "body", body)

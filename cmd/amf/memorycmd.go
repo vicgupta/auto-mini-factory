@@ -459,6 +459,14 @@ func (r *Runner) memTriage(n int, title, body string) string {
 	return b.String()
 }
 
+// issueTitle returns issue n's title from memory, or "" when it has none.
+func issueTitle(m MemoryStore, n int) string {
+	if h, err := m.History(n); err == nil && h.Issue != nil {
+		return h.Issue.Title
+	}
+	return ""
+}
+
 // memRecordRun records one attempt at issue n and how it ended.
 func (r *Runner) memRecordRun(n int, started time.Time, err error) {
 	if r.Memory == nil {
@@ -487,9 +495,9 @@ func (r *Runner) memRecordRun(n int, started time.Time, err error) {
 	}
 	r.memWarn(n, "record the run", r.Memory.RecordRun(run))
 	if r.lastPR.Number > 0 {
-		pr := MemPR{Number: r.lastPR.Number, Title: "", State: "open", HeadBranch: issueBranch(n), Issue: n}
-		if h, herr := r.Memory.History(n); herr == nil && h.Issue != nil {
-			pr.Title = fmt.Sprintf("Fix #%d: %s", n, h.Issue.Title)
+		pr := MemPR{Number: r.lastPR.Number, Title: r.lastPR.Title, State: "open", HeadBranch: issueBranch(n), Issue: n}
+		if pr.Title == "" {
+			pr.Title = prTitle(Issue{Number: n, Title: issueTitle(r.Memory, n)}, r.partial)
 		}
 		if r.lastCommit != "" {
 			pr.State, pr.Merged, pr.MergedAt = "merged", true, run.FinishedAt
