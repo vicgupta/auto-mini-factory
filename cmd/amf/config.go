@@ -223,9 +223,10 @@ func parseAgentIdleTimeout(v string) (time.Duration, error) {
 }
 
 // parseReviewGate reads AMF_REVIEW_GATE. "" and off mean the gate is off;
-// on turns it on. Any other non-empty value is an error naming the variable.
+// on turns it on, exactly as written. Any other value is an error naming
+// the variable.
 func parseReviewGate(v string) (bool, error) {
-	switch strings.ToLower(strings.TrimSpace(v)) {
+	switch v {
 	case "", "off":
 		return false, nil
 	case "on":

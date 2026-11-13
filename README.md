@@ -190,7 +190,8 @@ Set `AMF_REVIEW_GATE=on` for an opt-in pre-PR review gate: amf runs
 `AMF_REVIEW_COMMAND` (if set) in the worktree, then the agent that made the
 change reviews it. A failed command, a missing or blocking `amf-review`
 verdict, or a review that changes the worktree stops the PR and fails the
-issue, keeping the commit on the local `amf/issue-N` branch. A passing gate
+issue, keeping the commit on the local `amf/issue-N` branch and a local-only
+`amf/wip/issue-N-<UTC time>` branch. A passing gate
 adds a `## Review gate` section to the PR body. It is off by default.
 
 Native writes require a reviewed `amf-release-policy.json` committed at the exact

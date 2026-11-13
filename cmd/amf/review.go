@@ -34,6 +34,8 @@ type reviewOutcome struct {
 	Findings      string
 
 	reasons []string
+	// wipBranch is the local-only branch a block saved HEAD on, or "".
+	wipBranch string
 }
 
 // reviewGate runs AMF_REVIEW_GATE's steps in the worktree after build and
@@ -100,7 +102,7 @@ func (r *Runner) reviewGate(ctx context.Context, issue Issue, base string, p *Pi
 	case serr != nil:
 		out.reasons = append(out.reasons, fmt.Sprintf("could not read the worktree status after review: %v", serr))
 	case afterStatus != beforeStatus:
-		out.reasons = append(out.reasons, "the worktree changed during review (git status is not empty)")
+		out.reasons = append(out.reasons, "the worktree changed during review (git status differs from before the test command and the review agent)")
 	}
 
 	if len(out.reasons) > 0 {
@@ -121,10 +123,33 @@ func (r *Runner) blockReview(issue Issue, out reviewOutcome, wt string) error {
 		fmt.Sprintf("#%d: the review gate blocked the pull request: %s", n, strings.Join(out.reasons, "; ")),
 		"reasons", out.reasons, "agent", out.ReviewerAgent, "command", out.Command,
 		"exit_code", out.CommandExit, "duration", out.CommandDuration.String(), "worktree", wt)
+	// A retry resets amf/issue-N, so keep the reviewed commit on its own
+	// local-only branch too. Only HEAD is saved, never what the reviewer
+	// may have left uncommitted.
+	out.wipBranch = saveReviewedBranch(wt, n)
 	return &stageError{
 		msg:     fmt.Sprintf("the review gate blocked the pull request: %s", strings.Join(out.reasons, "; ")),
 		comment: out.comment(r, issue, wt),
 	}
+}
+
+// saveReviewedBranch points a new local-only amf/wip/issue-N-<UTC time>
+// branch at the worktree's HEAD and returns its name, or "" if it can't.
+func saveReviewedBranch(wt string, n int) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	base := fmt.Sprintf("amf/wip/issue-%d-%s", n, time.Now().UTC().Format("20060102T150405Z"))
+	name := base
+	for i := 2; i < 100; i++ {
+		if _, err := git(ctx, wt, "rev-parse", "--verify", "--quiet", "refs/heads/"+name); err != nil {
+			break
+		}
+		name = fmt.Sprintf("%s-%d", base, i)
+	}
+	if _, err := git(ctx, wt, "branch", name, "HEAD"); err != nil {
+		return ""
+	}
+	return name
 }
 
 // reviewAgent picks the agent for the review: the one that made the change
@@ -256,6 +281,9 @@ func (o reviewOutcome) comment(r *Runner, issue Issue, wt string) string {
 		b.WriteString("- " + reason + "\n")
 	}
 	fmt.Fprintf(&b, "\nThe commit is kept on the local branch `%s` and in the worktree `%s`.\n", issueBranch(issue.Number), shownPath(r.Root, wt))
+	if o.wipBranch != "" {
+		fmt.Fprintf(&b, "It is also saved on the local-only branch `%s`, which a retry doesn't reset.\n", o.wipBranch)
+	}
 	if o.CommandRan {
 		fmt.Fprintf(&b, "\n**Test command:** %s (exit %d after %s).\n", markdownCode(o.Command), o.CommandExit, o.CommandDuration.Round(10*time.Millisecond))
 		if o.CommandOutput != "" {

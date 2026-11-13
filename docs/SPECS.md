@@ -1191,13 +1191,18 @@ and exit code are preserved.
    3. Blocks when the command failed, the review agent failed or timed out,
       its verdict line is missing or not `pass`, or the worktree changed
       during review (`git status --porcelain` changed, or `HEAD` moved).
-      Missing verdict counts as block.
+      Missing verdict counts as block. The review agent runs with the same
+      permissions as a coding agent; the prompt and the worktree check, not
+      a sandbox, keep it from changing the commit.
 
    A blocked gate pushes nothing and creates or updates no PR. The issue
    becomes `amf:failed` with a comment naming the review gate, the reasons,
    the command output and the reviewer's findings (redacted and trimmed),
    and saying the commit is kept on the local branch `amf/issue-N` and in
-   the worktree. The worktree and local branch are kept, and amf logs
+   the worktree. amf also points a new local-only
+   `amf/wip/issue-N-<UTC time>` branch at that commit (only `HEAD`, never
+   what the reviewer left uncommitted), which a retry doesn't reset, and
+   names it in the comment. The worktree and local branch are kept, and amf logs
    `review.block` (warn). A passing gate logs `review.pass`, continues with
    Push, and appends to the PR body a `## Review gate` section: `_amf ran:_`
    the command, exit code and duration (observed), then `_Reviewer's notes

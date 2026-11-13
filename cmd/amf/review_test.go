@@ -18,7 +18,7 @@ func TestParseReviewGate(t *testing.T) {
 		{"", false, ""},
 		{"off", false, ""},
 		{"on", true, ""},
-		{" ON ", true, ""},
+		{"ON", false, `AMF_REVIEW_GATE must be on or off, got "ON"`},
 		{"yes", false, `AMF_REVIEW_GATE must be on or off, got "yes"`},
 	} {
 		on, err := parseReviewGate(tc.value)
@@ -177,6 +177,13 @@ func TestReviewGateBlocks(t *testing.T) {
 			}
 			if got := mustGit(t, root, "show", "amf/issue-1:feature.txt"); got != "hello" {
 				t.Fatalf("local branch lost the commit: feature.txt = %q", got)
+			}
+			wip := mustGit(t, root, "for-each-ref", "--format=%(refname:short)", "refs/heads/amf/wip/")
+			if !strings.HasPrefix(wip, "amf/wip/issue-1-") || !strings.Contains(comments[0], wip) {
+				t.Fatalf("wip branch = %q, comment = %q", wip, comments[0])
+			}
+			if got := mustGit(t, root, "show", wip+":feature.txt"); got != "hello" {
+				t.Fatalf("wip branch lost the commit: feature.txt = %q", got)
 			}
 			if _, err := os.Stat(filepath.Join(root, ".amf", "worktrees", "issue-1")); err != nil {
 				t.Fatalf("worktree should be kept after a block: %v", err)
