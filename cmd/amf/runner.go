@@ -169,6 +169,12 @@ type Runner struct {
 	// amf process working on it, before watch puts it back to amf:ready
 	// (see sweepStale). 0 turns the sweep off.
 	StaleTimeout time.Duration
+	// ReviewGate, from AMF_REVIEW_GATE=on, runs the opt-in pre-PR review
+	// gate: ReviewCommand, then a review agent, before anything is pushed.
+	ReviewGate bool
+	// ReviewCommand, from AMF_REVIEW_COMMAND, is the shell command the
+	// review gate runs in the worktree. "" means no command step.
+	ReviewCommand string
 	// working is the issue this process is running now, 0 for none.
 	working int
 	// attempts are the agent runs of the latest build without a pipeline,
@@ -454,6 +460,16 @@ func (r *Runner) process(ctx context.Context, issue Issue, base string, p *Pipel
 	facts, err := r.changeFacts(ctx, wt, base)
 	if err != nil {
 		return PullRequest{}, false, err
+	}
+	if r.ReviewGate {
+		review, err := r.reviewGate(ctx, issue, base, p)
+		if err != nil {
+			return PullRequest{}, false, err
+		}
+		if extra != "" {
+			extra += "\n\n"
+		}
+		extra += review.section()
 	}
 
 	r.event(slog.LevelInfo, "issue.push", n, fmt.Sprintf("#%d: pushing %s", n, branch), "branch", branch)

@@ -186,6 +186,13 @@ the title and commit say `Part of #N`, so merging does not close the issue;
 body starts with the diffstat and changed files amf read from git, then the
 agent's summary clearly marked as agent-written and unverified.
 
+Set `AMF_REVIEW_GATE=on` for an opt-in pre-PR review gate: amf runs
+`AMF_REVIEW_COMMAND` (if set) in the worktree, then the agent that made the
+change reviews it. A failed command, a missing or blocking `amf-review`
+verdict, or a review that changes the worktree stops the PR and fails the
+issue, keeping the commit on the local `amf/issue-N` branch. A passing gate
+adds a `## Review gate` section to the PR body. It is off by default.
+
 Native writes require a reviewed `amf-release-policy.json` committed at the exact
 target SHA, with required check names/app IDs and status contexts/creator IDs.
 Only explicit `release publish` publishes. The plan and expected checksums stay

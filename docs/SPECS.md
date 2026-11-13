@@ -980,7 +980,8 @@ reliably.
 
 `amf help env` prints these settings. amf reads one `.env`: `./.env`, or else `.env` at the top of the git
 checkout. Environment variables override the file. Values ending in `...`, and `owner/name`, are
-placeholders and count as unset. The file has `KEY=value` lines, optionally
+placeholders and count as unset, except `AMF_REVIEW_COMMAND`, whose shell commands
+may end in the Go package pattern `./...`. The file has `KEY=value` lines, optionally
 prefixed with `export ` and quoted; `#` starts a comment line or, after a
 space, a trailing comment. A leading byte order mark is ignored.
 
@@ -1002,6 +1003,8 @@ space, a trailing comment. A leading byte order mark is ignored.
 | `AMF_AGENT_IDLE_TIMEOUT` | `30m` | How long an agent may produce no output on stdout or stderr, and change no file in the worktree, before amf stops it and fails the run, as a Go duration; `off` disables it. Must be positive |
 | `AMF_STALE_TIMEOUT` | `max(2x agent timeout, 2h)` | How long `watch` lets an issue stay `amf:in-progress` with no amf working on it before putting it back to `amf:ready`; `off` disables it. `--stale-timeout` overrides it |
 | `AMF_LOG_LEVEL` | `info` (terminal), `debug` (event log) | `debug`, `info`, `warn` or `error`, for both the terminal and the event log of `run` and `watch`; `--log-level` overrides it |
+| `AMF_REVIEW_GATE` | `off` | `on` runs the opt-in pre-PR review gate before anything is pushed: `AMF_REVIEW_COMMAND`, then a review agent. Any other non-empty value is an error naming the variable |
+| `AMF_REVIEW_COMMAND` | unset | Shell command the review gate runs in the worktree with `sh -c`, as the repo's test gate (for example `test -z "$(gofmt -l .)" && go test ./...`). Unset runs no command step |
 | `AMF_CODEX` | `codex` | Path to the Codex CLI |
 | `AMF_OPENCODE` | `opencode` | Path to the opencode CLI |
 | `AMF_GITHUB_CLIENT_ID` | unset | The GitHub OAuth app `amf auth login` uses, when `--client-id` isn't given |
@@ -1168,6 +1171,38 @@ and exit code are preserved.
    when any changed path is under `.github/`, where workflows and `CODEOWNERS` live;
    the error names the offending paths. Changes elsewhere, even under a
    directory whose name contains `.github`, are fine.
+
+   **Review gate** (only with `AMF_REVIEW_GATE=on`; off, the default, leaves
+   this and the PR body byte-for-byte unchanged). Before step 8, amf:
+   1. Runs `AMF_REVIEW_COMMAND` with `sh -c` in the worktree, if set, with
+      the agent environment rules and the same timeout as an agent run. It
+      records the command, exit code, duration and the last 60 lines of
+      combined output (redacted). A non-zero exit is blocking.
+   2. Runs the agent that made the change (for a pipeline, the primary from
+      `agentPlan`) with the same model and a review prompt containing the
+      issue title and body. The prompt tells the agent to inspect
+      `git diff origin/<default> HEAD` itself, check every acceptance
+      criterion and look for regressions, security problems, missing tests
+      and missing docs; not to modify, create or delete any file and not to
+      commit; and to end with exactly one line `amf-review: pass` or
+      `amf-review: block`, with blocking findings above it. Its log is
+      `.amf/logs/issue-N-review.log`, and agents that write their final
+      message to a file use `.amf/review.md` in the worktree.
+   3. Blocks when the command failed, the review agent failed or timed out,
+      its verdict line is missing or not `pass`, or the worktree changed
+      during review (`git status --porcelain` changed, or `HEAD` moved).
+      Missing verdict counts as block.
+
+   A blocked gate pushes nothing and creates or updates no PR. The issue
+   becomes `amf:failed` with a comment naming the review gate, the reasons,
+   the command output and the reviewer's findings (redacted and trimmed),
+   and saying the commit is kept on the local branch `amf/issue-N` and in
+   the worktree. The worktree and local branch are kept, and amf logs
+   `review.block` (warn). A passing gate logs `review.pass`, continues with
+   Push, and appends to the PR body a `## Review gate` section: `_amf ran:_`
+   the command, exit code and duration (observed), then `_Reviewer's notes
+   (written by the agent; amf has not verified them):_` the reviewer's text
+   without the verdict line. `--dry-run` skips the review gate.
 8. **Push.** If `origin/amf/issue-N` doesn't exist, or its tip is an
    ancestor of the new head, amf runs `git push -u origin amf/issue-N` with
    the user's git credentials. Otherwise it replaces the remote tip with
@@ -1365,7 +1400,10 @@ merge doesn't count; see step 11): set `amf:failed` (or keep `amf:pr-open`
 when the branch still has an open PR, and `amf:done` when it was done),
 comment the error on the issue (each agent tried with its exit code and
 duration, whether the fallback ran and why not, and the redacted last 40
-lines of the log), and keep the worktree and logs for inspection. This also happens if
+lines of the log), and keep the worktree and logs for inspection. A review
+gate that blocks is this kind of failure: nothing is pushed, no PR is
+created or updated, and the commit stays on `amf/issue-N` in the worktree.
+This also happens if
 the run is interrupted — except that a run that hit the agent timeout or
 idle timeout leaves the worktree (removed, with its branch unpushed), keeps
 only the logs and partial output, and saves the agent's changes on an
@@ -1437,6 +1475,7 @@ redirect to a URL ending in the tag, and serve the archive and
 | `.amf/worktrees/issue-N/` | Working copy for an issue in progress or failed |
 | `amf/wip/issue-N-<UTC time>` (local branch) | A killed agent's partial work, committed and never pushed |
 | `.amf/logs/issue-N.log` | The agent's output for the latest run of issue N, without a pipeline (stream-json for Claude) |
+| `.amf/logs/issue-N-review.log` | The review agent's output when `AMF_REVIEW_GATE=on` |
 | `.amf/logs/issue-N-<agent>.log` | The secondary agent's output, when amf fell back to it |
 | `.amf/logs/issue-N[-<stage>].partial.md` | An agent's final-message file, kept (redacted) after a timeout cut the run short |
 | `.amf/logs/issue-N-<stage>.log` | Each pipeline stage's output: `plan`, `code-K`, `eval-K` |
@@ -1494,6 +1533,9 @@ event log opens, are not. The fields of each event, besides those:
 | `issue.code.round` | debug | `round` |
 | `issue.code.done` | info | `rounds`, without an eval stage |
 | `issue.eval.verdict` | info | `round`, `pass`, `parsed` (whether eval gave a verdict), and `next_round`, or `final: true` when no rounds are left |
+| `review.command` | debug | The review gate's test command: `command`, `exit_code`, `duration`, `output` (the redacted last 60 lines) |
+| `review.pass` | info | `agent`, `command`, `exit_code`, `duration`, `pass: true` |
+| `review.block` | warn | `reasons`, `agent`, `command`, `exit_code`, `duration`, `worktree` |
 | `agent.start` | debug | `agent`, `binary`, `args`, `model`, `stage` (`agent run` without a pipeline), `dir`, `timeout`, `stdin_bytes` and `stdin_sha256` of the prompt, and `env_added` and `env_removed`: the names of the variables amf added, changed or removed for the agent, never their values |
 | `agent.exit` | debug | `agent`, `stage`, `exit_code` (-1 when killed or not started), `signal` when a signal ended it, `timed_out`, `duration_ms`, `stdout_bytes`, `stderr_bytes`, `out_bytes` (codex's and opencode's final-message file), and `result_bytes` and `result` (the final message's first 512 bytes), or `error` |
 | `agent.parse` | debug | Claude: `result_found`, `json` (whether its output was JSON); codex and opencode: `out_file` (whether they wrote their final message) |

@@ -704,6 +704,10 @@ func newRunnerFrom(ctx context.Context, cfg Config, timeout time.Duration, evalR
 	if err != nil {
 		return nil, err
 	}
+	reviewGate, err := parseReviewGate(cfg.ReviewGate)
+	if err != nil {
+		return nil, err
+	}
 	// A named agent must be there; the fallback order only applies without --agent.
 	agents := &Runner{Claude: cfg.Claude, Codex: cfg.Codex, Opencode: cfg.Opencode, Agent: agent} // --agent needs no key
 	if agent != "" {
@@ -733,6 +737,8 @@ func newRunnerFrom(ctx context.Context, cfg Config, timeout time.Duration, evalR
 	}
 	return &Runner{
 		StaleTimeout:  stale,
+		ReviewGate:    reviewGate,
+		ReviewCommand: cfg.ReviewCommand,
 		GH:            gh,
 		Repo:          cfg.Repo,
 		Root:          root,

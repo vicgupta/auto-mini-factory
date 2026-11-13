@@ -83,6 +83,13 @@ type Config struct {
 	// back to amf:ready. "" means the default, "off" no sweep.
 	StaleTimeout string
 
+	// ReviewGate is AMF_REVIEW_GATE as written: on runs the opt-in pre-PR
+	// review gate, off (or "") doesn't. parseReviewGate reads it.
+	ReviewGate string
+	// ReviewCommand is AMF_REVIEW_COMMAND, the shell command the review
+	// gate runs as the repo's test gate. "" means no command step.
+	ReviewCommand string
+
 	// Trusted is AMF_TRUSTED, the lower-case GitHub logins whose issues amf
 	// works on. Nil means anyone's.
 	Trusted []string
@@ -121,13 +128,18 @@ func loadConfig(paths ...string) (Config, error) {
 		break
 	}
 	seen := map[string]configValue{}
-	// Unfilled placeholders from `amf init` count as unset.
+	// Unfilled placeholders from `amf init` count as unset. A review
+	// command is a shell command, so one ending in the Go package pattern
+	// "./..." is real, not a placeholder.
+	placeholder := func(key, v string) bool {
+		return key != "AMF_REVIEW_COMMAND" && isPlaceholder(v)
+	}
 	get := func(key, def string) string {
-		if v := os.Getenv(key); v != "" && !isPlaceholder(v) {
+		if v := os.Getenv(key); v != "" && !placeholder(key, v) {
 			seen[key] = configValue{"env", v}
 			return v
 		}
-		if v := file[key]; v != "" && !isPlaceholder(v) {
+		if v := file[key]; v != "" && !placeholder(key, v) {
 			seen[key] = configValue{".env", v}
 			return v
 		}
@@ -155,6 +167,8 @@ func loadConfig(paths ...string) (Config, error) {
 		AgentIdleTimeout: get("AMF_AGENT_IDLE_TIMEOUT", ""),
 		LogLevel:         get("AMF_LOG_LEVEL", ""),
 		StaleTimeout:     get("AMF_STALE_TIMEOUT", ""),
+		ReviewGate:       get("AMF_REVIEW_GATE", ""),
+		ReviewCommand:    get("AMF_REVIEW_COMMAND", ""),
 		EnvPaths:         paths,
 		EnvFile:          envFile,
 		seen:             seen,
@@ -206,6 +220,18 @@ func parseAgentIdleTimeout(v string) (time.Duration, error) {
 		return 0, fmt.Errorf("AMF_AGENT_IDLE_TIMEOUT: the idle timeout must be positive, got %s (use off to disable it)", d)
 	}
 	return d, nil
+}
+
+// parseReviewGate reads AMF_REVIEW_GATE. "" and off mean the gate is off;
+// on turns it on. Any other non-empty value is an error naming the variable.
+func parseReviewGate(v string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", "off":
+		return false, nil
+	case "on":
+		return true, nil
+	}
+	return false, fmt.Errorf("AMF_REVIEW_GATE must be on or off, got %q", v)
 }
 
 // parseTrusted splits AMF_TRUSTED, a list of GitHub logins separated by
