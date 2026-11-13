@@ -148,8 +148,10 @@ func docsChanged(files []string) []string {
 }
 
 func (r *Runner) sectionedPRBody(summary, extra string, n int, f changeFacts) string {
-	sec := splitAgentSections(summary)
-	summary = cleanSummary(sec.Summary, n)
+	// Clean first, so an amf-status or attribution line at the end of the
+	// last section never lands in it.
+	sec := splitAgentSections(cleanSummary(summary, n))
+	summary = sec.Summary
 	testing := strings.TrimSpace(sec.Testing)
 	decisions := strings.TrimSpace(sec.Decisions)
 	if f.Part {
@@ -192,7 +194,7 @@ func (r *Runner) sectionedPRBody(summary, extra string, n int, f changeFacts) st
 	b.WriteString("\n\n## Docs updated\n\n_From git, not the agent._\n\n")
 	docs := docsChanged(f.Files)
 	if len(docs) == 0 {
-		b.WriteString("None.")
+		b.WriteString("None.\n")
 	} else {
 		for _, path := range docs {
 			b.WriteString("- `" + path + "`\n")

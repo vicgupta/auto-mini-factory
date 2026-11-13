@@ -598,9 +598,6 @@ func newRunner(ctx context.Context, timeout time.Duration, evalRounds int, agent
 	if err != nil {
 		return nil, err
 	}
-	if cfg.PRSections, err = parsePRSections(cfg.PRSectionsRaw); err != nil {
-		return nil, err
-	}
 	if timeout == 0 { // no flag gave one, or run and watch would have failed on it already
 		env, err := parseAgentTimeout(cfg.AgentTimeout)
 		if err != nil {

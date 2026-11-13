@@ -1228,7 +1228,8 @@ and exit code are preserved.
    questions` (the agent's section, or `The agent did not report decisions
    on open questions.`); and, only when `README.md` didn't change,
    `## README feature list` (`README.md was not changed, so the feature list
-   has no entry for this change.`). A section is found by its Markdown
+   has no entry for this change.`). After amf drops `amf-status` and
+   attribution lines, a section is found by its Markdown
    heading, any level and case-insensitive; named `Testing`, `Decisions on
    open questions` (or `Decisions`), or `Docs updated`, and it runs until the
    next heading of the same or a higher level. amf never invents content.

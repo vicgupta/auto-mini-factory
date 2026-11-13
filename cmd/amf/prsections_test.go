@@ -202,3 +202,37 @@ func TestPRSectionsBadValue(t *testing.T) {
 		}
 	}
 }
+
+func TestPRSectionsStatusLineNotInLastSection(t *testing.T) {
+	summary := "Did it.\n\n## Decisions on open questions\nNone.\n\nCo-Authored-By: Bot <b@example.com>\namf-status: complete"
+	r := &Runner{PRSections: true}
+	body := r.prBody(summary, "", 7, changeFacts{Files: []string{"README.md"}})
+	if strings.Contains(body, "amf-status") || strings.Contains(body, "Co-Authored-By") {
+		t.Errorf("status or attribution line kept:\n%s", body)
+	}
+	if !strings.Contains(body, "_Reported by the agent; amf has not verified it._\n\nNone.\n\nCloses #7") {
+		t.Errorf("decisions section = %q", body)
+	}
+}
+
+func TestPRSectionsRepoFileOnlyForItsRepo(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("AMF_CONFIG_DIR", dir)
+	t.Setenv("AMF_API_URL", "")
+	t.Setenv("AMF_PR_SECTIONS", "")
+	repoFile := filepath.Join(dir, "repos", "github.com", "vic", "demo.env")
+	if err := os.MkdirAll(filepath.Dir(repoFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(repoFile, []byte("AMF_PR_SECTIONS=on\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := writeEnv(t, "GITHUB_TOKEN=t\nGITHUB_REPO=vic/other\n")
+	cfg, err := loadConfig(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PRSections || cfg.RepoConfigFile != "" || cfg.seen["AMF_PR_SECTIONS"].From != "default" {
+		t.Fatalf("another repo's settings file applied: %+v", cfg)
+	}
+}
