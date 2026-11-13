@@ -407,7 +407,7 @@ func (r *Runner) runPipeline(ctx context.Context, wt string, issue Issue, branch
 		rounds = k
 		r.event(slog.LevelDebug, "issue.code.round", n, fmt.Sprintf("#%d: code round %d", n, k), "round", k)
 		name := fmt.Sprintf("code-%d", k)
-		out, err := r.runStage(ctx, p.Code, n, name, wt, base, codePrompt(r.Repo, branch, issue, p.Code, plan, review))
+		out, err := r.runStage(ctx, p.Code, n, name, wt, base, codePrompt(r.Repo, branch, issue, p.Code, plan, review, r.PRSections))
 		if err != nil {
 			return "", "", err
 		}
@@ -1247,7 +1247,7 @@ Instructions:
 %s`, repo, branch, issueText(issue), skillText(s))
 }
 
-func codePrompt(repo, branch string, issue Issue, s *Stage, plan, review string) string {
+func codePrompt(repo, branch string, issue Issue, s *Stage, plan, review string, prSections ...bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "You are working in a git worktree of the GitHub repository %s, on branch %s.\nResolve this GitHub issue:\n\n%s\n", repo, branch, issueText(issue))
 	if plan != "" {
@@ -1264,7 +1264,11 @@ Instructions:
 - Do not commit, push, create branches or open pull requests. amf handles git and GitHub.
 - When you are done, reply with only a pull request description in Markdown:
   a short summary of what changed and why, and how you verified it.
-- End the final message with exactly one line: amf-status: complete if the
+`)
+	if len(prSections) > 0 && prSections[0] {
+		b.WriteString(prSectionsInstruction)
+	}
+	b.WriteString(`- End the final message with exactly one line: amf-status: complete if the
   change finishes the issue, or amf-status: partial if it is only one slice
   of it.
 `)

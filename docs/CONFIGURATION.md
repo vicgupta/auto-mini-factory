@@ -26,6 +26,26 @@ amf reads `.env` in the current directory (or the file `--env-file` names), then
 git checkout. Real environment variables win over the file.
 Keep `.env` out of git: add it to the target repo's `.gitignore`.
 
+### Per-repo settings
+
+A repo can have its own settings file outside the checkout:
+`<config-dir>/repos/<host>/<owner>/<name>.env`. `<config-dir>` is
+`AMF_CONFIG_DIR` or the user config folder's `amf` (the folder holding
+`hosts.json`), `<host>` is `AMF_API_URL`'s host (`github.com` for
+`https://api.github.com`), and `<owner>/<name>` is the lower-cased
+`GITHUB_REPO`. The file uses the same `KEY=value` syntax as `.env`, and a
+missing file is normal. Only keys starting with `AMF_PR_` or `AMF_REVIEW_`
+are read; any other key is an error naming the file and the key, so a token
+can never come from it. For example, for `vicgupta/tinyagent` on github.com:
+
+```sh
+mkdir -p ~/.config/amf/repos/github.com/vicgupta
+printf 'AMF_PR_SECTIONS=on\n' > ~/.config/amf/repos/github.com/vicgupta/tinyagent.env
+```
+
+It is read after `.env` and before the defaults, so the environment wins
+first, then `.env`, then this file.
+
 ### Watch reliability
 
 - **One amf per checkout.** `amf watch`, `amf run` and `amf auto` hold
@@ -70,6 +90,7 @@ placeholders ending in `...`, and `owner/name`, count as unset.
 | `AMF_AGENT_TIMEOUT` | `60m` | How long each agent run may take, as a Go duration; `--agent-timeout` (or its deprecated alias `--timeout`) overrides it. Must be at least 1m and at most 24h |
 | `AMF_AGENT_IDLE_TIMEOUT` | `30m` | How long an agent may produce no output on stdout or stderr, and change no file in the worktree, before amf stops it and fails the run, as a Go duration; `off` disables it. Must be positive |
 | `AMF_STALE_TIMEOUT` | `max(2x agent timeout, 2h)` | How long `watch` lets an issue stay `amf:in-progress` with no amf working on it before putting it back to `amf:ready`; `off` disables it. `--stale-timeout` overrides it |
+| `AMF_PR_SECTIONS` | `off` | `on` asks the agent for `## Testing` and `## Decisions on open questions` sections, and adds those, the docs changed from git, and a README feature-list check to the PR body. Any other value is an error |
 | `AMF_LOG_LEVEL` | `info` (terminal), `debug` (event log) | `debug`, `info`, `warn` or `error`, for both the terminal and the event log of `run` and `watch`; `--log-level` overrides it |
 | `AMF_CODEX` | `codex` | Path to the Codex CLI |
 | `AMF_OPENCODE` | `opencode` | Path to the opencode CLI |
@@ -92,6 +113,7 @@ OPENAI_API_KEY=sk-proj-...   # optional: OpenAI API key for codex
 # AMF_SECONDARY_AGENT=claudecode   # optional: claudecode, codex, opencode or none; runs when the primary fails
 # AMF_AGENT_TIMEOUT=60m   # optional: how long each agent run may take (--agent-timeout overrides it)
 # AMF_AGENT_IDLE_TIMEOUT=30m   # optional: stop an agent that produces no output or changes no worktree file for this long (off disables it)
+# AMF_PR_SECTIONS=off   # optional: on adds Testing, Docs updated, Decisions and README sections to PRs
 # AMF_LOG_LEVEL=info   # optional: debug, info, warn or error, for the terminal and the event log in .amf/runs/
 AMF_TRUSTED=login1,login2...   # optional: only work on issues opened by these GitHub users
 # AMF_POSTGRES_URL=postgres://user:password@localhost:5432/postgres   # optional: also save the logs to database amflogs on this PostgreSQL server

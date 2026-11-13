@@ -598,6 +598,9 @@ func newRunner(ctx context.Context, timeout time.Duration, evalRounds int, agent
 	if err != nil {
 		return nil, err
 	}
+	if cfg.PRSections, err = parsePRSections(cfg.PRSectionsRaw); err != nil {
+		return nil, err
+	}
 	if timeout == 0 { // no flag gave one, or run and watch would have failed on it already
 		env, err := parseAgentTimeout(cfg.AgentTimeout)
 		if err != nil {
@@ -731,8 +734,15 @@ func newRunnerFrom(ctx context.Context, cfg Config, timeout time.Duration, evalR
 	if err != nil {
 		return nil, err
 	}
+	prSections := cfg.PRSections
+	if cfg.PRSectionsRaw != "" {
+		if prSections, err = parsePRSections(cfg.PRSectionsRaw); err != nil {
+			return nil, err
+		}
+	}
 	return &Runner{
 		StaleTimeout:  stale,
+		PRSections:    prSections,
 		GH:            gh,
 		Repo:          cfg.Repo,
 		Root:          root,
