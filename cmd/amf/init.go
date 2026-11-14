@@ -35,6 +35,7 @@ var envTemplate = []envVar{
 	{"AMF_SECONDARY_AGENT", defaultSecondaryAgent, "optional: claudecode, codex, opencode or none; runs when the primary fails", true},
 	{"AMF_AGENT_TIMEOUT", fmt.Sprintf("%dm", defaultAgentTimeout/time.Minute), "optional: how long each agent run may take (--agent-timeout overrides it)", true},
 	{"AMF_AGENT_IDLE_TIMEOUT", fmt.Sprintf("%dm", defaultAgentIdleTimeout/time.Minute), "optional: stop an agent that produces no output or changes no worktree file for this long (off disables it)", true},
+	{"AMF_PR_SECTIONS", "off", "optional: on adds Testing, Docs updated, Decisions and README sections to PRs", true},
 	{"AMF_LOG_LEVEL", "info", "optional: debug, info, warn or error, for the terminal and the event log in .amf/runs/", true},
 	{"AMF_TRUSTED", "login1,login2...", "optional: only work on issues opened by these GitHub users", false},
 	{"AMF_POSTGRES_URL", "postgres://user:password@localhost:5432/postgres", "optional: also save the logs to database amflogs on this PostgreSQL server", true},

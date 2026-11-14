@@ -102,6 +102,9 @@ type Runner struct {
 	// Draft opens new pull requests as drafts, from --draft. A retry that
 	// updates an open PR leaves it a draft or ready for review as it was.
 	Draft bool
+	// PRSections is AMF_PR_SECTIONS=on: the prompts ask the agent for the
+	// Testing and Decisions sections, and the PR body reports them.
+	PRSections bool
 	// ExcludeLabels, from watch's --exclude-label, makes watch skip issues
 	// with any of these labels, leaving them as they are.
 	ExcludeLabels []string
@@ -175,6 +178,10 @@ type Runner struct {
 	// ReviewCommand, from AMF_REVIEW_COMMAND, is the shell command the
 	// review gate runs in the worktree. "" means no command step.
 	ReviewCommand string
+	// reviewSection is the PR body's Review gate section from the latest
+	// passing gate, "" when the gate is off. prBody gives it its own
+	// section, never inside the agent's summary.
+	reviewSection string
 	// working is the issue this process is running now, 0 for none.
 	working int
 	// attempts are the agent runs of the latest build without a pipeline,
@@ -453,6 +460,7 @@ func (r *Runner) checkAuthor(issue Issue) error {
 func (r *Runner) process(ctx context.Context, issue Issue, base string, p *Pipeline, agent runPlan) (pr PullRequest, updated bool, err error) {
 	n := issue.Number
 	branch, wt := issueBranch(n), r.worktreePath(n)
+	r.reviewSection = ""
 	summary, extra, err := r.build(ctx, issue, base, p, agent)
 	if err != nil {
 		return PullRequest{}, false, err
@@ -466,10 +474,7 @@ func (r *Runner) process(ctx context.Context, issue Issue, base string, p *Pipel
 		if err != nil {
 			return PullRequest{}, false, err
 		}
-		if extra != "" {
-			extra += "\n\n"
-		}
-		extra += review.section()
+		r.reviewSection = review.section()
 	}
 
 	r.event(slog.LevelInfo, "issue.push", n, fmt.Sprintf("#%d: pushing %s", n, branch), "branch", branch)
@@ -566,6 +571,9 @@ func (r *Runner) prBody(summary, extra string, n int, facts ...changeFacts) stri
 	if len(facts) > 0 {
 		f = facts[0]
 	}
+	if r.PRSections {
+		return r.Redact.Redact(r.sectionedPRBody(summary, extra, n, f))
+	}
 	summary = cleanSummary(summary, n)
 	if f.Part {
 		summary = rewriteClosingKeywords(summary, n)
@@ -593,6 +601,9 @@ func (r *Runner) prBody(summary, extra string, n int, facts ...changeFacts) stri
 	b.WriteString("\n## Agent summary\n\n")
 	b.WriteString("_Written by the agent; amf has not verified it._\n\n")
 	b.WriteString(summary + "\n\n")
+	if s := r.reviewPart(n, f.Part); s != "" {
+		b.WriteString(s + "\n\n")
+	}
 	if f.Part {
 		b.WriteString(fmt.Sprintf("Part of #%d", n))
 	} else {
@@ -652,7 +663,7 @@ func (r *Runner) buildOne(ctx context.Context, issue Issue, base, agent, log str
 	}
 	r.event(slog.LevelInfo, "issue.agent", n, text, "agent", agentName(agent), "model", model, "timeout", r.Timeout.String())
 	out := filepath.Join(wt, ".amf", "code.md") // for agents that write their final message to a file
-	if summary, err = r.runAgent(ctx, agent, "", model, wt, base, buildPrompt(r.Repo, branch, issue), log, out); err != nil {
+	if summary, err = r.runAgent(ctx, agent, "", model, wt, base, buildPrompt(r.Repo, branch, issue, r.PRSections), log, out); err != nil {
 		return "", exitOf(err), err
 	}
 	var status string
@@ -932,10 +943,14 @@ func protectedPaths(changed []string) []string {
 	return bad
 }
 
-func buildPrompt(repo, branch string, issue Issue) string {
+func buildPrompt(repo, branch string, issue Issue, prSections ...bool) string {
 	body := strings.TrimSpace(issue.Body)
 	if body == "" {
 		body = "(no description)"
+	}
+	sections := ""
+	if len(prSections) > 0 && prSections[0] {
+		sections = prSectionsInstruction
 	}
 	return fmt.Sprintf(`You are working in a git worktree of the GitHub repository %s, on branch %s.
 Resolve this GitHub issue:
@@ -951,10 +966,10 @@ Instructions:
 - Do not commit, push, create branches or open pull requests. amf handles git and GitHub.
 - When you are done, reply with only a pull request description in Markdown:
   a short summary of what changed and why, and how you verified it.
-- End the final message with exactly one line: amf-status: complete if the
+%s- End the final message with exactly one line: amf-status: complete if the
   change finishes the issue, or amf-status: partial if it is only one slice
   of it.
-`, repo, branch, issue.Number, issue.Title, body)
+`, repo, branch, issue.Number, issue.Title, body, sections)
 }
 
 // cleanSummary prepares Claude's summary for a PR body. It drops attribution

@@ -322,6 +322,16 @@ func (o reviewOutcome) section() string {
 	return b.String()
 }
 
+// reviewPart is the Review gate section for the PR body, trimmed, with
+// closing keywords rewritten for a partial change; "" without one.
+func (r *Runner) reviewPart(n int, part bool) string {
+	s := strings.TrimSpace(r.reviewSection)
+	if s != "" && part {
+		s = rewriteClosingKeywords(s, n)
+	}
+	return s
+}
+
 // markdownCode wraps s in enough backticks to keep it one code span.
 func markdownCode(s string) string {
 	fence := "`"

@@ -126,6 +126,31 @@ func (d *doctor) check(ctx context.Context) {
 	default:
 		d.line("ok", "GITHUB_REPO", "%s, from %s", cfg.Repo, source("GITHUB_REPO", envFile))
 	}
+	if cfg.RepoConfigFile != "" {
+		d.line("ok", "repo settings", "%s", cfg.RepoConfigFile)
+	}
+	sections, sectionsErr := parsePRSections(cfg.PRSectionsRaw)
+	switch {
+	case !parsed:
+		d.line("skip", "PR sections", ".env didn't parse")
+	case sectionsErr != nil:
+		d.line("FAIL", "PR sections", "%v", sectionsErr)
+	default:
+		shown := "off"
+		if sections {
+			shown = "on"
+		}
+		from := "the default"
+		switch cfg.seen["AMF_PR_SECTIONS"].From {
+		case "env":
+			from = "the environment"
+		case ".env":
+			from = envFile
+		case "repo":
+			from = cfg.RepoConfigFile
+		}
+		d.line("ok", "PR sections", "%s, from %s", shown, from)
+	}
 
 	// GitHub.
 	base := ""

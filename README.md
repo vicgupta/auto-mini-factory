@@ -186,6 +186,13 @@ the title and commit say `Part of #N`, so merging does not close the issue;
 body starts with the diffstat and changed files amf read from git, then the
 agent's summary clearly marked as agent-written and unverified.
 
+Set `AMF_PR_SECTIONS=on` (off by default; `amf help env`) when a repo's PRs
+must also report how the change was tested, which docs changed, the decisions
+on the issue's open questions, and whether `README.md`'s feature list was
+updated. A per-repo file at
+`<config dir>/repos/<host>/<owner>/<name>.env` can turn it on for just that
+repo; see the [configuration guide](docs/CONFIGURATION.md#per-repo-settings).
+
 Set `AMF_REVIEW_GATE=on` for an opt-in pre-PR review gate: amf runs
 `AMF_REVIEW_COMMAND` (if set) in the worktree, then the agent that made the
 change reviews it. A failed command, a missing or blocking `amf-review`

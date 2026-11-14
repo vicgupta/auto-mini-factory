@@ -288,6 +288,9 @@ are not placeholders).
     How long watch lets an issue stay amf:in-progress with no amf working on
     it before putting it back to amf:ready; off disables it. --stale-timeout
     overrides it
+  AMF_PR_SECTIONS (default: off)
+    on asks the agent for Testing and Decisions sections, and adds them, the
+    docs changed from git, and a README feature-list check to the PR body
   AMF_LOG_LEVEL (default: info (terminal), debug (event log))
     debug, info, warn or error, for both the terminal and the event log of
     run and watch; --log-level overrides it
@@ -311,6 +314,10 @@ are not placeholders).
     …/api/v3 becomes …/api/graphql
   AMF_CLONE_URL (default: https://github.com/<repo>.git)
     Where to clone GITHUB_REPO from
+
+A per-repo settings file, <config dir>/repos/<host>/<owner>/<name>.env,
+may set AMF_PR_* and AMF_REVIEW_* only. It is read after .env and before
+the defaults; <config dir> is the folder that holds hosts.json.
 
 amf init writes the common settings to .env and preserves existing values;
 amf doctor checks the configuration.

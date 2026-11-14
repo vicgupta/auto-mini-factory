@@ -735,10 +735,17 @@ func newRunnerFrom(ctx context.Context, cfg Config, timeout time.Duration, evalR
 	if err != nil {
 		return nil, err
 	}
+	prSections := cfg.PRSections
+	if cfg.PRSectionsRaw != "" {
+		if prSections, err = parsePRSections(cfg.PRSectionsRaw); err != nil {
+			return nil, err
+		}
+	}
 	return &Runner{
 		StaleTimeout:  stale,
 		ReviewGate:    reviewGate,
 		ReviewCommand: cfg.ReviewCommand,
+		PRSections:    prSections,
 		GH:            gh,
 		Repo:          cfg.Repo,
 		Root:          root,

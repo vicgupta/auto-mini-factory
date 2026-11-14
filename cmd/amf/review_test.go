@@ -209,3 +209,56 @@ func TestDoctorReviewGate(t *testing.T) {
 		wantLines(t, out, `ok +\.env +`, tc.want)
 	}
 }
+
+func TestReviewSectionIsItsOwnSection(t *testing.T) {
+	section := reviewOutcome{CommandRan: true, Command: "go test ./...", Findings: "Fixes #7 cleanly."}.section()
+	for _, sections := range []bool{false, true} {
+		r := &Runner{PRSections: sections, reviewSection: section}
+		summary := "Did it.\n\n## Testing\nRan go test.\n\n## Decisions on open questions\nNone."
+		body := r.prBody(summary, "", 7, changeFacts{Files: []string{"a.go", "README.md"}})
+		gate := strings.Index(body, "## Review gate")
+		if gate < 0 {
+			t.Fatalf("sections=%v: no Review gate section:\n%s", sections, body)
+		}
+		before := []string{"## Agent summary", "## Changes"}
+		if sections {
+			before = []string{"## Summary", "## Changes", "## Testing", "## Docs updated", "## Decisions on open questions"}
+		}
+		for _, h := range before {
+			if i := strings.Index(body, h); i < 0 || i > gate {
+				t.Errorf("sections=%v: %q missing or after the Review gate:\n%s", sections, h, body)
+			}
+		}
+		if !strings.Contains(body[gate:], "Closes #7") {
+			t.Errorf("sections=%v: closing line not after the Review gate:\n%s", sections, body)
+		}
+
+		r.reviewSection = section
+		part := r.prBody(summary, "", 7, changeFacts{Files: []string{"a.go"}, Part: true})
+		if strings.Contains(part, "Fixes #7") {
+			t.Errorf("sections=%v: partial body kept a closing keyword in the Review gate:\n%s", sections, part)
+		}
+	}
+}
+
+func TestReviewCommandFromRepoFileIsNotAPlaceholder(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("AMF_CONFIG_DIR", dir)
+	t.Setenv("AMF_API_URL", "")
+	t.Setenv("AMF_REVIEW_COMMAND", "")
+	t.Setenv("AMF_REVIEW_GATE", "")
+	repoFile := filepath.Join(dir, "repos", "github.com", "vic", "demo.env")
+	if err := os.MkdirAll(filepath.Dir(repoFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(repoFile, []byte("AMF_REVIEW_GATE=on\nAMF_REVIEW_COMMAND=go vet ./... && go test ./...\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := loadConfig(writeEnv(t, "GITHUB_TOKEN=t\nGITHUB_REPO=vic/demo\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ReviewGate != "on" || cfg.ReviewCommand != "go vet ./... && go test ./..." {
+		t.Fatalf("repo file review settings = %q, %q", cfg.ReviewGate, cfg.ReviewCommand)
+	}
+}
