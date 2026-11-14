@@ -172,6 +172,16 @@ type Runner struct {
 	// amf process working on it, before watch puts it back to amf:ready
 	// (see sweepStale). 0 turns the sweep off.
 	StaleTimeout time.Duration
+	// ReviewGate, from AMF_REVIEW_GATE=on, runs the opt-in pre-PR review
+	// gate: ReviewCommand, then a review agent, before anything is pushed.
+	ReviewGate bool
+	// ReviewCommand, from AMF_REVIEW_COMMAND, is the shell command the
+	// review gate runs in the worktree. "" means no command step.
+	ReviewCommand string
+	// reviewSection is the PR body's Review gate section from the latest
+	// passing gate, "" when the gate is off. prBody gives it its own
+	// section, never inside the agent's summary.
+	reviewSection string
 	// working is the issue this process is running now, 0 for none.
 	working int
 	// attempts are the agent runs of the latest build without a pipeline,
@@ -450,6 +460,7 @@ func (r *Runner) checkAuthor(issue Issue) error {
 func (r *Runner) process(ctx context.Context, issue Issue, base string, p *Pipeline, agent runPlan) (pr PullRequest, updated bool, err error) {
 	n := issue.Number
 	branch, wt := issueBranch(n), r.worktreePath(n)
+	r.reviewSection = ""
 	summary, extra, err := r.build(ctx, issue, base, p, agent)
 	if err != nil {
 		return PullRequest{}, false, err
@@ -457,6 +468,13 @@ func (r *Runner) process(ctx context.Context, issue Issue, base string, p *Pipel
 	facts, err := r.changeFacts(ctx, wt, base)
 	if err != nil {
 		return PullRequest{}, false, err
+	}
+	if r.ReviewGate {
+		review, err := r.reviewGate(ctx, issue, base, p)
+		if err != nil {
+			return PullRequest{}, false, err
+		}
+		r.reviewSection = review.section()
 	}
 
 	r.event(slog.LevelInfo, "issue.push", n, fmt.Sprintf("#%d: pushing %s", n, branch), "branch", branch)
@@ -583,6 +601,9 @@ func (r *Runner) prBody(summary, extra string, n int, facts ...changeFacts) stri
 	b.WriteString("\n## Agent summary\n\n")
 	b.WriteString("_Written by the agent; amf has not verified it._\n\n")
 	b.WriteString(summary + "\n\n")
+	if s := r.reviewPart(n, f.Part); s != "" {
+		b.WriteString(s + "\n\n")
+	}
 	if f.Part {
 		b.WriteString(fmt.Sprintf("Part of #%d", n))
 	} else {

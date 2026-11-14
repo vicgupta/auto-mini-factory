@@ -71,7 +71,8 @@ first, then `.env`, then this file.
 
 Every configuration setting amf reads from `.env` or the environment (`amf help env`
 prints the same list). Real environment variables win over the file, and
-placeholders ending in `...`, and `owner/name`, count as unset.
+placeholders ending in `...`, and `owner/name`, count as unset (except
+`AMF_REVIEW_COMMAND`, whose shell commands may end in `./...`).
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -92,6 +93,8 @@ placeholders ending in `...`, and `owner/name`, count as unset.
 | `AMF_STALE_TIMEOUT` | `max(2x agent timeout, 2h)` | How long `watch` lets an issue stay `amf:in-progress` with no amf working on it before putting it back to `amf:ready`; `off` disables it. `--stale-timeout` overrides it |
 | `AMF_PR_SECTIONS` | `off` | `on` asks the agent for `## Testing` and `## Decisions on open questions` sections, and adds those, the docs changed from git, and a README feature-list check to the PR body. Any other value is an error |
 | `AMF_LOG_LEVEL` | `info` (terminal), `debug` (event log) | `debug`, `info`, `warn` or `error`, for both the terminal and the event log of `run` and `watch`; `--log-level` overrides it |
+| `AMF_REVIEW_GATE` | `off` | `on` runs the opt-in pre-PR review gate before anything is pushed: `AMF_REVIEW_COMMAND`, then a review agent. Any other non-empty value is an error naming the variable |
+| `AMF_REVIEW_COMMAND` | unset | Shell command the review gate runs in the worktree with `sh -c`, as the repo's test gate (for example `test -z "$(gofmt -l .)" && go test ./...`). Unset runs no command step |
 | `AMF_CODEX` | `codex` | Path to the Codex CLI |
 | `AMF_OPENCODE` | `opencode` | Path to the opencode CLI |
 | `AMF_GITHUB_CLIENT_ID` | unset | The GitHub OAuth app `amf auth login` uses, when `--client-id` isn't given |
@@ -115,6 +118,8 @@ OPENAI_API_KEY=sk-proj-...   # optional: OpenAI API key for codex
 # AMF_AGENT_IDLE_TIMEOUT=30m   # optional: stop an agent that produces no output or changes no worktree file for this long (off disables it)
 # AMF_PR_SECTIONS=off   # optional: on adds Testing, Docs updated, Decisions and README sections to PRs
 # AMF_LOG_LEVEL=info   # optional: debug, info, warn or error, for the terminal and the event log in .amf/runs/
+# AMF_REVIEW_GATE=off   # optional: on runs a test command and a review agent before amf pushes
+# AMF_REVIEW_COMMAND=   # optional: shell command the review gate runs in the worktree with sh -c
 AMF_TRUSTED=login1,login2...   # optional: only work on issues opened by these GitHub users
 # AMF_POSTGRES_URL=postgres://user:password@localhost:5432/postgres   # optional: also save the logs to database amflogs on this PostgreSQL server
 ```

@@ -84,6 +84,12 @@ type Config struct {
 	// back to amf:ready. "" means the default, "off" no sweep.
 	StaleTimeout string
 
+	// ReviewGate is AMF_REVIEW_GATE as written: on runs the opt-in pre-PR
+	// review gate, off (or "") doesn't. parseReviewGate reads it.
+	ReviewGate string
+	// ReviewCommand is AMF_REVIEW_COMMAND, the shell command the review
+	// gate runs as the repo's test gate. "" means no command step.
+	ReviewCommand string
 	// PRSections is AMF_PR_SECTIONS=on: the PR body and the agents' prompts
 	// include the Testing, Docs updated, Decisions and README sections.
 	PRSections bool
@@ -162,17 +168,22 @@ func loadConfig(paths ...string) (Config, error) {
 		}
 	}
 	seen := map[string]configValue{}
-	// Unfilled placeholders from `amf init` count as unset.
+	// Unfilled placeholders from `amf init` count as unset. A review
+	// command is a shell command, so one ending in the Go package pattern
+	// "./..." is real, not a placeholder.
+	placeholder := func(key, v string) bool {
+		return key != "AMF_REVIEW_COMMAND" && isPlaceholder(v)
+	}
 	get := func(key, def string) string {
-		if v := os.Getenv(key); v != "" && !isPlaceholder(v) {
+		if v := os.Getenv(key); v != "" && !placeholder(key, v) {
 			seen[key] = configValue{"env", v}
 			return v
 		}
-		if v := file[key]; v != "" && !isPlaceholder(v) {
+		if v := file[key]; v != "" && !placeholder(key, v) {
 			seen[key] = configValue{".env", v}
 			return v
 		}
-		if v := repoVars[key]; v != "" && !isPlaceholder(v) {
+		if v := repoVars[key]; v != "" && !placeholder(key, v) {
 			seen[key] = configValue{"repo", v}
 			return v
 		}
@@ -200,6 +211,8 @@ func loadConfig(paths ...string) (Config, error) {
 		AgentIdleTimeout: get("AMF_AGENT_IDLE_TIMEOUT", ""),
 		LogLevel:         get("AMF_LOG_LEVEL", ""),
 		StaleTimeout:     get("AMF_STALE_TIMEOUT", ""),
+		ReviewGate:       get("AMF_REVIEW_GATE", ""),
+		ReviewCommand:    get("AMF_REVIEW_COMMAND", ""),
 		PRSectionsRaw:    get("AMF_PR_SECTIONS", ""),
 		EnvPaths:         paths,
 		EnvFile:          envFile,
@@ -279,6 +292,19 @@ func parseAgentIdleTimeout(v string) (time.Duration, error) {
 		return 0, fmt.Errorf("AMF_AGENT_IDLE_TIMEOUT: the idle timeout must be positive, got %s (use off to disable it)", d)
 	}
 	return d, nil
+}
+
+// parseReviewGate reads AMF_REVIEW_GATE. "" and off mean the gate is off;
+// on turns it on, exactly as written. Any other value is an error naming
+// the variable.
+func parseReviewGate(v string) (bool, error) {
+	switch v {
+	case "", "off":
+		return false, nil
+	case "on":
+		return true, nil
+	}
+	return false, fmt.Errorf("AMF_REVIEW_GATE must be on or off, got %q", v)
 }
 
 // parseTrusted splits AMF_TRUSTED, a list of GitHub logins separated by

@@ -209,6 +209,9 @@ func (r *Runner) sectionedPRBody(summary, extra string, n int, f changeFacts) st
 	if !readmeChanged {
 		b.WriteString("\n\n## README feature list\n\n" + prReadmeMissing)
 	}
+	if s := r.reviewPart(n, f.Part); s != "" {
+		b.WriteString("\n\n" + s)
+	}
 	b.WriteString("\n\n")
 	if f.Part {
 		b.WriteString(fmt.Sprintf("Part of #%d", n))

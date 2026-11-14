@@ -191,6 +191,23 @@ func (d *doctor) check(ctx context.Context) {
 		d.line("ok", "agent timeout", "%s, from %s", timeout, source("AMF_AGENT_TIMEOUT", envFile))
 	}
 
+	// The opt-in pre-PR review gate.
+	gate, gerr := parseReviewGate(cfg.ReviewGate)
+	switch {
+	case !parsed:
+		d.line("skip", "review gate", ".env didn't parse")
+	case gerr != nil:
+		d.line("FAIL", "review gate", "%v", gerr)
+	case gate:
+		command := "no AMF_REVIEW_COMMAND"
+		if cfg.ReviewCommand != "" {
+			command = "AMF_REVIEW_COMMAND is set"
+		}
+		d.line("ok", "review gate", "on; %s", command)
+	default:
+		d.line("ok", "review gate", "off, the default (AMF_REVIEW_GATE=on turns it on)")
+	}
+
 	// The checkout, and pushing from it.
 	root := d.checkCheckout(ctx, cfg, repoOK)
 	d.checkAutoState(root)

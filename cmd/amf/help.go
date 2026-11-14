@@ -232,7 +232,8 @@ See also: amf help pipeline, amf help env, amf help run
 `
 
 const envHelp = `Configuration is read from .env (or the environment; environment variables win).
-Placeholders ending in ..., and owner/name, count as unset.
+Placeholders ending in ..., and owner/name, count as unset (review commands
+are not placeholders).
 
   GITHUB_TOKEN (default: gh auth token, then amf auth login)
     API access: Contents, Issues, Pull requests (read & write). GH_TOKEN is read
@@ -293,6 +294,12 @@ Placeholders ending in ..., and owner/name, count as unset.
   AMF_LOG_LEVEL (default: info (terminal), debug (event log))
     debug, info, warn or error, for both the terminal and the event log of
     run and watch; --log-level overrides it
+  AMF_REVIEW_GATE (default: off)
+    on runs an opt-in pre-PR review gate before anything is pushed: a test
+    command and a review agent. Any other non-empty value is an error
+  AMF_REVIEW_COMMAND (default: unset)
+    Shell command the review gate runs in the worktree with sh -c, as the
+    repo's test gate; unset runs no command step
   AMF_CODEX (default: codex)
     Path to the Codex CLI
   AMF_OPENCODE (default: opencode)
