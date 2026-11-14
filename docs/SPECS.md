@@ -852,10 +852,10 @@ or `--host`.
    `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
    `OPENCODE_API_KEY`, `OPENCODE_MODEL`, `AMF_PRIMARY_AGENT`,
    `AMF_SECONDARY_AGENT`, `AMF_AGENT_TIMEOUT`, `AMF_AGENT_IDLE_TIMEOUT`,
-   `AMF_LOG_LEVEL`, `AMF_TRUSTED` and `AMF_POSTGRES_URL`.
+   `AMF_PR_SECTIONS`, `AMF_LOG_LEVEL`, `AMF_TRUSTED` and `AMF_POSTGRES_URL`.
    - `OPENCODE_API_KEY`, `OPENCODE_MODEL`, `AMF_PRIMARY_AGENT`,
      `AMF_SECONDARY_AGENT`, `AMF_AGENT_TIMEOUT`, `AMF_AGENT_IDLE_TIMEOUT`,
-     `AMF_LOG_LEVEL`
+     `AMF_PR_SECTIONS`, `AMF_LOG_LEVEL`
      and `AMF_POSTGRES_URL` are written
      commented out, as `# OPENCODE_MODEL=opencode/big-pickle   # opencode/<id> for free and pay-as-you-go models, opencode-go/<id> for Go; 'opencode models' lists them`
      until they have a real value. None is one of the values `init` asks
@@ -910,6 +910,8 @@ changes anything (issue labels, below). The checks, in order:
 | `.env` | A `.env` was found where `run` looks; shows its path | `warn` if there is none (the environment is used); `FAIL` if it doesn't parse |
 | `GITHUB_TOKEN` | A token was found; says its source: `.env`, the environment, `gh auth token` or `amf auth login` | `FAIL` if none or a placeholder |
 | `GITHUB_REPO` | Set and `owner/name` | `FAIL` |
+| `repo settings` | When the per-repo settings file exists, shows its path | No line when there is none |
+| `PR sections` | `AMF_PR_SECTIONS`: `on` or `off`, and where the value came from | `FAIL` if it isn't `on`, `off` or empty |
 | `github` | `GET /user` accepts the token; shows the login. A 403 (a token that can't read `/user`) is `ok`, without a login | `FAIL` on 401 or no connection |
 | `scopes` | The token's `X-OAuth-Scopes` (classic and OAuth tokens); `ok` with none reported (fine-grained tokens) | `warn` if scopes are reported without `repo` |
 | `repo` | The repo is readable; shows its default branch | `FAIL` on 404; `warn` if the account can't push |
@@ -1001,6 +1003,7 @@ space, a trailing comment. A leading byte order mark is ignored.
 | `AMF_AGENT_TIMEOUT` | `60m` | How long each agent run may take, as a Go duration; `--agent-timeout` (or its deprecated alias `--timeout`) overrides it. Must be at least 1m and at most 24h |
 | `AMF_AGENT_IDLE_TIMEOUT` | `30m` | How long an agent may produce no output on stdout or stderr, and change no file in the worktree, before amf stops it and fails the run, as a Go duration; `off` disables it. Must be positive |
 | `AMF_STALE_TIMEOUT` | `max(2x agent timeout, 2h)` | How long `watch` lets an issue stay `amf:in-progress` with no amf working on it before putting it back to `amf:ready`; `off` disables it. `--stale-timeout` overrides it |
+| `AMF_PR_SECTIONS` | `off` | `on` asks the agent for `## Testing` and `## Decisions on open questions` sections, and adds those, the docs changed from git, and a README feature-list check to the PR body. Any other value is an error |
 | `AMF_LOG_LEVEL` | `info` (terminal), `debug` (event log) | `debug`, `info`, `warn` or `error`, for both the terminal and the event log of `run` and `watch`; `--log-level` overrides it |
 | `AMF_CODEX` | `codex` | Path to the Codex CLI |
 | `AMF_OPENCODE` | `opencode` | Path to the opencode CLI |
@@ -1008,6 +1011,16 @@ space, a trailing comment. A leading byte order mark is ignored.
 | `AMF_CONFIG_DIR` | the user config folder's amf | Where `amf auth login` saves tokens (`hosts.json`); environment only |
 | `AMF_API_URL` | `https://api.github.com` | GitHub API base URL. `amf pr ready` and `amf pr draft` derive their GraphQL endpoint from it: `…/graphql` appended, or a GitHub Enterprise Server `…/api/v3` becomes `…/api/graphql` |
 | `AMF_CLONE_URL` | `https://github.com/<repo>.git` | Where to clone `GITHUB_REPO` from |
+
+A per-repo settings file at `<config-dir>/repos/<host>/<owner>/<name>.env`
+may also set `AMF_PR_*` and `AMF_REVIEW_*` variables, where `<config-dir>` is
+`AMF_CONFIG_DIR` or the user config folder's `amf` (the folder holding
+`hosts.json`), `<host>` is the host of `AMF_API_URL` (`github.com` for
+`https://api.github.com`), and `<owner>/<name>` is the lower-cased
+`GITHUB_REPO`. It uses the same `KEY=value` syntax as `.env`. It is read
+after `.env` and before the defaults, and its variables show `repo` as their
+source in `config.load`. Any other key in it is an error naming the file and
+the key, so a token can never come from it. A missing file is normal.
 
 ## Pipelines (`AGENTS.md`)
 
@@ -1153,7 +1166,11 @@ and exit code are preserved.
      which is never pushed and which a retry resets to `origin/<default>`.
    - **Summary:** the final message becomes the summary. Its `amf-status:`
      line is removed; the last `complete` or `partial` value sets the run's
-     partial flag, which `--part` also sets.
+     partial flag, which `--part` also sets. With `AMF_PR_SECTIONS=on`, the
+     prompt also asks for `## Testing` (exact commands and actual results,
+     never invented numbers) and `## Decisions on open questions` (each open
+     question and the cautious choice, or `None.`), and for a user-visible
+     feature an updated `README.md` feature-list entry linking its docs.
 
    With a pipeline, this step and the next are replaced by the steps in
    "With a pipeline" below.
@@ -1200,6 +1217,25 @@ and exit code are preserved.
    For a partial change it rewrites any other closing keyword for the issue
    to `Part of`. That way each PR is credited to the user alone and closes
    the issue once, and a partial PR never closes it.
+
+   With `AMF_PR_SECTIONS=on`, the body instead has these sections in order:
+   `## Summary` (the agent summary, without the agent's Testing, Decisions
+   and Docs updated sections or its `Summary` heading); `## Changes` (the
+   git-observed diffstat and changed files above); `## Testing` (the agent's
+   Testing section, or `The agent did not report how it tested this
+   change.`); `## Docs updated` (the changed paths ending in `.md`, `.mdx`
+   or `.rst`, or under `docs/` or `doc/`, or `None.`); `## Decisions on open
+   questions` (the agent's section, or `The agent did not report decisions
+   on open questions.`); and, only when `README.md` didn't change,
+   `## README feature list` (`README.md was not changed, so the feature list
+   has no entry for this change.`). After amf drops `amf-status` and
+   attribution lines, a section is found by its Markdown
+   heading, any level and case-insensitive; named `Testing`, `Decisions on
+   open questions` (or `Decisions`), or `Docs updated`, and it runs until the
+   next heading of the same or a higher level. amf never invents content.
+   When a section is missing, or README.md didn't change, amf logs and prints
+   a `pr.sections_missing` warning naming `testing`, `decisions` and/or
+   `readme`.
 10. **Clean up.** Remove the worktree. The branch and logs are kept.
 11. **Merge** (with `--merge` only). Merge the PR with the method `--merge`
     names, through GitHub's merge API, pinned to the commit amf pushed
@@ -1445,6 +1481,7 @@ redirect to a URL ending in the tag, and serve the archive and
 | `.amf/runs/<run_id>/summary.json` | That process's summary, rewritten after each issue and at exit |
 | `.amf/opencode.json` | The config amf runs opencode with |
 | `<config-dir>/hosts.json` | Tokens saved by `amf auth login`, per host (0600, folder 0700); `<config-dir>` is `AMF_CONFIG_DIR` or `os.UserConfigDir()/amf` |
+| `<config-dir>/repos/<host>/<owner>/<name>.env` | Optional per-repo settings; only `AMF_PR_*` and `AMF_REVIEW_*` keys are read |
 | `<memory-dir>/amf-memory/<host>/<owner>/<repo>/` | The repo's memory (see [Repo memory](#repo-memory)) |
 
 amf only ever adds to `.git/info/exclude`. It never edits a tracked `.gitignore`.
@@ -1466,7 +1503,7 @@ event log opens, are not. The fields of each event, besides those:
 | `agent.fallback` | warn | Without a pipeline, the primary agent failed or wasn't usable: `from`, `to`, `reason` (`unusable`, `error` or `agent_timeout`, which also covers an idle timeout) and `error` |
 | `log.file` | info | `path`: the event log |
 | `run.summary` | debug, info | The fields of `summary.json` (see Commands) as `done`, `failed`, `skipped`, `github_calls`, `ratelimit_lowest`, `git_calls`, `agent_ms`, `errors`, `log`, and `final`: false (debug) after an issue, true (info, the terminal's last line) at exit |
-| `config.load` | debug | `paths` (the `.env` files looked for), `file` (the one read, or `""`), and `keys`: for each variable read, its `source` (`env`, `.env` or `default`) and `value`. Only `GITHUB_REPO`, `AMF_API_URL`, `OPENCODE_MODEL`, `AMF_AGENT_TIMEOUT`, `AMF_AGENT_IDLE_TIMEOUT`, `AMF_STALE_TIMEOUT`, `AMF_LOG_LEVEL`, `AMF_CLAUDE`, `AMF_CODEX` and `AMF_OPENCODE` show their value; every other one shows `set` or `unset` |
+| `config.load` | debug | `paths` (the `.env` files looked for), `file` (the one read, or `""`), and `keys`: for each variable read, its `source` (`env`, `.env`, `repo` or `default`) and `value`. Only `GITHUB_REPO`, `AMF_API_URL`, `OPENCODE_MODEL`, `AMF_AGENT_TIMEOUT`, `AMF_AGENT_IDLE_TIMEOUT`, `AMF_STALE_TIMEOUT`, `AMF_PR_SECTIONS`, `AMF_LOG_LEVEL`, `AMF_CLAUDE`, `AMF_CODEX` and `AMF_OPENCODE` show their value; every other one shows `set` or `unset` |
 | `pg.connect` | debug | With `AMF_POSTGRES_URL`: `host`, `port`, `database`, and `tls` and `auth` (`trust`, `password`, `md5` or `scram-sha-256`), or `error`; `created` when amf created the database. The first connection's event follows `log.file` and `config.load` |
 | `pg.retry` | debug | `attempt` (since the last success), `backoff`, `error` |
 | `pg.drop` | debug | `rows` that never reached the database, and `error` when amf gave up at exit |
@@ -1500,6 +1537,7 @@ event log opens, are not. The fields of each event, besides those:
 | `agent.timeout` | warn | `agent`, `stage`, `limit`, `elapsed`, `grace`, `pgid`, `bytes` (stdout so far), `log`, and `idle: true` when the idle timeout stopped it |
 | `issue.push` | info | `branch` |
 | `issue.pr` | info | `action` (`opened`, `updated`, or `updating` when the branch has an open PR), `number`, `url` |
+| `pr.sections_missing` | warn | With `AMF_PR_SECTIONS=on`: `sections`, the missing ones (`testing`, `decisions`, `readme`) |
 | `issue.merge` | info, warn, debug | `action`, `method`, `number`: `merging` (info) with `sha`, then `merged` (info) with `commit` (GitHub's merge commit) and `attempts`, or `failed` (warn) with `error`; `retry` (debug) with `attempt` and `error` when GitHub said not mergeable yet |
 | `issue.comment` | debug | `bytes`; warn with `error` when posting failed |
 | `issue.cleanup` | warn | `error`: a worktree that couldn't be removed or pruned |

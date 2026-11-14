@@ -102,6 +102,9 @@ type Runner struct {
 	// Draft opens new pull requests as drafts, from --draft. A retry that
 	// updates an open PR leaves it a draft or ready for review as it was.
 	Draft bool
+	// PRSections is AMF_PR_SECTIONS=on: the prompts ask the agent for the
+	// Testing and Decisions sections, and the PR body reports them.
+	PRSections bool
 	// ExcludeLabels, from watch's --exclude-label, makes watch skip issues
 	// with any of these labels, leaving them as they are.
 	ExcludeLabels []string
@@ -550,6 +553,9 @@ func (r *Runner) prBody(summary, extra string, n int, facts ...changeFacts) stri
 	if len(facts) > 0 {
 		f = facts[0]
 	}
+	if r.PRSections {
+		return r.Redact.Redact(r.sectionedPRBody(summary, extra, n, f))
+	}
 	summary = cleanSummary(summary, n)
 	if f.Part {
 		summary = rewriteClosingKeywords(summary, n)
@@ -636,7 +642,7 @@ func (r *Runner) buildOne(ctx context.Context, issue Issue, base, agent, log str
 	}
 	r.event(slog.LevelInfo, "issue.agent", n, text, "agent", agentName(agent), "model", model, "timeout", r.Timeout.String())
 	out := filepath.Join(wt, ".amf", "code.md") // for agents that write their final message to a file
-	if summary, err = r.runAgent(ctx, agent, "", model, wt, base, buildPrompt(r.Repo, branch, issue), log, out); err != nil {
+	if summary, err = r.runAgent(ctx, agent, "", model, wt, base, buildPrompt(r.Repo, branch, issue, r.PRSections), log, out); err != nil {
 		return "", exitOf(err), err
 	}
 	var status string
@@ -916,10 +922,14 @@ func protectedPaths(changed []string) []string {
 	return bad
 }
 
-func buildPrompt(repo, branch string, issue Issue) string {
+func buildPrompt(repo, branch string, issue Issue, prSections ...bool) string {
 	body := strings.TrimSpace(issue.Body)
 	if body == "" {
 		body = "(no description)"
+	}
+	sections := ""
+	if len(prSections) > 0 && prSections[0] {
+		sections = prSectionsInstruction
 	}
 	return fmt.Sprintf(`You are working in a git worktree of the GitHub repository %s, on branch %s.
 Resolve this GitHub issue:
@@ -935,10 +945,10 @@ Instructions:
 - Do not commit, push, create branches or open pull requests. amf handles git and GitHub.
 - When you are done, reply with only a pull request description in Markdown:
   a short summary of what changed and why, and how you verified it.
-- End the final message with exactly one line: amf-status: complete if the
+%s- End the final message with exactly one line: amf-status: complete if the
   change finishes the issue, or amf-status: partial if it is only one slice
   of it.
-`, repo, branch, issue.Number, issue.Title, body)
+`, repo, branch, issue.Number, issue.Title, body, sections)
 }
 
 // cleanSummary prepares Claude's summary for a PR body. It drops attribution

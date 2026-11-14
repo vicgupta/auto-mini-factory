@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"maps"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -83,6 +84,13 @@ type Config struct {
 	// back to amf:ready. "" means the default, "off" no sweep.
 	StaleTimeout string
 
+	// PRSections is AMF_PR_SECTIONS=on: the PR body and the agents' prompts
+	// include the Testing, Docs updated, Decisions and README sections.
+	PRSections bool
+	// PRSectionsRaw is AMF_PR_SECTIONS as written, for a command to report a
+	// bad value instead of every command that reads .env failing on it.
+	PRSectionsRaw string
+
 	// Trusted is AMF_TRUSTED, the lower-case GitHub logins whose issues amf
 	// works on. Nil means anyone's.
 	Trusted []string
@@ -91,6 +99,8 @@ type Config struct {
 	// one it read, or "".
 	EnvPaths []string
 	EnvFile  string
+	// RepoConfigFile is the per-repo settings file loadConfig read, or "".
+	RepoConfigFile string
 	// seen is each variable loadConfig read: where from and its value.
 	seen map[string]configValue
 }
@@ -120,6 +130,37 @@ func loadConfig(paths ...string) (Config, error) {
 		envFile = p
 		break
 	}
+	first := func(key, def string) string {
+		if v := os.Getenv(key); v != "" && !isPlaceholder(v) {
+			return v
+		}
+		if v := file[key]; v != "" && !isPlaceholder(v) {
+			return v
+		}
+		return def
+	}
+	repoFile := repoSettingsPath(strings.TrimSuffix(first("AMF_API_URL", "https://api.github.com"), "/"), normalizeRepo(first("GITHUB_REPO", "")))
+	repoVars := map[string]string{}
+	if repoFile != "" {
+		f, err := os.Open(repoFile)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			repoFile = ""
+		case err != nil:
+			return Config{}, err
+		default:
+			repoVars, err = parseDotEnv(f)
+			f.Close()
+			if err != nil {
+				return Config{}, fmt.Errorf("%s: %w", repoFile, err)
+			}
+			for k := range repoVars {
+				if !strings.HasPrefix(k, "AMF_PR_") && !strings.HasPrefix(k, "AMF_REVIEW_") {
+					return Config{}, fmt.Errorf("%s: %s is not allowed in a repo settings file; only AMF_PR_* and AMF_REVIEW_* are read", repoFile, k)
+				}
+			}
+		}
+	}
 	seen := map[string]configValue{}
 	// Unfilled placeholders from `amf init` count as unset.
 	get := func(key, def string) string {
@@ -129,6 +170,10 @@ func loadConfig(paths ...string) (Config, error) {
 		}
 		if v := file[key]; v != "" && !isPlaceholder(v) {
 			seen[key] = configValue{".env", v}
+			return v
+		}
+		if v := repoVars[key]; v != "" && !isPlaceholder(v) {
+			seen[key] = configValue{"repo", v}
 			return v
 		}
 		seen[key] = configValue{"default", def}
@@ -155,10 +200,13 @@ func loadConfig(paths ...string) (Config, error) {
 		AgentIdleTimeout: get("AMF_AGENT_IDLE_TIMEOUT", ""),
 		LogLevel:         get("AMF_LOG_LEVEL", ""),
 		StaleTimeout:     get("AMF_STALE_TIMEOUT", ""),
+		PRSectionsRaw:    get("AMF_PR_SECTIONS", ""),
 		EnvPaths:         paths,
 		EnvFile:          envFile,
+		RepoConfigFile:   repoFile,
 		seen:             seen,
 	}
+	cfg.PRSections = cfg.PRSectionsRaw == "on"
 	cfg.Token, cfg.TokenSource = resolveToken(get, seen, envFile, authHost(cfg.APIURL))
 	if cfg.Token == "" {
 		return cfg, errNoToken
@@ -171,6 +219,31 @@ func loadConfig(paths ...string) (Config, error) {
 	}
 	cfg.CloneURL = get("AMF_CLONE_URL", "https://github.com/"+cfg.Repo+".git")
 	return cfg, nil
+}
+
+// repoSettingsPath is the box-local settings file for a repo, or "" when
+// the repo or the config folder can't name one.
+func repoSettingsPath(apiURL, repo string) string {
+	if validRepo(repo) != nil {
+		return ""
+	}
+	d, err := configDir()
+	if err != nil {
+		return ""
+	}
+	owner, name, _ := strings.Cut(strings.ToLower(repo), "/")
+	return filepath.Join(d, "repos", authHost(apiURL), owner, name+".env")
+}
+
+// parsePRSections reads AMF_PR_SECTIONS: on, off, or empty (off).
+func parsePRSections(v string) (bool, error) {
+	switch v {
+	case "", "off":
+		return false, nil
+	case "on":
+		return true, nil
+	}
+	return false, fmt.Errorf("AMF_PR_SECTIONS=%q: want on or off", v)
 }
 
 // parseAgentTimeout reads AMF_AGENT_TIMEOUT. An empty value means unset (0);
@@ -268,7 +341,7 @@ func parseDotEnv(r io.Reader) (map[string]string, error) {
 
 // shownConfig are the variables whose values config.load may log; every
 // other one is logged only as set or unset.
-var shownConfig = []string{"GITHUB_REPO", "AMF_API_URL", "OPENCODE_MODEL", "AMF_AGENT_TIMEOUT", "AMF_AGENT_IDLE_TIMEOUT", "AMF_STALE_TIMEOUT", "AMF_LOG_LEVEL", "AMF_CLAUDE", "AMF_CODEX", "AMF_OPENCODE", "AMF_PRIMARY_AGENT", "AMF_SECONDARY_AGENT"}
+var shownConfig = []string{"GITHUB_REPO", "AMF_API_URL", "OPENCODE_MODEL", "AMF_AGENT_TIMEOUT", "AMF_AGENT_IDLE_TIMEOUT", "AMF_STALE_TIMEOUT", "AMF_PR_SECTIONS", "AMF_LOG_LEVEL", "AMF_CLAUDE", "AMF_CODEX", "AMF_OPENCODE", "AMF_PRIMARY_AGENT", "AMF_SECONDARY_AGENT"}
 
 // configAttrs is, for config.load, each variable loadConfig read with where
 // it came from and its value, or set or unset for those not in shownConfig.
