@@ -2143,7 +2143,7 @@ func TestPipelineCodexWritesNoMessage(t *testing.T) {
 func TestPipelineOpencodeReadsPromptFromStdin(t *testing.T) {
 	r, gh, _, _ := pipelineRun(t, "## amf\n\n| Stage | Agent | Model |\n|---|---|---|\n| code | opencode | default |\n", "claude")
 	r.Opencode = fakeAgent(t, "opencode", `
-[ "$#" = 1 ] && [ "$1" = run ] || { echo "bad args: $*" >&2; exit 5; }
+[ "$#" = 4 ] && [ "$1" = run ] && [ "$2" = --print-logs ] && [ "$3" = --log-level ] && [ "$4" = ERROR ] || { echo "bad args: $*" >&2; exit 5; }
 prompt=$(cat)
 case "$prompt" in *"Add feature file"*"final reply"*) ;; *) echo "bad prompt: $prompt" >&2; exit 4;; esac
 echo x > feature.txt
@@ -2802,7 +2802,7 @@ echo "Added feature.txt with codex (key: ${OPENAI_API_KEY:-none})." > "$4"
 // fakeDefaultOpencode is opencode run without a pipeline, writing its final
 // reply to the file the prompt names.
 const fakeDefaultOpencode = `
-[ "$*" = run ] || { echo "bad args: $*" >&2; exit 5; }
+[ "$*" = "run --print-logs --log-level ERROR" ] || { echo "bad args: $*" >&2; exit 5; }
 out=$(cat | sed -n 's/.*final reply, exactly as you give it, to the file \(.*\)\.$/\1/p')
 echo hello > feature.txt
 echo "Added feature.txt with opencode." > "$out"
@@ -3056,7 +3056,7 @@ func TestOpencodeModel(t *testing.T) {
 	r, log := newTestRunner(t, srv, root, filepath.Join(t.TempDir(), "no-claude"))
 	r.OpencodeModel = "opencode/test-model-free"
 	r.Opencode = fakeAgent(t, "opencode", `
-[ "$*" = "run --model opencode/test-model-free" ] || { echo "bad args: $*" >&2; exit 5; }
+[ "$*" = "run --print-logs --log-level ERROR --model opencode/test-model-free" ] || { echo "bad args: $*" >&2; exit 5; }
 out=$(cat | sed -n 's/.*final reply, exactly as you give it, to the file \(.*\)\.$/\1/p')
 echo hello > feature.txt
 echo "Added with the model." > "$out"
@@ -3080,8 +3080,8 @@ func TestOpencodeModelInPipeline(t *testing.T) {
 prompt=$(cat)
 out=$(printf '%s\n' "$prompt" | sed -n 's/.*final reply, exactly as you give it, to the file \(.*\)\.$/\1/p')
 case "$prompt" in
-*"VERDICT: PASS"*) [ "$*" = "run --model opencode/eval-model" ] || { echo "eval args: $*" >&2; exit 5; }; printf 'ok\n\nVERDICT: PASS\n' > "$out" ;;
-*) [ "$*" = "run --model opencode/env-model" ] || { echo "code args: $*" >&2; exit 5; }; echo hello > feature.txt; echo "Coded." > "$out" ;;
+*"VERDICT: PASS"*) [ "$*" = "run --print-logs --log-level ERROR --model opencode/eval-model" ] || { echo "eval args: $*" >&2; exit 5; }; printf 'ok\n\nVERDICT: PASS\n' > "$out" ;;
+*) [ "$*" = "run --print-logs --log-level ERROR --model opencode/env-model" ] || { echo "code args: $*" >&2; exit 5; }; echo hello > feature.txt; echo "Coded." > "$out" ;;
 esac
 `)
 	if err := r.Run(context.Background(), 1); err != nil {

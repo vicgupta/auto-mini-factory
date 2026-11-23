@@ -96,6 +96,10 @@ type Runner struct {
 	// KillGrace is how long an agent gets to exit after SIGTERM before amf
 	// SIGKILLs its process group, in tests small. 0 means agentKillGrace.
 	KillGrace time.Duration
+	// ProgressEvery is how often amf prints a still-running line while an
+	// agent is working. 0 means defaultAgentProgress; a negative value
+	// disables it. Quiet hides the line.
+	ProgressEvery time.Duration
 	// EvalRounds is how many times a pipeline's eval stage may send a change
 	// back to the code stage.
 	EvalRounds int
@@ -323,7 +327,14 @@ func (r *Runner) Run(ctx context.Context, n int) (err error) {
 			// into the worktree, and its partial work is never pushed.
 			r.removeWorktree(cctx, n)
 		}
-		if ate == nil {
+		var ale *agentLimitError
+		if errors.As(err, &ale) {
+			msg = ale.comment(r.Root)
+			r.event(slog.LevelInfo, "issue.failed", n, fmt.Sprintf("issue.failed: issue=%d reason=agent_limit", n),
+				"reason", "agent_limit", "stage", stageName(ale.Stage), "kind", ale.Kind, "error", err)
+			r.removeWorktree(cctx, n)
+		}
+		if ate == nil && ale == nil {
 			reason := "error"
 			if se != nil {
 				reason = "stage"
@@ -724,6 +735,8 @@ func (r *Runner) buildFallback(ctx context.Context, issue Issue, base string, pl
 			reason := "error"
 			if errors.As(err, new(*agentTimeoutError)) {
 				reason = "agent_timeout"
+			} else if errors.As(err, new(*agentLimitError)) {
+				reason = "agent_limit"
 			}
 			r.fallbackEvent(n, agent, plan.Agents[i+1], reason, err.Error())
 		}

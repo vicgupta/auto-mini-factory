@@ -613,7 +613,10 @@ func (r *Runner) runAgent(ctx context.Context, agent, stage, model, wt, base, pr
 		if err != nil {
 			return "", err
 		}
-		args := []string{"run"}
+		// --print-logs --log-level ERROR puts usage and rate-limit
+		// errors on stderr; without them OpenCode can hit a limit,
+		// print nothing, and hang until the idle timeout.
+		args := []string{"run", "--print-logs", "--log-level", "ERROR"}
 		if model != "" {
 			args = append(args, "--model", model)
 		}
@@ -654,9 +657,11 @@ func (r *Runner) runAgent(ctx context.Context, agent, stage, model, wt, base, pr
 	}
 	outLog, errLog := redacted(), redacted()
 	var stderrBytes countWriter
+	var outBytes byteCounter
 	activity := make(chan struct{}, 1)
-	cmd.Stdout = io.MultiWriter(&stdout, outLog, activityWriter(activity))
-	cmd.Stderr = io.MultiWriter(&stderrBytes, errLog, activityWriter(activity))
+	limit := newLimitWatch(r, ctx, agent, cancel)
+	cmd.Stdout = io.MultiWriter(&stdout, outLog, activityWriter(activity), &outBytes, limit.writer(false))
+	cmd.Stderr = io.MultiWriter(&stderrBytes, errLog, activityWriter(activity), &outBytes, limit.writer(true))
 	// An agent that edits files without printing still counts as active:
 	// scan the worktree for changes while it runs, ignoring .git.
 	filesDone := make(chan struct{})
@@ -725,16 +730,22 @@ func (r *Runner) runAgent(ctx context.Context, agent, stage, model, wt, base, pr
 		}
 		callEvent(ctx, "agent.exit", fmt.Sprintf("%s: %s exited %d", stageName(stage), agentName(agent), code), attrs...)
 	}()
+	stopProgress := r.startProgress(r.progressEvery(), logIssue(logPath), agent, begin, &outBytes)
 	runErr := cmd.Run()
 	close(filesDone)
 	close(exited)
 	stopIdle()
+	stopProgress()
 	outLog.Flush()
 	errLog.Flush()
+	limit.flush()
 	// However the run ended, nothing the agent spawned outlives it: the
 	// group-wide SIGKILL costs nothing when the group is already gone.
 	if cmd.Process != nil && groupOutlivesLeader {
 		_ = killGroup(cmd.Process, syscall.SIGKILL)
+	}
+	if kind, msg, ok := limit.result(); ok {
+		return "", r.finishLimit(ctx, agent, stage, kind, msg, wt, base, logPath, outPath, logOut, begin)
 	}
 	idleStopped := false
 	select {

@@ -257,7 +257,19 @@ label commands also return stdout write failures. No git checkout is needed.
   limit), so a long run that keeps printing or editing is not stopped. On
   expiry amf stops the run's process group just as the agent timeout does,
   and fails the run with `<agent> produced no output for <limit>; stopped
-  it`; the fallback or the next stage can then run.
+  it`; the fallback or the next stage can then run. If the agent's stdout or
+  stderr reports a usage, quota, rate-limit, or authentication error (for
+  example OpenCode's `Free usage limit reached`, `HTTP 429`, `rate limit`,
+  `quota exceeded`, or `invalid API key`), amf stops the process group the
+  same way at once and fails with `<agent>: <message>`. A mere mention of a
+  quota does not match. OpenCode is run with `--print-logs --log-level ERROR`
+  so those errors appear on stderr; without that, OpenCode can hit a free
+  usage limit, print almost nothing, and hang. Unless `--quiet`, amf prints
+  redacted agent stderr to its own stderr, prefixed `amf: <agent>:`, and a
+  still-running line every 30s (`#N: <agent> still running (<elapsed>, <n>
+  bytes of output)`) so a silent hang is visible. Claude's stream-json
+  stdout is not dumped to the terminal. `--dry-run` fails fast the same way
+  but does not change labels or post comments.
 - `--label L` (`watch` only, default `amf:ready`) is the label `watch` polls
   for: each poll lists open issues with that exact label. An empty value
   (`amf watch --label ""`, such as an unset shell variable) fails `watch` at
@@ -366,6 +378,7 @@ label commands also return stdout write failures. No git checkout is needed.
   anything, and `doctor` shows as `FAIL agent settings`.
   - **Failure** is any of: the agent isn't usable (below; decided before any
     run), a non-zero exit or error result, the agent timeout or idle timeout,
+    a usage, quota, rate-limit, or authentication error in the agent's output,
     finishing without changes, or a change to a refused path. Interrupting
     amf (Ctrl-C)
     is not a failure and falls back to nothing.
@@ -374,8 +387,8 @@ label commands also return stdout write failures. No git checkout is needed.
     is kept; a timed-out primary's changes were already saved on its
     `amf/wip/issue-N-<UTC time>` branch. Its
     output goes to `.amf/logs/issue-N-<agent>.log`. amf logs an
-    `agent.fallback` event (`from`, `to`, `reason`: `unusable`, `error` or
-    `agent_timeout`, `error`). Its message names the agent that didn't run or
+    `agent.fallback` event (`from`, `to`, `reason`: `unusable`, `error`,
+    `agent_timeout`, or `agent_limit`, `error`). Its message names the agent that didn't run or
     failed, why, and the agent used next: every skipped agent's reason, then
     `falling back to <agent>` (for example `codex is not installed; falling
     back to opencode`), or `<agent> failed (<error>); falling back to
@@ -1002,7 +1015,7 @@ space, a trailing comment. A leading byte order mark is ignored.
 | `AMF_PRIMARY_AGENT` | `codex` | The agent for issues without a pipeline: `claudecode` (or `claude`), `codex` or `opencode`, ignoring case. `--agent` and a pipeline override it |
 | `AMF_SECONDARY_AGENT` | `claudecode` | The agent amf falls back to when the primary fails, in a fresh worktree; the same values, or `none` for no fallback |
 | `AMF_AGENT_TIMEOUT` | `60m` | How long each agent run may take, as a Go duration; `--agent-timeout` (or its deprecated alias `--timeout`) overrides it. Must be at least 1m and at most 24h |
-| `AMF_AGENT_IDLE_TIMEOUT` | `30m` | How long an agent may produce no output on stdout or stderr, and change no file in the worktree, before amf stops it and fails the run, as a Go duration; `off` disables it. Must be positive |
+| `AMF_AGENT_IDLE_TIMEOUT` | `30m` | How long an agent may produce no output on stdout or stderr, and change no file in the worktree, before amf stops it and fails the run, as a Go duration; `off` disables it. Must be positive. A usage, quota, rate-limit, or authentication error in the agent's output fails the run immediately, without waiting for this limit |
 | `AMF_STALE_TIMEOUT` | `max(2x agent timeout, 2h)` | How long `watch` lets an issue stay `amf:in-progress` with no amf working on it before putting it back to `amf:ready`; `off` disables it. `--stale-timeout` overrides it |
 | `AMF_PR_SECTIONS` | `off` | `on` asks the agent for `## Testing` and `## Decisions on open questions` sections, and adds those, the docs changed from git, and a README feature-list check to the PR body. Any other value is an error |
 | `AMF_LOG_LEVEL` | `info` (terminal), `debug` (event log) | `debug`, `info`, `warn` or `error`, for both the terminal and the event log of `run` and `watch`; `--log-level` overrides it |
@@ -1071,7 +1084,7 @@ work. Starter skills are in this repo under `skills/`.
 |---|---|---|
 | `claudecode` | `claude -p --dangerously-skip-permissions --output-format stream-json --verbose [--model M]`, prompt on stdin | The `result` message; one with an error fails the run |
 | `codex` | `codex exec --dangerously-bypass-approvals-and-sandbox [-m M] -o <file> -`, prompt on stdin | The `-o` file; fails if it's empty |
-| `opencode` | `opencode run [--model M]`, prompt on stdin | A file the prompt asks it to write; what it printed, if it didn't |
+| `opencode` | `opencode run [--model M] --print-logs --log-level ERROR`, prompt on stdin | A file the prompt asks it to write; what it printed, if it didn't |
 
 - **Permissions:** every agent runs with permission checks off. opencode
   gets `OPENCODE_CONFIG` pointing at `.amf/opencode.json`, which allows
@@ -1135,7 +1148,19 @@ and exit code are preserved.
      inherited `OPENCODE_CONFIG` is removed for Codex and replaced for
      opencode (see Permissions).
    - **Log:** output streams live to `.amf/logs/issue-N.log`, a line at a
-     time and redacted (see "Redaction" under "Security model").
+     time and redacted (see "Redaction" under "Security model"). Unless
+     `--quiet`, amf also prints redacted agent stderr to its own stderr,
+     prefixed `amf: <agent>:`, and a still-running line every 30s.
+   - **Usage and rate limits:** if a line of stdout or stderr reports a
+     usage, quota, rate-limit, or authentication error, amf stops the
+     process group at once (SIGTERM, then SIGKILL after 15s, as for a
+     timeout), fails the run with `<agent>: <message>`, and logs an
+     `agent.limit` event. The issue is labeled `amf:failed` with a comment
+     naming the agent and the message (except in a `--dry-run`, which still
+     fails fast but does not change GitHub). Partial output and any WIP
+     branch are kept as for a timeout. OpenCode is invoked as
+     `opencode run [--model M] --print-logs --log-level ERROR` so those
+     errors appear on stderr.
    - **Timeout:** each run may take at most `--agent-timeout` (or
      `AMF_AGENT_TIMEOUT`; the default is 60m). It must also keep producing
      output or changing files: when nothing is written to stdout or stderr,
@@ -1550,7 +1575,7 @@ event log opens, are not. The fields of each event, besides those:
 
 | Event | Level | Fields |
 |---|---|---|
-| `agent.fallback` | warn | Without a pipeline, the primary agent failed or wasn't usable: `from`, `to`, `reason` (`unusable`, `error` or `agent_timeout`, which also covers an idle timeout) and `error` |
+| `agent.fallback` | warn | Without a pipeline, the primary agent failed or wasn't usable: `from`, `to`, `reason` (`unusable`, `error`, `agent_timeout`, which also covers an idle timeout, or `agent_limit`) and `error` |
 | `log.file` | info | `path`: the event log |
 | `run.summary` | debug, info | The fields of `summary.json` (see Commands) as `done`, `failed`, `skipped`, `github_calls`, `ratelimit_lowest`, `git_calls`, `agent_ms`, `errors`, `log`, and `final`: false (debug) after an issue, true (info, the terminal's last line) at exit |
 | `config.load` | debug | `paths` (the `.env` files looked for), `file` (the one read, or `""`), and `keys`: for each variable read, its `source` (`env`, `.env`, `repo` or `default`) and `value`. Only `GITHUB_REPO`, `AMF_API_URL`, `OPENCODE_MODEL`, `AMF_AGENT_TIMEOUT`, `AMF_AGENT_IDLE_TIMEOUT`, `AMF_STALE_TIMEOUT`, `AMF_PR_SECTIONS`, `AMF_LOG_LEVEL`, `AMF_CLAUDE`, `AMF_CODEX` and `AMF_OPENCODE` show their value; every other one shows `set` or `unset` |
@@ -1588,6 +1613,8 @@ event log opens, are not. The fields of each event, besides those:
 | `agent.exit` | debug | `agent`, `stage`, `exit_code` (-1 when killed or not started), `signal` when a signal ended it, `timed_out`, `duration_ms`, `stdout_bytes`, `stderr_bytes`, `out_bytes` (codex's and opencode's final-message file), and `result_bytes` and `result` (the final message's first 512 bytes), or `error` |
 | `agent.parse` | debug | Claude: `result_found`, `json` (whether its output was JSON); codex and opencode: `out_file` (whether they wrote their final message) |
 | `agent.timeout` | warn | `agent`, `stage`, `limit`, `elapsed`, `grace`, `pgid`, `bytes` (stdout so far), `log`, and `idle: true` when the idle timeout stopped it |
+| `agent.limit` | warn | amf stopped the agent after its output reported a usage, quota, rate-limit, or authentication error: `agent`, `stage`, `kind` (`usage`, `quota`, `rate_limit` or `auth`), `message`, `elapsed`, `log` |
+| `agent.progress` | info | Unless `--quiet`, every 30s while an agent is still running: `agent`, `elapsed`, `bytes` (stdout and stderr so far). The message is `#N: <agent> still running (<elapsed>, <n> bytes of output)` |
 | `issue.push` | info | `branch` |
 | `issue.pr` | info | `action` (`opened`, `updated`, or `updating` when the branch has an open PR), `number`, `url` |
 | `pr.sections_missing` | warn | With `AMF_PR_SECTIONS=on`: `sections`, the missing ones (`testing`, `decisions`, `readme`) |
@@ -1596,7 +1623,7 @@ event log opens, are not. The fields of each event, besides those:
 | `issue.cleanup` | warn | `error`: a worktree that couldn't be removed or pruned |
 | `issue.done` | debug | `pr`: its number; `dry_run: true` instead after a dry run |
 | `issue.dry_run` | info | `branch`, `base`, `head` (the local commit), `files` (the paths it changes), `action` (`open` or `update`), `url` (the PR to update, or `""`), `draft`, `merge` (the method, `off`, or `refused` with `merge_error`), `title`, `body` |
-| `issue.failed` | debug, info | `reason` (`agent_timeout` at info, with `stage`, for the agent timeout or idle timeout; `stage` for a stage's own failure such as a blocked plan or an untrusted author; else `error`), `error`, and `dry_run: true` in a dry run |
+| `issue.failed` | debug, info | `reason` (`agent_timeout` at info, with `stage`, for the agent timeout or idle timeout; `agent_limit` at info, with `stage` and `kind`, for a usage, quota, rate-limit, or authentication error; `stage` for a stage's own failure such as a blocked plan or an untrusted author; else `error`), `error`, and `dry_run: true` in a dry run |
 | `github.call` | debug | One per GitHub API request: `method`, `path` with `{repo}`, `{n}` and `{label}` in place of the repo, numbers and label names, `status` (0 when there was no response), `duration_ms`, `bytes_out` (request body), `bytes_in` (response body read), `ratelimit_remaining`, `ratelimit_reset`, `request_id` (GitHub's headers, `""` when absent), `page` for a later page of a list, and `error_body` (the first 512 bytes of an error response) or `error`. The token is never logged |
 | `git.exec` | debug | One per git command: `subcommand`, `args` (a commit message cut to 80 characters), `dir`, `exit_code` (-1 when git didn't start), `duration_ms`, `stdout_bytes`, `stderr_bytes`, and on failure `stderr` (its first 512 bytes) |
 | `git.push` | debug | After `git.exec` for a push: `branch`, `forced` (`--force` or `--force-with-lease`), `exit_code` |

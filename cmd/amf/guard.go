@@ -183,9 +183,15 @@ type agentAttempt struct {
 // exitOf is how an agent's run ended, from runAgent's error.
 func exitOf(err error) string {
 	var ee *exec.ExitError
+	var ale *agentLimitError
 	switch {
 	case errors.As(err, new(*agentTimeoutError)):
 		return "timed out"
+	case errors.As(err, &ale):
+		if ale.Kind != "" {
+			return ale.Kind
+		}
+		return "usage"
 	case errors.As(err, &ee):
 		return fmt.Sprint(ee.ExitCode())
 	}

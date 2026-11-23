@@ -218,7 +218,12 @@ short form: `amf help flags` lists them, including `-D, --draft` and
 `-O, --color=auto|always|never`. An agent that prints no output and changes
 no file in the worktree for `AMF_AGENT_IDLE_TIMEOUT` (default 30m; `off`
 disables it) is stopped and the run fails, so the fallback agent can try.
-When amf kills an agent, it saves the agent's partial work on a local-only
+If the agent's output reports a usage, quota, rate-limit, or authentication
+error (for example OpenCode's "Free usage limit reached"), amf stops it at
+once, names the agent and the message, and labels the issue `amf:failed` with
+a comment. Unless `--quiet`, amf also prints the agent's stderr and a
+still-running line every 30s so a silent hang is visible. When amf kills an
+agent, it saves the agent's partial work on a local-only
 `amf/wip/issue-N-<UTC time>` branch (nothing is pushed); the failure comment
 names it and says how to inspect it.
 

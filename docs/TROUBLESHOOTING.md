@@ -94,6 +94,32 @@ time by setting `AMF_AGENT_IDLE_TIMEOUT=1h` (or another Go duration) in
 `AMF_AGENT_IDLE_TIMEOUT=off` to disable the idle timeout. The regular agent
 timeout still applies.
 
+## Agent hits a usage, quota, or rate limit
+
+**Symptom:** The run fails almost immediately with
+`<agent>: Free usage limit reached…`, `<agent>: HTTP 429…`, or a similar
+quota, rate-limit, or authentication message. The issue is labeled
+`amf:failed` and a comment names the agent and the message. On amf v0.24.0
+and earlier, the same OpenCode error could instead look like a hang: amf
+printed `running opencode` and then nothing until it was killed by hand.
+
+**Cause:** The coding agent reported that it cannot continue: a free usage
+limit, a quota or rate limit, or bad or missing credentials. OpenCode's
+free models print `Free usage limit reached` and then stay running; amf
+passes `--print-logs --log-level ERROR` so that message appears on stderr,
+detects it, and stops the process group instead of waiting for the idle
+timeout. `--dry-run` fails the same way but does not change labels or post
+comments.
+
+**Fix:** Check the agent's log in `.amf/logs/` and the failure comment for
+the exact message. For OpenCode free models, wait until the free quota
+resets, subscribe to OpenCode Go, or set `OPENCODE_API_KEY` (or run
+`opencode auth login`) and point `OPENCODE_MODEL` at a model that key can
+run. For other agents, fix or refresh the corresponding API key. Then add
+`amf:ready` again. `amf doctor` can confirm the executable, the model name,
+and whether a paid OpenCode model has a key or saved login; it does not
+probe live quota, because that would spend the same limited quota.
+
 ## Saved auto state blocks a new run
 
 **Symptom:** A new `amf auto` sentence is refused because

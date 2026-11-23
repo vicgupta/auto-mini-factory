@@ -178,7 +178,7 @@ esac
 	// The eval stage, as opencode: it fails round 1, passes round 2, and its
 	// stray file must not survive.
 	fakeEvalOpencode = `
-[ "$#" = 3 ] && [ "$1" = run ] && [ "$2" = --model ] && [ "$3" = opencode/test ] || { echo "bad args: $*" >&2; exit 5; }
+[ "$#" = 6 ] && [ "$1" = run ] && [ "$2" = --print-logs ] && [ "$3" = --log-level ] && [ "$4" = ERROR ] && [ "$5" = --model ] && [ "$6" = opencode/test ] || { echo "bad args: $*" >&2; exit 5; }
 [ -f "$OPENCODE_CONFIG" ] || { echo "no OPENCODE_CONFIG" >&2; exit 6; }
 prompt=$(cat)
 case "$prompt" in *"eval stage"*"+hello"*"EVAL-SKILL"*) ;; *) echo "bad eval prompt: $prompt" >&2; exit 4;; esac
