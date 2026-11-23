@@ -936,9 +936,13 @@ duration per agent run (default `AMF_AGENT_TIMEOUT` or `60m`, range `1m` to
 `24h`), with deprecated alias `--timeout`. An agent that produces no output
 and changes no worktree file for `AMF_AGENT_IDLE_TIMEOUT` (default `30m`;
 `off` disables it) is stopped and the run fails, so the fallback can run.
-When amf kills an agent, it saves the agent's partial work on a local-only
-`amf/wip/issue-N-<UTC time>` branch (nothing is pushed), and the failure
-comment names it. `--eval-rounds` defaults to 2 and accepts nonnegative integers.
+A usage, quota, rate-limit, or authentication error in the agent's output
+fails the run immediately, with a comment naming the agent and the message
+(except `--dry-run`). Unless `--quiet`, amf prints the agent's stderr and a
+still-running line every 30s. When amf kills an agent, it saves the agent's
+partial work on a local-only `amf/wip/issue-N-<UTC time>` branch (nothing is
+pushed), and the failure comment names it. `--eval-rounds` defaults to 2 and
+accepts nonnegative integers.
 `--draft` defaults off and cannot be combined with `--merge`.
 `--merge[=merge|squash|rebase]` defaults off; bare `--merge` uses a merge
 commit. With `--merge`, `--wait-for-checks` (`-w`, default on) waits up to
@@ -1597,7 +1601,13 @@ Without a pipeline (see below), amf runs one agent once. With Claude Code:
    editing: no output on stdout or stderr, and no worktree file created,
    changed or removed, for `AMF_AGENT_IDLE_TIMEOUT` (default `30m`; `off`
    disables it) also stops it, with the error
-   `<agent> produced no output for <limit>; stopped it`. Before removing the
+   `<agent> produced no output for <limit>; stopped it`. If the agent's
+   output reports a usage, quota, rate-limit, or authentication error, amf
+   stops it at once and fails with `<agent>: <message>`, labeling the issue
+   `amf:failed` with a comment (except `--dry-run`, which does not change
+   GitHub). Unless `--quiet`, amf prints the agent's redacted stderr and a
+   still-running line every 30s. OpenCode is run with `--print-logs
+   --log-level ERROR` so those errors appear on stderr. Before removing the
    worktree or resetting it for a fallback, amf saves whatever the agent
    changed on a local-only `amf/wip/issue-N-<UTC time>` branch, pushed
    nowhere; the failure comment names it. See

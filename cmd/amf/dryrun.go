@@ -27,6 +27,13 @@ func (r *Runner) dryRun(ctx context.Context, issue Issue, base string, p *Pipeli
 			r.removeWorktree(context.WithoutCancel(ctx), n)
 			return
 		}
+		var ale *agentLimitError
+		if errors.As(err, &ale) {
+			r.event(slog.LevelInfo, "issue.failed", n, fmt.Sprintf("issue.failed: issue=%d reason=agent_limit", n),
+				"reason", "agent_limit", "stage", stageName(ale.Stage), "kind", ale.Kind, "error", err, "dry_run", true)
+			r.removeWorktree(context.WithoutCancel(ctx), n)
+			return
+		}
 		reason := "error"
 		if errors.As(err, new(*stageError)) {
 			reason = "stage"

@@ -94,6 +94,11 @@ agent changed on a local-only amf/wip/issue-N-<UTC time> branch, pushed
 nowhere, and the failure comment names it; an agent that changed nothing gets
 no WIP branch.
 
+If the agent's output reports a usage, quota, rate-limit, or authentication
+error, amf stops it at once, names the agent and the message, and labels the
+issue amf:failed (except --dry-run). By default, amf prints the agent's
+stderr and a still-running line every 30s.
+
 --part (-P) marks the change as one part of a larger issue: the commit and PR
 say Part of #N instead of Fix #N and Closes #N, so merging the PR does not
 close the issue. An agent or pipeline can say the same by ending its final
@@ -283,7 +288,7 @@ are not placeholders).
   AMF_AGENT_IDLE_TIMEOUT (default: 30m)
     How long an agent may produce no output, and change no file in the
     worktree, before amf stops it and fails the run, as a Go duration; off
-    disables it
+    disables it. A usage, quota, rate-limit or auth error fails immediately
   AMF_STALE_TIMEOUT (default: max(2x agent timeout, 2h))
     How long watch lets an issue stay amf:in-progress with no amf working on
     it before putting it back to amf:ready; off disables it. --stale-timeout
